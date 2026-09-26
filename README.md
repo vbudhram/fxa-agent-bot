@@ -28,9 +28,14 @@ The bot calls every command with `--backend gce` first. It depends only on these
 
 Event types: `question` (with `options`), `turn_end` (with `status`: `needs-input` or `ready`), `pr` (with `url`), `error`. `state` is one of `starting`, `active`, `wrapping`, `pr_open`, `stopped`, `failed`.
 
+## Who can do what
+
+- Anyone in `ALLOWED_USERS` (`*` for everyone) in an `ALLOWED_CHANNELS` channel can start a session and steer any session in that channel, as in Claude Tag. The agent is told when a message is not from the person who started the session.
+- `STEER=owner` limits steering, Interrupt, `!interrupt`, `!mute`, and 👎 to the person who started the session.
+- Open PR, Stop, `!stop`, and `!restart` are always owner-only.
+
 ## Not in v0
 
-- Collaborators and comments from people who are not the owner. The bot ignores those replies.
 - Take over, Try it, Screenshots, Tests.
 - The idle sweep and resume.
 - The voice model. The messages come from templates.

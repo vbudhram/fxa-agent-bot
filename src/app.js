@@ -32,7 +32,11 @@ app.event('app_mention', async ({ event, client }) => {
       text: "Sorry, you're not on the list of people who can start agent sessions here." }).catch(() => {});
     return;
   }
-  if (event.thread_ts && sessions.get(event.channel, event.thread_ts)) return; // steer path handles it
+  const thread = event.thread_ts || event.ts;
+  const cur = event.thread_ts && sessions.get(event.channel, event.thread_ts);
+  if (cur && LIVE.includes(cur.state)) return; // the steer path handles it
+  // A second tag during the Cancel window would start a second session.
+  if ([...pending.values()].some((p) => p.channel === event.channel && p.thread_ts === thread)) return;
   let prompt = strip(event.text);
   if (!prompt) return;
   const thread_ts = event.thread_ts || event.ts;
@@ -62,8 +66,6 @@ async function launch(key, client, since = Date.now()) {
   if (!s || s.state !== 'queued') return; // stopped or restarted while waiting
   try {
     await ctl.task({ key, owner: s.owner, prompt: s.prompt });
-    sessions.put({ ...fresh(key), state: 'starting', started_at: Date.now() });
-    await startStatus(fresh(key), 'Setting up');
   } catch (e) {
     if (!/cap \d+ \(FXA_SESSION_MAX\)/.test(e.stderr ?? '')) { sessions.put({ ...fresh(key), state: 'failed' }); await fail(client, s, e); return; }
     if (Date.now() - since > QUEUE_GIVE_UP_MS) {
@@ -76,7 +78,11 @@ async function launch(key, client, since = Date.now()) {
       await say(s, "Still waiting for available capacity. Your request is queued, and I'll start as soon as a session frees up.");
     }
     setTimeout(() => launch(key, client, since).catch((err) => console.error('launch', key, err.message)), QUEUE_RETRY_MS);
+    return;
   }
+  // The runner is booting from here on: a Slack hiccup is logged, not fatal.
+  sessions.put({ ...fresh(key), state: 'starting', started_at: Date.now() });
+  await startStatus(fresh(key), 'Setting up').catch((e) => console.error('status', key, e.data?.error ?? e.message));
 }
 const say = (s, text) => app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text });
 
@@ -93,8 +99,15 @@ app.action('cancel', async ({ ack, body, action, client }) => {
 // are other people's words, so they are marked as data, not as the request.
 async function threadContext(client, event) {
   try {
-    const r = await client.conversations.replies({ channel: event.channel, ts: event.thread_ts, limit: 100 });
-    const lines = (r.messages ?? []).filter((m) => m.ts !== event.ts && !m.bot_id && m.text)
+    // replies pages oldest first; walk to the end so a long thread keeps its newest messages.
+    let msgs = [], cursor;
+    for (let page = 0; page < 10; page++) {
+      const r = await client.conversations.replies({ channel: event.channel, ts: event.thread_ts, limit: 200, cursor });
+      msgs = msgs.concat(r.messages ?? []);
+      cursor = r.response_metadata?.next_cursor;
+      if (!cursor) break;
+    }
+    const lines = msgs.filter((m) => m.ts !== event.ts && !m.bot_id && m.text)
       .map((m) => `${m.user === event.user ? 'owner' : 'someone else'}: ${m.text.replace(/<@[A-Z0-9]+>/g, '@someone')}`);
     if (!lines.length) return '';
     let t = lines.join('\n');
@@ -112,7 +125,7 @@ app.message(async ({ message, client }) => {
   // Deleting the thread's first message closes its session, as in Claude Tag.
   if (message.subtype === 'message_deleted') {
     const s = sessions.get(message.channel, message.deleted_ts);
-    if (s && LIVE.includes(s.state)) { sessions.put({ ...fresh(s.key), state: 'stopped' }); await ctl.stop(s.key).catch(() => {}); }
+    if (s && LIVE.includes(s.state)) await stopSession(s.key);
     return;
   }
   if (!message.thread_ts || message.subtype || message.bot_id) return;
@@ -145,6 +158,10 @@ const HELP = [
 async function bang(s, text, m, client) {
   const cmd = text.slice(1).split(/\s+/)[0].toLowerCase();
   const note = (t) => client.chat.postEphemeral({ channel: m.channel, thread_ts: m.thread_ts, user: m.user, text: t }).catch(() => {});
+  if (!allowed(m.channel, m.user)) { await note("Sorry, you're not on the list of people who can use the agent here."); return; }
+  // Interrupt and mute go as far as steering does: anyone allowed, or only the
+  // owner under STEER=owner.
+  const steerOnly = () => { if (!STEER_ANYONE && s && m.user !== s.owner) { note(`Only <@${s.owner}> can do that in this session.`); return true; } return false; };
   const ownerOnly = () => { if (s && m.user !== s.owner) { note(`Only <@${s.owner}> can do that in this session.`); return true; } return false; };
   if (cmd === 'help' || !s) {
     if (cmd === 'status' && !s) { await note(await statusList(client)); return; }
@@ -156,18 +173,17 @@ async function bang(s, text, m, client) {
     await note([`*${STATE_WORD[s.state] ?? s.state}* · ${mins} min · started by <@${s.owner}>`,
       s.last_act ? `Now: ${s.last_act}` : null, s.muted ? 'Replies are muted here. `!unmute` to hear from me.' : null].filter(Boolean).join('\n'));
   } else if (cmd === 'interrupt') {
+    if (steerOnly()) return;
     const out = await ctl.interrupt(s.key).catch(() => '');
     if (!out.includes('interrupted')) { await note('Nothing is running right now.'); return; }
     sessions.put({ ...fresh(s.key), interrupted: true });
     await say(s, 'Interrupted. The work so far is kept. Tell me what to do instead.');
   } else if (cmd === 'stop') {
     if (ownerOnly()) return;
-    sessions.put({ ...fresh(s.key), state: 'stopped' });
-    await ctl.stop(s.key).catch(() => {});
-    await say(s, 'Stopped. The work so far is kept.');
+    await say(s, STOPPED_TEXT(await stopSession(s.key)));
   } else if (cmd === 'restart') {
     if (ownerOnly()) return;
-    if (LIVE.includes(s.state)) { sessions.put({ ...fresh(s.key), state: 'stopped' }); await ctl.stop(s.key).catch(() => {}); }
+    if (LIVE.includes(s.state)) await stopSession(s.key);
     const request = (s.prompt ?? '').split('\n\nEarlier messages')[0];
     const key = sessions.newKey();
     const prompt = request + await threadContext(client, { channel: s.channel, thread_ts: s.thread_ts, ts: m.ts, user: s.owner });
@@ -175,6 +191,7 @@ async function bang(s, text, m, client) {
     pending.set(key, { prompt, owner: s.owner, channel: s.channel, thread_ts: s.thread_ts });
     await begin(key, client);
   } else if (cmd === 'mute' || cmd === 'unmute') {
+    if (steerOnly()) return;
     sessions.put({ ...fresh(s.key), muted: cmd === 'mute' });
     await note(cmd === 'mute' ? 'Muted. I keep working but stop posting here. `!unmute` to hear from me again.' : 'Unmuted.');
   } else {
@@ -188,7 +205,8 @@ app.event('reaction_added', async ({ event, client }) => {
   if (!['-1', 'thumbsdown'].includes(event.reaction) || event.item?.type !== 'message') return;
   const { channel, ts } = event.item;
   const s = sessions.all().find((x) => x.channel === channel && [x.thread_ts, x.status_ts, x.buttons_msg?.ts].includes(ts));
-  if (!s || !LIVE.includes(s.state)) return;
+  if (!s || !LIVE.includes(s.state) || !allowed(channel, event.user)) return;
+  if (!STEER_ANYONE && event.user !== s.owner) return;
   sessions.put({ ...fresh(s.key), muted: true, interrupted: true });
   await ctl.interrupt(s.key).catch(() => {});
   await client.chat.postEphemeral({ channel, thread_ts: s.thread_ts, user: event.user,
@@ -230,14 +248,14 @@ async function startStatusNow(s, verb) {
         chunks: [{ type: 'task_update', id: 't0', title: first, status: 'in_progress' },
           { type: 'blocks', blocks: [buttons(s.key, ['Interrupt', 'interrupt'])] }],
       });
-      sessions.put({ ...cur, status_ts: ts, status_kind: 'stream', busy_since: Date.now(), last_act: first, step_n: 0 });
+      sessions.put({ ...cur, status_ts: ts, status_kind: 'stream', busy_since: Date.now(), status_opened_at: Date.now(), last_act: first, step_n: 0 });
       if (cur.state === 'active') ensureWatch(s.key);
       return;
     } catch (e) { streamOff(e); }
   }
   const text = `${spinner(0)} ${verb} · 0s`;
   const { ts } = await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text });
-  sessions.put({ ...cur, status_ts: ts, status_kind: 'line', status_text: text, busy_since: Date.now(), last_act: null });
+  sessions.put({ ...cur, status_ts: ts, status_kind: 'line', status_text: text, busy_since: Date.now(), status_opened_at: Date.now(), last_act: null });
   if (cur.state === 'active') ensureWatch(s.key);
 }
 const secs = (ms) => { const t = Math.round(ms / 1000); return t < 60 ? `${t}s` : `${Math.floor(t / 60)}m ${t % 60}s`; };
@@ -418,7 +436,13 @@ ownerAction('diff', async (s, client) => {
 });
 
 // 7: stop the running turn but keep the session and everything done so far.
-ownerAction('interrupt', async (s, client, action, body) => {
+app.action('interrupt', async ({ ack, body, action, client }) => {
+  await ack();
+  const s = fresh(action.value);
+  if (!s || !allowed(s.channel, body.user.id) || (!STEER_ANYONE && body.user.id !== s.owner)) return;
+  await interrupt(s, client, body).catch((e) => fail(client, s, e));
+});
+async function interrupt(s, client, body) {
   const out = await ctl.interrupt(s.key);
   if (!out.includes('interrupted')) {
     await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: body.user.id, text: 'Nothing is running right now.' }).catch(() => {});
@@ -426,16 +450,14 @@ ownerAction('interrupt', async (s, client, action, body) => {
   }
   sessions.put({ ...fresh(s.key), interrupted: true });
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Interrupted. The work so far is kept. Tell me what to do instead.' });
-});
+}
 ownerAction('open_pr', async (s, client) => {
   // Returns at once; the poll loop posts the PR link or the failure.
   await ctl.finish(s.key);
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Wrapping up: review, PR description, then a draft PR. I will post the link here.' });
 });
 ownerAction('stop', async (s, client) => {
-  await ctl.stop(s.key);
-  sessions.put({ ...s, state: 'stopped' });
-  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Stopped. The work so far is kept.' });
+  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: STOPPED_TEXT(await stopSession(s.key)) });
 });
 app.action(/^answer_\d+$/, async ({ ack, body, action, client }) => {
   await ack();
@@ -471,13 +493,16 @@ async function deliverMedia(key) {
   const s = fresh(key);
   try {
     const sent = new Set(s.media_sent ?? []);
-    for (const path of await ctl.media(key)) {
-      const id = `${basename(path)}:${statSync(path).size}`;
-      if (sent.has(id)) continue;
-      await app.client.files.uploadV2({ channel_id: s.channel, thread_ts: s.thread_ts, filename: basename(path), file: readFileSync(path) });
-      sent.add(id);
-    }
-    sessions.put({ ...fresh(key), media_sent: [...sent] });
+    const { dir, files } = await ctl.media(key);
+    try {
+      for (const path of files) {
+        const id = `${basename(path)}:${statSync(path).size}`;
+        if (sent.has(id)) continue;
+        await app.client.files.uploadV2({ channel_id: s.channel, thread_ts: s.thread_ts, filename: basename(path), file: readFileSync(path) });
+        sent.add(id);
+      }
+    } finally { await ctl.cleanup(dir); }
+    if (fresh(key)) sessions.put({ ...fresh(key), media_sent: [...sent] });
   } catch (e) { console.error('media', key, e.data?.error ?? e.stderr ?? e.message); }
 }
 
@@ -485,7 +510,7 @@ async function deliverMedia(key) {
 // the sessions that are still going, with links.
 const STATE_WORD = { queued: 'waiting for capacity', starting: 'setting up', active: 'working', wrapping: 'opening a PR', pr_open: 'PR open', stopped: 'stopped', failed: 'failed' };
 async function statusList(client) {
-  const live = sessions.all().filter((x) => !['stopped', 'failed'].includes(x.state));
+  const live = sessions.all().filter((x) => !['stopped', 'failed'].includes(x.state) && CHANNELS.includes(x.channel));
   if (!live.length) return 'No sessions are running. Tag @fxa-agent in a thread to start one.';
   const lines = await Promise.all(live.map(async (x) => {
     const link = await client.chat.getPermalink({ channel: x.channel, message_ts: x.thread_ts }).then((r) => r.permalink).catch(() => null);
@@ -495,8 +520,12 @@ async function statusList(client) {
   }));
   return `${live.length} session${live.length === 1 ? '' : 's'}:\n${lines.join('\n')}`;
 }
-app.command('/fxa-agent', async ({ ack, respond, client }) => {
+app.command('/fxa-agent', async ({ ack, command, respond, client }) => {
   await ack();
+  if (!allowed(command.channel_id, command.user_id)) {
+    await respond({ response_type: 'ephemeral', text: 'Run this in a channel where the agent works.' });
+    return;
+  }
   await respond({ response_type: 'ephemeral', text: await statusList(client) });
 });
 
@@ -509,8 +538,7 @@ async function mindLifetime(key, state) {
   const min = (Date.now() - s.started_at) / 60_000;
   const say = (text) => app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text });
   if (min >= PAUSE_AT_MIN) {
-    sessions.put({ ...s, state: 'stopped' });
-    await ctl.stop(key).catch((e) => console.error('pause', key, e.message));
+    await stopSession(key);
     await say(`I paused: my runner reached its ${RUNNER_MIN}-minute limit. The work so far is saved as a patch on the host. Tag me again to start a new session.`);
   } else if (min >= WARN_AT_MIN && !s.life_warned) {
     sessions.put({ ...s, life_warned: true });
@@ -518,31 +546,58 @@ async function mindLifetime(key, state) {
   }
 }
 
+// 11: one way to end a session, so no path leaves the live stream, the watch,
+// or the runner behind. False when the runner could not be stopped.
+async function stopSession(key) {
+  const s = fresh(key);
+  if (!s) return true;
+  const hadRunner = s.state !== 'queued';
+  sessions.put({ ...s, state: 'stopped' });
+  stopWatch(key);
+  await updateStatus(key, 'stopped', { busy: false }).catch(() => {});
+  for (const m of [steps, unsent, lastEdit]) m.delete(key);
+  if (!hadRunner) return true;
+  return ctl.stop(key).then(() => true, (e) => { console.error('stop', key, e.stderr || e.message); return false; });
+}
+const STOPPED_TEXT = (ok) => ok ? 'Stopped. The work so far is kept.'
+  : "I couldn't stop the runner cleanly. GCE deletes it at its 90-minute limit; `!stop` tries again.";
+
 // The 5 s poll owns state (replies, questions, errors, PR links); the watch
 // stream only makes the status line live between polls.
 const DONE = ['stopped', 'failed', 'pr_open', 'queued'];
+const again = new Set(); // keys asked to poll while a poll was in flight
 async function pollOne(key) {
   const s = fresh(key);
   if (!s || DONE.includes(s.state)) return;
-  if (busy.has(key)) { setTimeout(() => pollOne(key), 1000); return; }
+  if (busy.has(key)) { again.add(key); return; }
   busy.add(key);
+  const polledAt = Date.now();
   try {
     const { cursor, state, events, activity } = await ctl.events(s.key, s.cursor);
     const endAt = events.findLastIndex((e) => e.type === 'turn_end' || e.type === 'question');
+    // Each event posts on its own: ctl has already moved the cursor past this
+    // batch, so a failed post is logged and skipped, never re-sent every 5 s.
     for (const [i, ev] of events.entries()) {
       const msg = render(s.key, ev);
       if (!msg) continue;
-      if (i === endAt) await finishTurn(key, msg, ev); else await postMsg(key, msg);
+      await (i === endAt ? finishTurn(key, msg, ev) : postMsg(key, msg))
+        .catch((e) => console.error('post', key, ev.type, e.data?.error ?? e.message));
     }
+    if (!fresh(key)) return; // restarted or replaced while this poll ran
     sessions.put({ ...fresh(key), cursor, state });
     await mindLifetime(key, state);
     if (events.some((e) => e.type === 'turn_end' || e.type === 'question')) await deliverMedia(key);
-    if (activity?.busy && (state === 'active' || state === 'wrapping')) ensureWatch(key); else stopWatch(key);
-    await updateStatus(key, state, activity).catch((e) => console.error('status', key, e.message));
+    // 14: a reply can open a turn while this poll was reading "idle". Its
+    // stream is newer than what this poll saw, so leave it open.
+    const opened = fresh(key)?.status_opened_at ?? 0;
+    const stale = !activity?.busy && opened > polledAt;
+    if (activity?.busy && (state === 'active' || state === 'wrapping')) ensureWatch(key); else if (!stale) stopWatch(key);
+    if (!stale) await updateStatus(key, state, activity).catch((e) => console.error('status', key, e.message));
   } catch (e) {
     console.error('events', key, e.stderr || e.message);
   } finally {
     busy.delete(key);
+    if (again.delete(key)) setTimeout(() => pollOne(key), 0);
   }
 }
 setInterval(() => { for (const s of sessions.all()) pollOne(s.key); }, 5_000);
@@ -551,4 +606,6 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { for (const w of
 
 await app.start();
 teamId = (await app.client.auth.test()).team_id;
+// A request waiting for capacity lived only in a timer; pick it up again.
+for (const s of sessions.all()) if (s.state === 'queued') launch(s.key, app.client).catch((e) => console.error('launch', s.key, e.message));
 console.log('agent-tag is running (Socket Mode)');

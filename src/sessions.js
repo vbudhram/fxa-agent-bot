@@ -18,6 +18,9 @@ export const get = (channel, ts) => sessions[threadId(channel, ts)];
 export const all = () => Object.values(sessions);
 
 export function put(s) {
+  // A write for a session that has left the map (its thread now holds another
+  // key) would otherwise land under "undefined:undefined".
+  if (!s?.key || !s.channel || !s.thread_ts) return s;
   sessions[threadId(s.channel, s.thread_ts)] = s;
   save();
   return s;

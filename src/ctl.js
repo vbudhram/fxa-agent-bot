@@ -1,7 +1,7 @@
 // Thin wrapper over the fxa-sandbox-ctl CLI. Slack text never reaches a shell:
 // it goes into a file, and every call uses execFile with an argv array.
 import { execFile, spawn } from 'node:child_process';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -16,21 +16,23 @@ function run(args, { timeout = 15 * 60_000 } = {}) {
   });
 }
 
-async function toFile(text) {
+// Slack text goes to the ctl in a file, never an argument, and the file is
+// deleted once the ctl has read it: it can hold other people's messages.
+async function withFile(text, fn) {
   const dir = await mkdtemp(join(tmpdir(), 'agent-tag-'));
   const file = join(dir, 'message.md');
-  await writeFile(file, text, { mode: 0o600 });
-  return file;
+  try {
+    await writeFile(file, text, { mode: 0o600 });
+    return await fn(file);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 }
 
-export async function task({ key, owner, prompt }) {
-  return run(['task', '--source', 'slack', '--id', key, '--owner', owner,
-    '--prompt-file', await toFile(prompt)]);
-}
+export const task = ({ key, owner, prompt }) => withFile(prompt, (f) =>
+  run(['task', '--source', 'slack', '--id', key, '--owner', owner, '--prompt-file', f]));
 
-export async function steer(key, message) {
-  return run(['steer', key, '--message-file', await toFile(message)]);
-}
+export const steer = (key, message) => withFile(message, (f) => run(['steer', key, '--message-file', f]));
 
 // Returns { cursor, state, events: [{ type, text, ... }] }.
 export async function events(key, since) {
@@ -40,11 +42,13 @@ export async function events(key, since) {
 
 export const diff = (key) => run(['diff', key], { timeout: 60_000 });
 // Copies the agent's screenshots and videos off the runner; returns local paths.
+// The caller deletes the returned dir once it has uploaded what it needs.
 export async function media(key) {
   const dir = await mkdtemp(join(tmpdir(), 'agent-tag-media-'));
-  const out = await run(['media', key, dir], { timeout: 120_000 });
-  return out.split('\n').filter(Boolean);
+  const out = await run(['media', key, dir], { timeout: 120_000 }).catch(async (e) => { await rm(dir, { recursive: true, force: true }); throw e; });
+  return { dir, files: out.split('\n').filter(Boolean) };
 }
+export const cleanup = (dir) => rm(dir, { recursive: true, force: true });
 // Starts the wrap-up in the background; events reports the PR or the failure.
 export const finish = (key) => run(['finish', '--session', key], { timeout: 60_000 });
 export const stop = (key) => run(['stop', key]);
@@ -54,6 +58,8 @@ export const interrupt = (key) => run(['interrupt', key], { timeout: 60_000 });
 // the ssh under it.
 export function watch(key, onEvent) {
   const child = spawn(CTL, ['--backend', 'gce', 'watch', key], { detached: true, stdio: ['ignore', 'pipe', 'ignore'] });
+  // Without a listener a failed spawn throws and takes the bot down.
+  child.on('error', (e) => console.error('watch', key, e.message));
   let buf = '';
   child.stdout.on('data', (d) => {
     buf += d;
@@ -63,5 +69,5 @@ export function watch(key, onEvent) {
       try { onEvent(JSON.parse(line)); } catch { /* partial or non-JSON line */ }
     }
   });
-  return { child, stop: () => { try { process.kill(-child.pid, 'SIGTERM'); } catch { /* already gone */ } } };
+  return { child, stop: () => { try { if (child.pid) process.kill(-child.pid, 'SIGTERM'); } catch { /* already gone */ } } };
 }
