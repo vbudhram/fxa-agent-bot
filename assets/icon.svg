@@ -1,28 +1,32 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-<!-- fxa-agent: the agent and an engineer in an epic-handshake clasp. White is
+<!-- fxa-agent: the agent and an engineer in an epic-handshake clasp. Orange is
      the agent, sky blue the engineer. Square: Slack rounds the corners itself. -->
 <rect width="512" height="512" fill="#592ACB"/>
 <!-- burst above the clasp -->
-<g stroke="#FFD567" stroke-width="15" stroke-linecap="round">
-  <line x1="256" y1="70" x2="256" y2="108"/>
-  <line x1="190" y1="92" x2="208" y2="124"/>
-  <line x1="322" y1="92" x2="304" y2="124"/>
+<g stroke="#FFD567" stroke-width="16" stroke-linecap="round">
+  <line x1="256" y1="28" x2="256" y2="66"/>
+  <line x1="184" y1="50" x2="204" y2="84"/>
+  <line x1="328" y1="50" x2="308" y2="84"/>
 </g>
-<!-- engineer: forearm from the lower right, with a muscle bulge -->
-<path d="M300 236 Q392 262 470 380 L520 470 L520 560 L380 560 Q360 452 262 312 Z" fill="#00B3F4"/>
-<path d="M352 300 Q420 330 452 420" stroke="#0090C8" stroke-width="12" fill="none" stroke-linecap="round"/>
-<!-- agent: forearm from the lower left, with a muscle bulge -->
-<path d="M212 236 Q120 262 42 380 L-8 470 L-8 560 L132 560 Q152 452 250 312 Z" fill="#FFFFFF"/>
-<path d="M160 300 Q92 330 60 420" stroke="#D5CCEF" stroke-width="12" fill="none" stroke-linecap="round"/>
-<!-- the clasp: engineer's hand under, agent's fingers wrap over it -->
-<rect x="218" y="186" width="120" height="96" rx="40" fill="#00B3F4" transform="rotate(-18 278 234)"/>
-<rect x="174" y="186" width="120" height="96" rx="40" fill="#FFFFFF" transform="rotate(18 234 234)"/>
-<!-- agent's fingers curled over the engineer's hand -->
-<g fill="#FFFFFF" stroke="#592ACB" stroke-width="6">
-  <rect x="262" y="178" width="58" height="30" rx="15" transform="rotate(-18 291 193)"/>
-  <rect x="270" y="208" width="60" height="30" rx="15" transform="rotate(-18 300 223)"/>
-  <rect x="274" y="238" width="56" height="30" rx="15" transform="rotate(-18 302 253)"/>
+<!-- agent: a big forearm and bicep from the lower left -->
+<path d="M226 196 C150 186 78 226 44 290 C16 344 -6 380 -24 420 L-24 560 L150 560
+         C142 482 170 400 250 290 Z" fill="#FF7139"/>
+<path d="M146 238 C92 262 58 316 48 382" stroke="#E0531C" stroke-width="13" fill="none" stroke-linecap="round"/>
+<path d="M112 420 C96 452 90 484 92 512" stroke="#E0531C" stroke-width="13" fill="none" stroke-linecap="round"/>
+<!-- engineer: the mirror from the lower right -->
+<path d="M286 196 C362 186 434 226 468 290 C496 344 518 380 536 420 L536 560 L362 560
+         C370 482 342 400 262 290 Z" fill="#00B3F4"/>
+<path d="M366 238 C420 262 454 316 464 382" stroke="#0088C2" stroke-width="13" fill="none" stroke-linecap="round"/>
+<path d="M400 420 C416 452 422 484 420 512" stroke="#0088C2" stroke-width="13" fill="none" stroke-linecap="round"/>
+<!-- the clasp, larger and higher -->
+<g transform="translate(256 190) scale(1.3) translate(-256 -234)">
+  <rect x="218" y="186" width="120" height="96" rx="40" fill="#00B3F4" transform="rotate(-18 278 234)"/>
+  <rect x="174" y="186" width="120" height="96" rx="40" fill="#FF7139" transform="rotate(18 234 234)"/>
+  <g fill="#FF7139" stroke="#592ACB" stroke-width="6">
+    <rect x="262" y="178" width="58" height="30" rx="15" transform="rotate(-18 291 193)"/>
+    <rect x="270" y="208" width="60" height="30" rx="15" transform="rotate(-18 300 223)"/>
+    <rect x="274" y="238" width="56" height="30" rx="15" transform="rotate(-18 302 253)"/>
+  </g>
+  <rect x="194" y="170" width="74" height="32" rx="16" fill="#00B3F4" stroke="#592ACB" stroke-width="6" transform="rotate(20 231 186)"/>
 </g>
-<!-- engineer's thumb over the agent's hand -->
-<rect x="194" y="170" width="74" height="32" rx="16" fill="#00B3F4" stroke="#592ACB" stroke-width="6" transform="rotate(20 231 186)"/>
 </svg>
