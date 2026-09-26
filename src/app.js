@@ -48,11 +48,16 @@ app.event('app_mention', async ({ event, client }) => {
   // Reserve the thread before any await: a second tag meanwhile would start a second session.
   if ([...pending.values()].some((p) => p.channel === event.channel && p.thread_ts === thread)) return;
   const key = sessions.newKey();
-  pending.set(key, { owner: event.user, channel: event.channel, thread_ts });
+  // The last session here stopped (a pause, Stop, or the runner limit): continue
+  // its conversation and changes instead of starting from scratch.
+  const resume_from = cur && ['stopped', 'failed'].includes(cur.state) ? cur.key : undefined;
+  pending.set(key, { owner: event.user, channel: event.channel, thread_ts, resume_from });
   if (event.thread_ts) prompt += await threadContext(client, event);
-  const { ts } = await client.chat.postMessage({ channel: event.channel, thread_ts, text: `Starting in ${START_DELAY_S} seconds.`, blocks: startCard(key, prompt, START_DELAY_S) });
+  const { ts } = await client.chat.postMessage({ channel: event.channel, thread_ts,
+    text: resume_from ? `Picking up where we left off, in ${START_DELAY_S} seconds.` : `Starting in ${START_DELAY_S} seconds.`,
+    blocks: startCard(key, prompt, START_DELAY_S, Boolean(resume_from)) });
   if (!pending.has(key)) return;
-  pending.set(key, { prompt, owner: event.user, channel: event.channel, thread_ts, card_ts: ts,
+  pending.set(key, { prompt, owner: event.user, channel: event.channel, thread_ts, card_ts: ts, resume_from,
     timer: setTimeout(() => begin(key, client).catch((e) => console.error('begin', key, e.message)), START_DELAY_S * 1000) });
 });
 
@@ -74,7 +79,7 @@ async function launch(key, client, since = Date.now()) {
   const s = fresh(key);
   if (!s || s.state !== 'queued') return; // stopped or restarted while waiting
   try {
-    await ctl.task({ key, owner: s.owner, prompt: s.prompt });
+    await ctl.task({ key, owner: s.owner, prompt: s.prompt, resumeFrom: s.resume_from });
   } catch (e) {
     if (!/cap \d+ \(FXA_SESSION_MAX\)/.test(e.stderr ?? '')) { sessions.patch(key, { state: 'failed' }); await fail(client, s, e); return; }
     if (Date.now() - since > QUEUE_GIVE_UP_MS) {

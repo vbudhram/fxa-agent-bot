@@ -20,9 +20,10 @@ const plain = (text) => text.split('\n')[0].replace(/[*_`#>|]/g, '').slice(0, 15
 
 // Shown for the few seconds before a mention starts a session, so a mistaken
 // tag can be taken back.
-export function startCard(key, prompt, seconds) {
+export function startCard(key, prompt, seconds, resuming = false) {
+  const lead = resuming ? `Picking up where we left off, with your changes and our conversation, in ${seconds} seconds:` : `Starting in ${seconds} seconds:`;
   return [
-    { type: 'section', text: { type: 'mrkdwn', text: `Starting in ${seconds} seconds:\n>${prompt.split('\n\nEarlier messages')[0].slice(0, 500).replace(/\n/g, '\n>')}` } },
+    { type: 'section', text: { type: 'mrkdwn', text: `${lead}\n>${prompt.split('\n\nEarlier messages')[0].slice(0, 500).replace(/\n/g, '\n>')}` } },
     buttons(key, ['Cancel', 'cancel']),
   ];
 }
