@@ -1,24 +1,28 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-<!-- Sibling of the ai-fixme bot icon: same head, violet ground, and a chat
-     bubble with typing dots. Square: Slack rounds the corners itself. -->
+<!-- fxa-agent: the agent and an engineer in an epic-handshake clasp. White is
+     the agent, sky blue the engineer. Square: Slack rounds the corners itself. -->
 <rect width="512" height="512" fill="#592ACB"/>
-<!-- jaw shadow -->
-<path d="M96 128 L176 184 L288 184 L368 128 L368 284 Q368 388 232 388 Q96 388 96 284 Z" fill="#45278D"/>
-<!-- head -->
-<path d="M96 116 L176 172 L288 172 L368 116 L368 272 Q368 376 232 376 Q96 376 96 272 Z" fill="#FFFFFF"/>
-<!-- inner ears -->
-<path d="M118 144 L168 180 L130 184 Z" fill="#00B3F4"/>
-<path d="M346 144 L296 180 L334 184 Z" fill="#00B3F4"/>
-<!-- eyes with a catchlight -->
-<circle cx="180" cy="268" r="22" fill="#592ACB"/>
-<circle cx="284" cy="268" r="22" fill="#592ACB"/>
-<circle cx="187" cy="261" r="7" fill="#FFFFFF"/>
-<circle cx="291" cy="261" r="7" fill="#FFFFFF"/>
-<!-- nose -->
-<path d="M218 320 L246 320 L232 336 Z" fill="#592ACB"/>
-<!-- chat bubble with typing dots -->
-<path d="M300 336 H436 Q456 336 456 356 V424 Q456 444 436 444 H352 L318 470 L324 444 H300 Q280 444 280 424 V356 Q280 336 300 336 Z" fill="#00B3F4" stroke="#592ACB" stroke-width="10"/>
-<circle cx="326" cy="390" r="12" fill="#FFFFFF"/>
-<circle cx="368" cy="390" r="12" fill="#FFFFFF"/>
-<circle cx="410" cy="390" r="12" fill="#FFFFFF"/>
+<!-- burst above the clasp -->
+<g stroke="#FFD567" stroke-width="15" stroke-linecap="round">
+  <line x1="256" y1="70" x2="256" y2="108"/>
+  <line x1="190" y1="92" x2="208" y2="124"/>
+  <line x1="322" y1="92" x2="304" y2="124"/>
+</g>
+<!-- engineer: forearm from the lower right, with a muscle bulge -->
+<path d="M300 236 Q392 262 470 380 L520 470 L520 560 L380 560 Q360 452 262 312 Z" fill="#00B3F4"/>
+<path d="M352 300 Q420 330 452 420" stroke="#0090C8" stroke-width="12" fill="none" stroke-linecap="round"/>
+<!-- agent: forearm from the lower left, with a muscle bulge -->
+<path d="M212 236 Q120 262 42 380 L-8 470 L-8 560 L132 560 Q152 452 250 312 Z" fill="#FFFFFF"/>
+<path d="M160 300 Q92 330 60 420" stroke="#D5CCEF" stroke-width="12" fill="none" stroke-linecap="round"/>
+<!-- the clasp: engineer's hand under, agent's fingers wrap over it -->
+<rect x="218" y="186" width="120" height="96" rx="40" fill="#00B3F4" transform="rotate(-18 278 234)"/>
+<rect x="174" y="186" width="120" height="96" rx="40" fill="#FFFFFF" transform="rotate(18 234 234)"/>
+<!-- agent's fingers curled over the engineer's hand -->
+<g fill="#FFFFFF" stroke="#592ACB" stroke-width="6">
+  <rect x="262" y="178" width="58" height="30" rx="15" transform="rotate(-18 291 193)"/>
+  <rect x="270" y="208" width="60" height="30" rx="15" transform="rotate(-18 300 223)"/>
+  <rect x="274" y="238" width="56" height="30" rx="15" transform="rotate(-18 302 253)"/>
+</g>
+<!-- engineer's thumb over the agent's hand -->
+<rect x="194" y="170" width="74" height="32" rx="16" fill="#00B3F4" stroke="#592ACB" stroke-width="6" transform="rotate(20 231 186)"/>
 </svg>
