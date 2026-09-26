@@ -7,6 +7,17 @@ const buttons = (key, ...names) => ({
   })),
 });
 
+// The agent writes standard Markdown (tables, **bold**, [links](url)); a
+// markdown block renders it, where mrkdwn shows the raw syntax. The 12,000 char
+// cap is per message; a section block would have failed past 3,000.
+const MD_MAX = 11500;
+const md = (text) => ({
+  type: 'markdown',
+  text: text.length > MD_MAX ? `${text.slice(0, MD_MAX)}\n\n_(cut at ${MD_MAX} characters; ask for the rest)_` : text,
+});
+// Notification and screen-reader fallback: the first line, plain.
+const plain = (text) => text.split('\n')[0].replace(/[*_`#>|]/g, '').slice(0, 150) || 'Reply';
+
 export function setupCard(key, prompt) {
   return [
     { type: 'section', text: { type: 'mrkdwn', text: `I can take this on:\n>${prompt.slice(0, 500).replace(/\n/g, '\n>')}` } },
@@ -19,9 +30,9 @@ export function render(key, ev) {
     case 'stage': return { text: `_${ev.text}_` };
     case 'plan': return { text: `Here's my plan:\n${ev.text}\nSound right? Reply here to adjust.` };
     case 'question': return {
-      text: ev.text,
+      text: plain(ev.text),
       blocks: [
-        { type: 'section', text: { type: 'mrkdwn', text: ev.text } },
+        md(ev.text || 'Which way?'),
         // Slack caps a label at 75 chars and rejects the message over it; the
         // full option rides in the value and is what gets sent.
         ...(ev.options?.length ? [{
@@ -35,11 +46,11 @@ export function render(key, ev) {
       ],
     };
     case 'turn_end':
-      if (ev.status === 'needs-input') return { text: ev.text || 'Over to you.' };
+      if (ev.status === 'needs-input') return { text: plain(ev.text || 'Over to you.'), blocks: [md(ev.text || 'Over to you.')] };
       if (ev.status === 'ready') return {
-        text: 'All set.',
+        text: plain(ev.text || 'All set.'),
         blocks: [
-          { type: 'section', text: { type: 'mrkdwn', text: ev.text || 'All set.' } },
+          md(ev.text || 'All set.'),
           buttons(key, ['Diff', 'diff'], ['Open PR', 'open_pr'], ['Stop', 'stop']),
         ],
       };
