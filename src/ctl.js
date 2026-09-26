@@ -48,6 +48,7 @@ export async function media(key) {
 // Starts the wrap-up in the background; events reports the PR or the failure.
 export const finish = (key) => run(['finish', '--session', key], { timeout: 60_000 });
 export const stop = (key) => run(['stop', key]);
+export const interrupt = (key) => run(['interrupt', key], { timeout: 60_000 });
 
 // Stream the running turn's steps. Its own process group, so stop() also ends
 // the ssh under it.
