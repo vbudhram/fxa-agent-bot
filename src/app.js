@@ -17,7 +17,8 @@ const app = new App({
 const pending = new Map(); // key → { prompt, owner, channel, thread_ts } until Start
 const busy = new Set();    // sessions with a poll in flight
 
-const allowed = (channel, user) => CHANNELS.includes(channel) && USERS.includes(user);
+// ALLOWED_USERS=* lets anyone in an allowed channel start a session; empty lets nobody.
+const allowed = (channel, user) => CHANNELS.includes(channel) && (USERS.includes('*') || USERS.includes(user));
 
 app.event('app_mention', async ({ event, say }) => {
   if (!allowed(event.channel, event.user)) return;
