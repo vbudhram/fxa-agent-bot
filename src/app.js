@@ -38,6 +38,7 @@ app.action('start', async ({ ack, body, action, client }) => {
   pending.delete(action.value);
   const s = sessions.put({ key: action.value, ...p, cursor: 0, state: 'starting' });
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'On it! Setting up takes about 2 minutes; the status below shows where I am.' });
+  await startStatus(s, 'Setting up');
   ctl.task({ key: s.key, owner: s.owner, prompt: s.prompt }).catch((e) => fail(client, s, e));
 });
 
@@ -53,14 +54,24 @@ app.message(async ({ message, client }) => {
   try {
     const out = await ctl.steer(s.key, text);
     if (out.includes('queued')) await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: "Got it. I'll pick that up as soon as I finish this step." });
+    else await startStatus(s, 'Working');
   } catch (e) { await fail(client, s, e); }
 });
 
 // One status line per turn, edited in place while the agent works, so a quiet
-// thread never looks like a dead one.
+// thread never looks like a dead one. Posted at once on a reply: a short turn
+// can finish between two polls and would otherwise show nothing.
+async function startStatus(s, verb) {
+  const cur = sessions.all().find((x) => x.key === s.key) ?? s;
+  if (cur.status_ts) return;
+  const text = `:hourglass_flowing_sand: ${verb} · 0s`;
+  const { ts } = await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text });
+  sessions.put({ ...cur, status_ts: ts, status_text: text, busy_since: Date.now(), last_act: null });
+}
 const secs = (ms) => { const t = Math.round(ms / 1000); return t < 60 ? `${t}s` : `${Math.floor(t / 60)}m ${t % 60}s`; };
 const VERB = { starting: 'Setting up', wrapping: 'Wrapping up', active: 'Working' };
-async function updateStatus(s, state, activity) {
+async function updateStatus(key, state, activity) {
+  const s = sessions.all().find((x) => x.key === key);
   const post = (text) => app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text });
   const edit = (text) => app.client.chat.update({ channel: s.channel, ts: s.status_ts, text });
   if (activity?.busy) {
@@ -119,7 +130,7 @@ setInterval(async () => {
         const msg = render(s.key, ev);
         if (msg) await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...msg });
       }
-      const status = await updateStatus(s, state, activity).catch((e) => { console.error('status', s.key, e.message); return {}; });
+      const status = await updateStatus(s.key, state, activity).catch((e) => { console.error('status', s.key, e.message); return {}; });
       // Re-read: a reply handler may have written the record during this poll.
       sessions.put({ ...(sessions.all().find((x) => x.key === s.key) ?? s), ...status, cursor, state });
     } catch (e) {
