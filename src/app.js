@@ -23,6 +23,17 @@ const busy = new Set();    // sessions with a poll in flight
 const allowed = (channel, user) => CHANNELS.includes(channel) && (USERS.includes('*') || USERS.includes(user));
 
 const START_DELAY_S = 10;
+
+// The first visible answer to any message: one reactions.add, sent before any
+// other work and not awaited. It turns into ✅ (or ⚠️) when the turn ends.
+const seen = (channel, ts) => app.client.reactions.add({ channel, timestamp: ts, name: 'eyes' }).catch(() => {});
+async function settle(s, ok = true) {
+  const cur = fresh(s.key);
+  if (!cur?.ack_ts) return;
+  sessions.patch(s.key, { ack_ts: null });
+  await app.client.reactions.remove({ channel: cur.channel, timestamp: cur.ack_ts, name: 'eyes' }).catch(() => {});
+  await app.client.reactions.add({ channel: cur.channel, timestamp: cur.ack_ts, name: ok ? 'white_check_mark' : 'warning' }).catch(() => {});
+}
 const strip = (t) => (t ?? '').replace(/<@[A-Z0-9]+>/g, '').trim();
 
 // A mention starts at once, after a short window to cancel a mistaken tag.
@@ -37,6 +48,7 @@ app.event('app_mention', async ({ event, client }) => {
   if (cur && LIVE.includes(cur.state)) return; // the steer path handles it
   let prompt = strip(event.text);
   if (!prompt) return;
+  if (!prompt.startsWith('!')) seen(event.channel, event.ts);
   const thread_ts = thread;
   // In a thread with a session, the message handler runs the bang; answer once.
   if (prompt.startsWith('!')) { if (!cur) await bang(null, prompt, { user: event.user, channel: event.channel, thread_ts, ts: event.ts }, client); return; }
@@ -52,12 +64,13 @@ app.event('app_mention', async ({ event, client }) => {
   // its conversation and changes instead of starting from scratch.
   const resume_from = cur && ['stopped', 'failed', 'paused'].includes(cur.state) ? cur.key : undefined;
   pending.set(key, { owner: event.user, channel: event.channel, thread_ts, resume_from });
-  if (event.thread_ts) prompt += await threadContext(client, event);
+  // The card goes up first; reading a long thread for context can take seconds.
   const { ts } = await client.chat.postMessage({ channel: event.channel, thread_ts,
     text: resume_from ? `Picking up where we left off, in ${START_DELAY_S} seconds.` : `Starting in ${START_DELAY_S} seconds.`,
     blocks: startCard(key, prompt, START_DELAY_S, Boolean(resume_from)) });
+  if (event.thread_ts) prompt += await threadContext(client, event);
   if (!pending.has(key)) return;
-  pending.set(key, { prompt, owner: event.user, channel: event.channel, thread_ts, card_ts: ts, resume_from,
+  pending.set(key, { prompt, owner: event.user, channel: event.channel, thread_ts, card_ts: ts, resume_from, ack_ts: event.ts,
     timer: setTimeout(() => begin(key, client).catch((e) => console.error('begin', key, e.message)), START_DELAY_S * 1000) });
 });
 
@@ -155,7 +168,10 @@ app.message(async ({ message, client }) => {
   const text = strip(message.text);
   if (!text) return;
   if (text.startsWith('!')) { await bang(s, text, { user: message.user, channel: message.channel, thread_ts: message.thread_ts, ts: message.ts }, client); return; }
-  if (s.state === 'paused' && allowed(message.channel, message.user) && (message.user === s.owner || STEER_ANYONE)) {
+  const steers = allowed(message.channel, message.user) && (message.user === s.owner || STEER_ANYONE);
+  if (steers && (LIVE.includes(s.state) || s.state === 'paused')) seen(message.channel, message.ts);
+  if (s.state === 'paused' && steers) {
+    sessions.patch(s.key, { ack_ts: message.ts });
     await resumePaused(s, message.user === s.owner ? text : `(From someone else in the thread, not the person who started this session.)\n${text}`, client);
     return;
   }
@@ -173,6 +189,7 @@ app.message(async ({ message, client }) => {
       text: `Only <@${s.owner}> can steer this session, so I won't act on your message. They can see it, though.` }).catch(() => {});
     return;
   }
+  sessions.patch(s.key, { ack_ts: message.ts });
   await steerAndAck(s, message.user === s.owner ? text : `(From someone else in the thread, not the person who started this session.)\n${text}`, client);
 });
 
@@ -249,7 +266,7 @@ app.event('reaction_added', async ({ event, client }) => {
 async function resumePaused(s, text, client) {
   if ([...pending.values()].some((p) => p.channel === s.channel && p.thread_ts === s.thread_ts)) return;
   const key = sessions.newKey();
-  pending.set(key, { prompt: text, owner: s.owner, channel: s.channel, thread_ts: s.thread_ts, resume_from: s.key });
+  pending.set(key, { prompt: text, owner: s.owner, channel: s.channel, thread_ts: s.thread_ts, resume_from: s.key, ack_ts: fresh(s.key)?.ack_ts });
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts,
     text: 'Picking up where we left off. Setting up takes about a minute; the status below shows where I am.' }).catch(() => {});
   await begin(key, client);
@@ -348,10 +365,13 @@ async function updateStreamNow(s, state, activity) {
     unsent.delete(s.key);
     // Boot steps and the no-stream fallback come from the poll, not the watch.
     if (!news.length && activity.text && activity.text !== s.last_step && !watchers.has(s.key)) news.push(activity.text);
+    // Setup refreshes every poll, so its clock keeps moving between steps.
+    if (!news.length && state === 'starting' && s.last_step) news.push(s.last_step);
     if (!news.length) return {};
     if (state !== 'starting') n += news.length; // boot steps are not the agent's steps
     const p = phase(news.at(-1));
-    title = state === 'starting' ? `Setting up: ${news.at(-1)}` : `${p.label} · ${n} step${n === 1 ? '' : 's'}`;
+    const up = Math.round((Date.now() - (s.busy_since ?? Date.now())) / 1000);
+    title = state === 'starting' ? `Setting up: ${news.at(-1)} · ${up}s of about ${SETUP_EXPECT_S}s` : `${p.label} · ${n} step${n === 1 ? '' : 's'}`;
     detail = state === 'starting' ? '' : p.detail;
     await app.client.apiCall('chat.appendStream', { ...at, chunks: [task('in_progress')] });
     return { step_n: n, last_act: title, last_detail: detail, last_step: news.at(-1) };
@@ -363,6 +383,7 @@ async function updateStreamNow(s, state, activity) {
   return { ...STATUS_CLEAR, interrupted: null };
 }
 
+const SETUP_EXPECT_S = 80; // measured boot to a running agent, 75-90 s
 const STATUS_CLEAR = { status_ts: null, status_kind: null, busy_since: null, last_act: null, last_detail: null, last_step: null, step_n: null, interrupted: null };
 const turnSummary = (s, word) => {
   const n = s.step_n ?? 0, took = secs(Date.now() - (s.busy_since ?? Date.now()));
@@ -373,6 +394,7 @@ const turnSummary = (s, word) => {
 // agent did, then what it says. Without a live stream it posts as before.
 const finishTurn = (key, msg, ev) => serial(key, async () => {
   const s = fresh(key);
+  settle(s);
   const actions = (msg.blocks ?? []).filter((b) => b.type === 'actions');
   if (s.status_kind === 'stream' && s.status_ts) {
     const summary = turnSummary(s, 'Done');
@@ -495,7 +517,9 @@ const ownerAction = (id, fn) => app.action(id, async ({ ack, body, action, clien
 });
 
 // 8: a one-line summary a phone can read, with the diff as a highlighted snippet.
-ownerAction('diff', async (s, client) => {
+const working = (s, body, text) => app.client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: body.user.id, text }).catch(() => {});
+ownerAction('diff', async (s, client, action, body) => {
+  working(s, body, 'Getting the diff…');
   const d = await ctl.diff(s.key);
   if (!d.trim()) { await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'No changes yet.' }); return; }
   const files = (d.match(/^diff --git /gm) ?? []).length;
@@ -512,6 +536,7 @@ app.action('interrupt', async ({ ack, body, action, client }) => {
   await interrupt(s, client, body).catch((e) => fail(client, s, e));
 });
 async function interrupt(s, client, body) {
+  working(s, body, 'Interrupting…');
   const out = await ctl.interrupt(s.key);
   if (!out.includes('interrupted')) {
     await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: body.user.id, text: 'Nothing is running right now.' }).catch(() => {});
@@ -521,9 +546,9 @@ async function interrupt(s, client, body) {
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Interrupted. The work so far is kept. Tell me what to do instead.' });
 }
 ownerAction('open_pr', async (s, client) => {
-  // Returns at once; the poll loop posts the PR link or the failure.
-  await ctl.finish(s.key);
+  // The note goes first; finish then returns at once and the poll posts the PR link.
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Wrapping up: review, PR description, then a draft PR. I will post the link here.' });
+  await ctl.finish(s.key);
 });
 ownerAction('stop', async (s, client) => {
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: STOPPED_TEXT(await stopSession(s.key)) });
@@ -557,6 +582,7 @@ function explain(e) {
 }
 async function fail(client, s, e) {
   console.error(s.key, e.stderr || e.message);
+  settle(s, false);
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: explain(e) });
 }
 
