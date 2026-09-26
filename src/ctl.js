@@ -1,6 +1,6 @@
 // Thin wrapper over the fxa-sandbox-ctl CLI. Slack text never reaches a shell:
 // it goes into a file, and every call uses execFile with an argv array.
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -42,3 +42,19 @@ export const diff = (key) => run(['diff', key], { timeout: 60_000 });
 // Starts the wrap-up in the background; events reports the PR or the failure.
 export const finish = (key) => run(['finish', '--session', key], { timeout: 60_000 });
 export const stop = (key) => run(['stop', key]);
+
+// Stream the running turn's steps. Its own process group, so stop() also ends
+// the ssh under it.
+export function watch(key, onEvent) {
+  const child = spawn(CTL, ['--backend', 'gce', 'watch', key], { detached: true, stdio: ['ignore', 'pipe', 'ignore'] });
+  let buf = '';
+  child.stdout.on('data', (d) => {
+    buf += d;
+    let i;
+    while ((i = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, i); buf = buf.slice(i + 1);
+      try { onEvent(JSON.parse(line)); } catch { /* partial or non-JSON line */ }
+    }
+  });
+  return { child, stop: () => { try { process.kill(-child.pid, 'SIGTERM'); } catch { /* already gone */ } } };
+}

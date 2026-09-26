@@ -78,12 +78,44 @@ async function startStatusNow(s, verb) {
   const text = `${spinner(0)} ${verb} · 0s`;
   const { ts } = await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text });
   sessions.put({ ...cur, status_ts: ts, status_text: text, busy_since: Date.now(), last_act: null });
+  steps.delete(s.key);
+  if (cur.state === 'active') ensureWatch(s.key);
 }
 const secs = (ms) => { const t = Math.round(ms / 1000); return t < 60 ? `${t}s` : `${Math.floor(t / 60)}m ${t % 60}s`; };
 const VERB = { starting: 'Setting up', wrapping: 'Wrapping up', active: 'Working' };
 // STATUS_EMOJI names an animated custom emoji (a spinner GIF); without one the
 // hourglass flips on each edit so the line still visibly ticks.
 const spinner = (n) => process.env.STATUS_EMOJI || (n % 2 ? ':hourglass:' : ':hourglass_flowing_sand:');
+// While a turn runs, a watch stream feeds the status line within a second, and
+// the turn's result triggers an immediate poll so the reply posts at once.
+const watchers = new Map(), steps = new Map(), editTimers = new Map(), lastEdit = new Map();
+function ensureWatch(key) {
+  if (watchers.has(key)) return;
+  const w = ctl.watch(key, (ev) => {
+    if (ev.type === 'step') { pushStep(key, ev.text); liveEdit(key); }
+    if (ev.type === 'result') setTimeout(() => pollOne(key), 300);
+  });
+  w.child.on('exit', () => { if (watchers.get(key) === w) watchers.delete(key); });
+  watchers.set(key, w);
+}
+function stopWatch(key) { watchers.get(key)?.stop(); watchers.delete(key); }
+function pushStep(key, text) {
+  if (!text) return;
+  const list = steps.get(key) ?? [];
+  list.push(text);
+  steps.set(key, list.slice(-5));
+}
+// At most one edit per 1.2 s per session; Slack rate-limits chat.update.
+function liveEdit(key) {
+  if (editTimers.has(key)) return;
+  const wait = Math.max(0, 1200 - (Date.now() - (lastEdit.get(key) ?? 0)));
+  editTimers.set(key, setTimeout(() => {
+    editTimers.delete(key); lastEdit.set(key, Date.now());
+    const s = fresh(key);
+    if (s?.status_ts) updateStatus(key, s.state, { busy: true, text: null }).catch((e) => console.error('status', key, e.message));
+  }, wait));
+}
+
 // Writes the status fields itself, inside the serial section, so no caller can
 // overwrite a status line posted in between with stale fields.
 const updateStatus = (key, state, activity) => serial(key, async () => {
@@ -97,12 +129,17 @@ async function updateStatusNow(s, state, activity) {
     const since = s.busy_since ?? Date.now();
     const doing = activity.text ?? s.last_act;
     const tick = (s.tick ?? 0) + 1;
-    const text = `${spinner(tick)} ${VERB[state] ?? 'Working'} · ${secs(Date.now() - since)}${doing ? ` · ${doing}` : ''}`;
+    const log = steps.get(s.key) ?? [];
+    const text = log.length
+      ? `${spinner(tick)} ${VERB[state] ?? 'Working'} · ${secs(Date.now() - since)}\n` +
+        log.map((t, i) => `${i === log.length - 1 ? '›' : '✓'} ${t}`).join('\n')
+      : `${spinner(tick)} ${VERB[state] ?? 'Working'} · ${secs(Date.now() - since)}${doing ? ` · ${doing}` : ''}`;
     let status_ts = s.status_ts;
     if (!status_ts) status_ts = (await post(text)).ts;
     else if (text !== s.status_text) await edit(text);
     return { busy_since: since, last_act: doing, status_ts, status_text: text, tick };
   }
+  steps.delete(s.key);
   if (s.status_ts) await edit(`:white_check_mark: Finished in ${secs(Date.now() - s.busy_since)}`);
   return { busy_since: null, last_act: null, status_ts: null, status_text: null };
 }
@@ -139,26 +176,32 @@ async function fail(client, s, e) {
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: "I hit an error and stopped. Details are in the bot log." });
 }
 
-// ponytail: one 5 s poll loop for every live session; a long-lived tail per session when there are many.
-setInterval(async () => {
-  for (const s of sessions.all()) {
-    if (['stopped', 'failed', 'pr_open'].includes(s.state) || busy.has(s.key)) continue;
-    busy.add(s.key);
-    try {
-      const { cursor, state, events, activity } = await ctl.events(s.key, s.cursor);
-      for (const ev of events) {
-        const msg = render(s.key, ev);
-        if (msg) await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...msg });
-      }
-      sessions.put({ ...fresh(s.key), cursor, state });
-      await updateStatus(s.key, state, activity).catch((e) => console.error('status', s.key, e.message));
-    } catch (e) {
-      console.error('events', s.key, e.stderr || e.message);
-    } finally {
-      busy.delete(s.key);
+// The 5 s poll owns state (replies, questions, errors, PR links); the watch
+// stream only makes the status line live between polls.
+const DONE = ['stopped', 'failed', 'pr_open'];
+async function pollOne(key) {
+  const s = fresh(key);
+  if (!s || DONE.includes(s.state)) return;
+  if (busy.has(key)) { setTimeout(() => pollOne(key), 1000); return; }
+  busy.add(key);
+  try {
+    const { cursor, state, events, activity } = await ctl.events(s.key, s.cursor);
+    for (const ev of events) {
+      const msg = render(s.key, ev);
+      if (msg) await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...msg });
     }
+    sessions.put({ ...fresh(key), cursor, state });
+    if (activity?.busy && (state === 'active' || state === 'wrapping')) ensureWatch(key); else stopWatch(key);
+    await updateStatus(key, state, activity).catch((e) => console.error('status', key, e.message));
+  } catch (e) {
+    console.error('events', key, e.stderr || e.message);
+  } finally {
+    busy.delete(key);
   }
-}, 5_000);
+}
+setInterval(() => { for (const s of sessions.all()) pollOne(s.key); }, 5_000);
+// Watch streams run in their own process groups; end them with the bot.
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { for (const w of watchers.values()) w.stop(); process.exit(0); });
 
 await app.start();
 console.log('agent-tag is running (Socket Mode)');
