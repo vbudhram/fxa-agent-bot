@@ -64,12 +64,15 @@ app.message(async ({ message, client }) => {
 async function startStatus(s, verb) {
   const cur = sessions.all().find((x) => x.key === s.key) ?? s;
   if (cur.status_ts) return;
-  const text = `:hourglass_flowing_sand: ${verb} · 0s`;
+  const text = `${spinner(0)} ${verb} · 0s`;
   const { ts } = await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text });
   sessions.put({ ...cur, status_ts: ts, status_text: text, busy_since: Date.now(), last_act: null });
 }
 const secs = (ms) => { const t = Math.round(ms / 1000); return t < 60 ? `${t}s` : `${Math.floor(t / 60)}m ${t % 60}s`; };
 const VERB = { starting: 'Setting up', wrapping: 'Wrapping up', active: 'Working' };
+// STATUS_EMOJI names an animated custom emoji (a spinner GIF); without one the
+// hourglass flips on each edit so the line still visibly ticks.
+const spinner = (n) => process.env.STATUS_EMOJI || (n % 2 ? ':hourglass:' : ':hourglass_flowing_sand:');
 async function updateStatus(key, state, activity) {
   const s = sessions.all().find((x) => x.key === key);
   const post = (text) => app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text });
@@ -77,11 +80,12 @@ async function updateStatus(key, state, activity) {
   if (activity?.busy) {
     const since = s.busy_since ?? Date.now();
     const doing = activity.text ?? s.last_act;
-    const text = `:hourglass_flowing_sand: ${VERB[state] ?? 'Working'} · ${secs(Date.now() - since)}${doing ? ` · ${doing}` : ''}`;
+    const tick = (s.tick ?? 0) + 1;
+    const text = `${spinner(tick)} ${VERB[state] ?? 'Working'} · ${secs(Date.now() - since)}${doing ? ` · ${doing}` : ''}`;
     let status_ts = s.status_ts;
     if (!status_ts) status_ts = (await post(text)).ts;
     else if (text !== s.status_text) await edit(text);
-    return { busy_since: since, last_act: doing, status_ts, status_text: text };
+    return { busy_since: since, last_act: doing, status_ts, status_text: text, tick };
   }
   if (s.status_ts) await edit(`:white_check_mark: Finished in ${secs(Date.now() - s.busy_since)}`);
   return { busy_since: null, last_act: null, status_ts: null, status_text: null };
