@@ -1,4 +1,6 @@
 import bolt from '@slack/bolt';
+import { basename } from 'node:path';
+import { statSync, readFileSync } from 'node:fs';
 import * as ctl from './ctl.js';
 import * as sessions from './sessions.js';
 import { render, setupCard, phase } from './render.js';
@@ -246,6 +248,22 @@ async function fail(client, s, e) {
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: "I hit an error and stopped. Details are in the bot log." });
 }
 
+// Screenshots and videos the agent saved during the turn, posted once each. A
+// file the agent rewrites (same name, new size) posts again.
+async function deliverMedia(key) {
+  const s = fresh(key);
+  try {
+    const sent = new Set(s.media_sent ?? []);
+    for (const path of await ctl.media(key)) {
+      const id = `${basename(path)}:${statSync(path).size}`;
+      if (sent.has(id)) continue;
+      await app.client.files.uploadV2({ channel_id: s.channel, thread_ts: s.thread_ts, filename: basename(path), file: readFileSync(path) });
+      sent.add(id);
+    }
+    sessions.put({ ...fresh(key), media_sent: [...sent] });
+  } catch (e) { console.error('media', key, e.data?.error ?? e.stderr ?? e.message); }
+}
+
 // The 5 s poll owns state (replies, questions, errors, PR links); the watch
 // stream only makes the status line live between polls.
 const DONE = ['stopped', 'failed', 'pr_open'];
@@ -261,6 +279,7 @@ async function pollOne(key) {
       if (msg) await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...msg });
     }
     sessions.put({ ...fresh(key), cursor, state });
+    if (events.some((e) => e.type === 'turn_end' || e.type === 'question')) await deliverMedia(key);
     if (activity?.busy && (state === 'active' || state === 'wrapping')) ensureWatch(key); else stopWatch(key);
     await updateStatus(key, state, activity).catch((e) => console.error('status', key, e.message));
   } catch (e) {

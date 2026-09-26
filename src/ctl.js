@@ -39,6 +39,12 @@ export async function events(key, since) {
 }
 
 export const diff = (key) => run(['diff', key], { timeout: 60_000 });
+// Copies the agent's screenshots and videos off the runner; returns local paths.
+export async function media(key) {
+  const dir = await mkdtemp(join(tmpdir(), 'agent-tag-media-'));
+  const out = await run(['media', key, dir], { timeout: 120_000 });
+  return out.split('\n').filter(Boolean);
+}
 // Starts the wrap-up in the background; events reports the PR or the failure.
 export const finish = (key) => run(['finish', '--session', key], { timeout: 60_000 });
 export const stop = (key) => run(['stop', key]);
