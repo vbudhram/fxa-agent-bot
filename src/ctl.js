@@ -54,6 +54,9 @@ export const cleanup = (dir) => rm(dir, { recursive: true, force: true });
 export const finish = (key) => run(['finish', '--session', key], { timeout: 60_000 });
 export const stop = (key) => run(['stop', key]);
 export const interrupt = (key) => run(['interrupt', key], { timeout: 60_000 });
+// Pauses sessions idle past the ctl's threshold; returns the keys it paused.
+export const idleSweep = async () => (await run(['session', 'idle-sweep'], { timeout: 10 * 60_000 }))
+  .split('\n').filter((l) => l.startsWith('paused ')).map((l) => l.slice(7).trim());
 
 // Stream the running turn's steps. Its own process group, so stop() also ends
 // the ssh under it.

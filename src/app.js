@@ -50,7 +50,7 @@ app.event('app_mention', async ({ event, client }) => {
   const key = sessions.newKey();
   // The last session here stopped (a pause, Stop, or the runner limit): continue
   // its conversation and changes instead of starting from scratch.
-  const resume_from = cur && ['stopped', 'failed'].includes(cur.state) ? cur.key : undefined;
+  const resume_from = cur && ['stopped', 'failed', 'paused'].includes(cur.state) ? cur.key : undefined;
   pending.set(key, { owner: event.user, channel: event.channel, thread_ts, resume_from });
   if (event.thread_ts) prompt += await threadContext(client, event);
   const { ts } = await client.chat.postMessage({ channel: event.channel, thread_ts,
@@ -155,6 +155,10 @@ app.message(async ({ message, client }) => {
   const text = strip(message.text);
   if (!text) return;
   if (text.startsWith('!')) { await bang(s, text, { user: message.user, channel: message.channel, thread_ts: message.thread_ts, ts: message.ts }, client); return; }
+  if (s.state === 'paused' && allowed(message.channel, message.user) && (message.user === s.owner || STEER_ANYONE)) {
+    await resumePaused(s, message.user === s.owner ? text : `(From someone else in the thread, not the person who started this session.)\n${text}`, client);
+    return;
+  }
   if (!LIVE.includes(s.state)) return;
   if (s.state === 'queued' && (message.user === s.owner || STEER_ANYONE)) {
     sessions.patch(s.key, { prompt: `${fresh(s.key).prompt}\n\nA later message in the thread:\n${text}` });
@@ -239,6 +243,32 @@ app.event('reaction_added', async ({ event, client }) => {
   await client.chat.postEphemeral({ channel, thread_ts: s.thread_ts, user: event.user,
     text: 'Muted, and I stopped the current reply. `@fxa-agent !unmute` to hear from me again.' }).catch(() => {});
 });
+
+// A reply to a paused session continues it on a fresh runner, with its changes
+// and conversation; the reply is the new session's first message.
+async function resumePaused(s, text, client) {
+  if ([...pending.values()].some((p) => p.channel === s.channel && p.thread_ts === s.thread_ts)) return;
+  const key = sessions.newKey();
+  pending.set(key, { prompt: text, owner: s.owner, channel: s.channel, thread_ts: s.thread_ts, resume_from: s.key });
+  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts,
+    text: 'Picking up where we left off. Setting up takes about a minute; the status below shows where I am.' }).catch(() => {});
+  await begin(key, client);
+}
+
+// Every minute the ctl pauses sessions idle for 30 minutes (FXA_SESSION_IDLE_SECONDS).
+async function idleSweep() {
+  let paused = [];
+  try { paused = await ctl.idleSweep(); } catch (e) { console.error('idle-sweep', e.stderr || e.message); return; }
+  for (const key of paused) {
+    const s = fresh(key);
+    if (!s) continue;
+    stopWatch(key);
+    await updateStatus(key, 'paused', { busy: false }).catch(() => {});
+    sessions.patch(key, { state: 'paused' });
+    if (!s.muted) await say(s, "I'll pause since it's been quiet. Everything's saved; reply here when you're ready.").catch(() => {});
+  }
+}
+setInterval(() => { idleSweep(); }, 60_000);
 
 // A typed reply and a tapped option take the same path, so both get the live timeline.
 // The timeline opens first, so the reply is visible in under a second while
@@ -551,7 +581,7 @@ async function deliverMedia(key) {
 
 // 9: /fxa-agent status, and @fxa-agent !status outside a session thread, list
 // the sessions that are still going, with links.
-const STATE_WORD = { queued: 'waiting for capacity', starting: 'setting up', active: 'working', wrapping: 'opening a PR', pr_open: 'PR open', stopped: 'stopped', failed: 'failed' };
+const STATE_WORD = { paused: 'paused (reply to resume)', queued: 'waiting for capacity', starting: 'setting up', active: 'working', wrapping: 'opening a PR', pr_open: 'PR open', stopped: 'stopped', failed: 'failed' };
 async function statusList(client, channel) {
   const live = sessions.all().filter((x) => !['stopped', 'failed'].includes(x.state) && x.channel === channel);
   if (!live.length) return 'No sessions are running in this channel. Tag @fxa-agent in a thread to start one.';
@@ -574,7 +604,9 @@ app.command('/fxa-agent', async ({ ack, command, respond, client }) => {
 
 // 5: GCE deletes a runner 90 minutes after it boots, with no warning. Warn the
 // owner ahead of it, then stop cleanly, which saves the work as a patch.
-const RUNNER_MIN = 90, WARN_AT_MIN = 75, PAUSE_AT_MIN = 85;
+// Matches the ctl's FXA_SESSION_MAX_RUN_SECONDS (4 h). The idle pause usually
+// ends a session long before this.
+const RUNNER_MIN = Number(process.env.SESSION_MAX_MINUTES || 240), WARN_AT_MIN = RUNNER_MIN - 15, PAUSE_AT_MIN = RUNNER_MIN - 5;
 async function mindLifetime(key, state) {
   const s = fresh(key);
   if (state !== 'active' || !s.started_at) return;
@@ -609,7 +641,7 @@ const STOPPED_TEXT = (ok) => ok ? 'Stopped. The work so far is kept.'
 
 // The 5 s poll owns state (replies, questions, errors, PR links); the watch
 // stream only makes the status line live between polls.
-const DONE = ['stopped', 'failed', 'pr_open', 'queued'];
+const DONE = ['stopped', 'failed', 'pr_open', 'queued', 'paused'];
 const again = new Set(); // keys asked to poll while a poll was in flight
 async function pollOne(key) {
   const s = fresh(key);
