@@ -75,10 +75,22 @@ const startStatus = (s, verb) => serial(s.key, () => startStatusNow(s, verb));
 async function startStatusNow(s, verb) {
   const cur = sessions.all().find((x) => x.key === s.key) ?? s;
   if (cur.status_ts) return;
+  steps.delete(s.key); unsent.delete(s.key);
+  const first = verb === 'Setting up' ? 'Setting up a runner' : `${verb} on it`;
+  if (streamOk) {
+    try {
+      const { ts } = await app.client.apiCall('chat.startStream', {
+        channel: s.channel, thread_ts: s.thread_ts, recipient_user_id: cur.owner, recipient_team_id: teamId,
+        chunks: [{ type: 'task_update', id: 't0', title: first, status: 'in_progress' }],
+      });
+      sessions.put({ ...cur, status_ts: ts, status_kind: 'stream', busy_since: Date.now(), last_act: first, step_n: 0 });
+      if (cur.state === 'active') ensureWatch(s.key);
+      return;
+    } catch (e) { streamOff(e); }
+  }
   const text = `${spinner(0)} ${verb} · 0s`;
   const { ts } = await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text });
-  sessions.put({ ...cur, status_ts: ts, status_text: text, busy_since: Date.now(), last_act: null });
-  steps.delete(s.key);
+  sessions.put({ ...cur, status_ts: ts, status_kind: 'line', status_text: text, busy_since: Date.now(), last_act: null });
   if (cur.state === 'active') ensureWatch(s.key);
 }
 const secs = (ms) => { const t = Math.round(ms / 1000); return t < 60 ? `${t}s` : `${Math.floor(t / 60)}m ${t % 60}s`; };
@@ -86,13 +98,43 @@ const VERB = { starting: 'Setting up', wrapping: 'Wrapping up', active: 'Working
 // STATUS_EMOJI names an animated custom emoji (a spinner GIF); without one the
 // hourglass flips on each edit so the line still visibly ticks.
 const spinner = (n) => process.env.STATUS_EMOJI || (n % 2 ? ':hourglass:' : ':hourglass_flowing_sand:');
+// Native streaming: one message per turn, one task per agent step. Slack gates
+// it behind the app's Agents feature (and, for some workspaces, a paid plan);
+// on the first refusal the bot logs why and keeps the edited status line.
+let streamOk = process.env.NATIVE_STREAM !== '0', teamId = null;
+const unsent = new Map(); // key → steps not yet appended to the stream
+function streamOff(e) {
+  streamOk = false;
+  console.error(`native streaming unavailable (${e.data?.error ?? e.message}); using the status line`);
+}
+async function updateStreamNow(s, state, activity) {
+  const at = { channel: s.channel, ts: s.status_ts };
+  let n = s.step_n ?? 0, last = s.last_act;
+  const task = (id, title, status) => ({ type: 'task_update', id: `t${id}`, title: String(title).slice(0, 250), status });
+  if (activity?.busy) {
+    const news = unsent.get(s.key) ?? [];
+    unsent.delete(s.key);
+    // Boot steps and the no-stream fallback come from the poll, not the watch.
+    if (!news.length && activity.text && activity.text !== last && !watchers.has(s.key)) news.push(activity.text);
+    const chunks = [];
+    for (const t of news) { chunks.push(task(n, last, 'complete')); n += 1; chunks.push(task(n, t, 'in_progress')); last = t; }
+    if (chunks.length) await app.client.apiCall('chat.appendStream', { ...at, chunks });
+    return { step_n: n, last_act: last };
+  }
+  await app.client.apiCall('chat.stopStream', { ...at, chunks: [
+    task(n, last, 'complete'),
+    { type: 'markdown_text', text: `Finished in ${secs(Date.now() - s.busy_since)}` },
+  ] });
+  return { status_ts: null, status_kind: null, busy_since: null, last_act: null, step_n: null };
+}
+
 // While a turn runs, a watch stream feeds the status line within a second, and
 // the turn's result triggers an immediate poll so the reply posts at once.
 const watchers = new Map(), steps = new Map(), editTimers = new Map(), lastEdit = new Map();
 function ensureWatch(key) {
   if (watchers.has(key)) return;
   const w = ctl.watch(key, (ev) => {
-    if (ev.type === 'step') { pushStep(key, ev.text); liveEdit(key); }
+    if (ev.type === 'step') { pushStep(key, ev.text); unsent.set(key, [...(unsent.get(key) ?? []), ev.text]); liveEdit(key); }
     if (ev.type === 'result') setTimeout(() => pollOne(key), 300);
   });
   w.child.on('exit', () => { if (watchers.get(key) === w) watchers.delete(key); });
@@ -120,6 +162,17 @@ function liveEdit(key) {
 // overwrite a status line posted in between with stale fields.
 const updateStatus = (key, state, activity) => serial(key, async () => {
   const s = fresh(key);
+  // A turn the bot did not start itself (a queued message, the first plan): open its status now.
+  if (!s.status_ts && activity?.busy) { await startStatusNow(s, VERB[state] ?? 'Working'); return; }
+  if (s.status_kind === 'stream') {
+    try { sessions.put({ ...s, ...(await updateStreamNow(s, state, activity)) }); }
+    catch (e) {
+      // The stream ended under us (stopped by the user, or timed out): start fresh next time.
+      console.error('stream', key, e.data?.error ?? e.message);
+      sessions.put({ ...s, status_ts: null, status_kind: null, busy_since: null, last_act: null, step_n: null });
+    }
+    return;
+  }
   sessions.put({ ...s, ...(await updateStatusNow(s, state, activity)) });
 });
 async function updateStatusNow(s, state, activity) {
@@ -204,4 +257,5 @@ setInterval(() => { for (const s of sessions.all()) pollOne(s.key); }, 5_000);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { for (const w of watchers.values()) w.stop(); process.exit(0); });
 
 await app.start();
+teamId = (await app.client.auth.test()).team_id;
 console.log('agent-tag is running (Socket Mode)');
