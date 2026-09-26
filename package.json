@@ -1,0 +1,15 @@
+{
+  "name": "agent-tag",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Slack front door for fxa-sandbox-ctl agent sessions",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node --env-file=.env src/app.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@slack/bolt": "^5.1.0"
+  }
+}
