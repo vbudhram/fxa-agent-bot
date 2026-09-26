@@ -26,6 +26,15 @@ export function put(s) {
   return s;
 }
 
+// Merge fields into the session with this key as it is now. Writers await
+// Slack between reading and writing; putting back the record they read would
+// undo what others wrote meanwhile (a cursor, a stop, a mute). No-op when the
+// key has left the map.
+export function patch(key, fields) {
+  const cur = Object.values(sessions).find((x) => x.key === key);
+  return cur ? put({ ...cur, ...fields }) : undefined;
+}
+
 export function newKey() {
   return `agent-${randomBytes(3).toString('hex')}`;
 }

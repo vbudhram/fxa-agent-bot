@@ -61,6 +61,7 @@ export function watch(key, onEvent) {
   // Without a listener a failed spawn throws and takes the bot down.
   child.on('error', (e) => console.error('watch', key, e.message));
   let buf = '';
+  child.stdout.setEncoding('utf8'); // a character split across chunks stays whole
   child.stdout.on('data', (d) => {
     buf += d;
     let i;
