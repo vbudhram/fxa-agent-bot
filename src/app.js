@@ -50,13 +50,17 @@ app.message(async ({ message, client }) => {
   const s = sessions.get(message.channel, message.thread_ts);
   if (!s || message.user !== s.owner || s.state === 'stopped') return;
   const text = message.text.replace(/<@[A-Z0-9]+>/g, '').trim();
-  if (!text) return;
+  if (text) await steerAndAck(s, text, client);
+});
+
+// A typed reply and a tapped option take the same path, so both get the live timeline.
+async function steerAndAck(s, text, client) {
   try {
     const out = await ctl.steer(s.key, text);
     if (out.includes('queued')) await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: "Got it. I'll pick that up as soon as I finish this step." });
     else await startStatus(s, 'Working');
   } catch (e) { await fail(client, s, e); }
-});
+}
 
 // One status line per turn, edited in place while the agent works, so a quiet
 // thread never looks like a dead one. Posted at once on a reply: a short turn
@@ -218,10 +222,17 @@ ownerAction('stop', async (s, client) => {
   sessions.put({ ...s, state: 'stopped' });
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Stopped. The work so far is kept.' });
 });
-app.action(/^answer_\d+$/, async ({ ack, body, action }) => {
+app.action(/^answer_\d+$/, async ({ ack, body, action, client }) => {
   await ack();
-  const s = sessions.all().find((x) => x.key === action.value);
-  if (s && body.user.id === s.owner) await ctl.steer(s.key, action.text.text);
+  // Buttons posted before the value carried JSON hold only the key.
+  let v; try { v = JSON.parse(action.value); } catch { v = { key: action.value, choice: action.text.text }; }
+  const s = fresh(v.key);
+  if (!s || body.user.id !== s.owner) return;
+  // Swap the buttons for the choice, so the question cannot be answered twice.
+  const blocks = (body.message.blocks ?? []).filter((b) => b.type !== 'actions')
+    .concat({ type: 'context', elements: [{ type: 'mrkdwn', text: `<@${body.user.id}> chose: *${v.choice.slice(0, 200)}*` }] });
+  await client.chat.update({ channel: s.channel, ts: body.message.ts, text: body.message.text, blocks }).catch(() => {});
+  await steerAndAck(s, v.choice, client);
 });
 
 async function fail(client, s, e) {

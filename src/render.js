@@ -22,7 +22,16 @@ export function render(key, ev) {
       text: ev.text,
       blocks: [
         { type: 'section', text: { type: 'mrkdwn', text: ev.text } },
-        ...(ev.options?.length ? [buttons(key, ...ev.options.map((o, i) => [o, `answer_${i}`]))] : []),
+        // Slack caps a label at 75 chars and rejects the message over it; the
+        // full option rides in the value and is what gets sent.
+        ...(ev.options?.length ? [{
+          type: 'actions',
+          elements: ev.options.slice(0, 5).map((o, i) => ({
+            type: 'button', action_id: `answer_${i}`,
+            text: { type: 'plain_text', text: o.length > 75 ? `${o.slice(0, 72)}...` : o },
+            value: JSON.stringify({ key, choice: o.slice(0, 1800) }),
+          })),
+        }] : []),
       ],
     };
     case 'turn_end':
