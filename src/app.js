@@ -63,10 +63,9 @@ ownerAction('diff', async (s, client) => {
   await client.files.uploadV2({ channel_id: s.channel, thread_ts: s.thread_ts, filename: `${s.key}.diff`, content: d || '(no changes)' });
 });
 ownerAction('open_pr', async (s, client) => {
-  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Wrapping up and opening the PR.' });
-  const url = (await ctl.finish(s.key)).trim().split('\n').at(-1);
-  sessions.put({ ...s, state: 'pr_open' });
-  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: `Draft PR is up: ${url}` });
+  // Returns at once; the poll loop posts the PR link or the failure.
+  await ctl.finish(s.key);
+  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Wrapping up: review, PR description, then a draft PR. I will post the link here.' });
 });
 ownerAction('stop', async (s, client) => {
   await ctl.stop(s.key);

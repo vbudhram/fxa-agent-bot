@@ -35,7 +35,7 @@ export function render(key, ev) {
         ],
       };
       return null; // working: stay quiet
-    case 'pr': return { text: `PR is up: ${ev.url}` };
+    case 'pr': return { text: `Draft PR is up: ${ev.url}` };
     case 'ci': return { text: `CI: ${ev.text}` };
     case 'error': return { text: `Something went wrong: ${ev.text}` };
     default: return null;

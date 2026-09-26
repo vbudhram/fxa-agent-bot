@@ -1,6 +1,7 @@
 // Maps a Slack thread to a ctl session key. ctl owns the session record; this
 // file only remembers where to post, so the bot can restart without losing threads.
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 
 const FILE = process.env.AGENT_TAG_STATE || `${process.env.HOME}/.agent-tag-sessions.json`;
 
@@ -23,5 +24,5 @@ export function put(s) {
 }
 
 export function newKey() {
-  return `agent-${Math.random().toString(16).slice(2, 6)}`;
+  return `agent-${randomBytes(3).toString('hex')}`;
 }

@@ -23,10 +23,10 @@ The bot calls every command with `--backend gce` first. It depends only on these
 | `steer <key> --message-file <f>` | exit 0 when the turn runs or is queued |
 | `events <key> --since <cursor>` | JSON `{cursor, state, events: [{type, text, status?, options?}]}` |
 | `diff <key>` | the working diff as text |
-| `finish --session <key>` | the draft PR URL on the last line, after a wrap-up turn (up to 45 min) |
+| `finish --session <key>` | exit 0 once the wrap-up starts; `events` later reports a `pr` or an `error` |
 | `stop <key>` | exit 0 when the runner is gone |
 
-Event types: `question` (with `options`), `turn_end` (with `status`: `needs-input` or `ready`), `error`. `state` is one of `starting`, `active`, `wrapping`, `pr_open`, `stopped`, `failed`.
+Event types: `question` (with `options`), `turn_end` (with `status`: `needs-input` or `ready`), `pr` (with `url`), `error`. `state` is one of `starting`, `active`, `wrapping`, `pr_open`, `stopped`, `failed`.
 
 ## Not in v0
 

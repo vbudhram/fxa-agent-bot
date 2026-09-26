@@ -39,6 +39,6 @@ export async function events(key, since) {
 }
 
 export const diff = (key) => run(['diff', key], { timeout: 60_000 });
-// Wrap-up turn plus squash, push, and PR: allow the 45 min the ctl allows.
-export const finish = (key) => run(['finish', '--session', key], { timeout: 50 * 60_000 });
+// Starts the wrap-up in the background; events reports the PR or the failure.
+export const finish = (key) => run(['finish', '--session', key], { timeout: 60_000 });
 export const stop = (key) => run(['stop', key]);
