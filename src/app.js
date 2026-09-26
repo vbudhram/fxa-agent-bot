@@ -37,7 +37,7 @@ app.action('start', async ({ ack, body, action, client }) => {
   if (!p || body.user.id !== p.owner) return;
   pending.delete(action.value);
   const s = sessions.put({ key: action.value, ...p, cursor: 0, state: 'starting' });
-  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'On it! Give me a few minutes to get set up.' });
+  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'On it! Setting up takes about 2 minutes; the status below shows where I am.' });
   ctl.task({ key: s.key, owner: s.owner, prompt: s.prompt }).catch((e) => fail(client, s, e));
 });
 
@@ -49,8 +49,32 @@ app.message(async ({ message, client }) => {
   const s = sessions.get(message.channel, message.thread_ts);
   if (!s || message.user !== s.owner || s.state === 'stopped') return;
   const text = message.text.replace(/<@[A-Z0-9]+>/g, '').trim();
-  if (text) ctl.steer(s.key, text).catch((e) => fail(client, s, e));
+  if (!text) return;
+  try {
+    const out = await ctl.steer(s.key, text);
+    if (out.includes('queued')) await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: "Got it. I'll pick that up as soon as I finish this step." });
+  } catch (e) { await fail(client, s, e); }
 });
+
+// One status line per turn, edited in place while the agent works, so a quiet
+// thread never looks like a dead one.
+const secs = (ms) => { const t = Math.round(ms / 1000); return t < 60 ? `${t}s` : `${Math.floor(t / 60)}m ${t % 60}s`; };
+const VERB = { starting: 'Setting up', wrapping: 'Wrapping up', active: 'Working' };
+async function updateStatus(s, state, activity) {
+  const post = (text) => app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text });
+  const edit = (text) => app.client.chat.update({ channel: s.channel, ts: s.status_ts, text });
+  if (activity?.busy) {
+    const since = s.busy_since ?? Date.now();
+    const doing = activity.text ?? s.last_act;
+    const text = `:hourglass_flowing_sand: ${VERB[state] ?? 'Working'} · ${secs(Date.now() - since)}${doing ? ` · ${doing}` : ''}`;
+    let status_ts = s.status_ts;
+    if (!status_ts) status_ts = (await post(text)).ts;
+    else if (text !== s.status_text) await edit(text);
+    return { busy_since: since, last_act: doing, status_ts, status_text: text };
+  }
+  if (s.status_ts) await edit(`:white_check_mark: Finished in ${secs(Date.now() - s.busy_since)}`);
+  return { busy_since: null, last_act: null, status_ts: null, status_text: null };
+}
 
 const ownerAction = (id, fn) => app.action(id, async ({ ack, body, action, client }) => {
   await ack();
@@ -90,12 +114,14 @@ setInterval(async () => {
     if (['stopped', 'failed', 'pr_open'].includes(s.state) || busy.has(s.key)) continue;
     busy.add(s.key);
     try {
-      const { cursor, state, events } = await ctl.events(s.key, s.cursor);
+      const { cursor, state, events, activity } = await ctl.events(s.key, s.cursor);
       for (const ev of events) {
         const msg = render(s.key, ev);
         if (msg) await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...msg });
       }
-      sessions.put({ ...s, cursor, state });
+      const status = await updateStatus(s, state, activity).catch((e) => { console.error('status', s.key, e.message); return {}; });
+      // Re-read: a reply handler may have written the record during this poll.
+      sessions.put({ ...(sessions.all().find((x) => x.key === s.key) ?? s), ...status, cursor, state });
     } catch (e) {
       console.error('events', s.key, e.stderr || e.message);
     } finally {
