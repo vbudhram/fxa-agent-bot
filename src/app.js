@@ -241,12 +241,20 @@ app.event('reaction_added', async ({ event, client }) => {
 });
 
 // A typed reply and a tapped option take the same path, so both get the live timeline.
+// The timeline opens first, so the reply is visible in under a second while
+// steer spends ~2 s over ssh starting the turn. A turn already running keeps
+// its own timeline, and startStatus leaves it alone.
 async function steerAndAck(s, text, client) {
+  const busyBefore = Boolean(fresh(s.key)?.status_ts);
+  if (!busyBefore) await startStatus(s, 'Working').catch((e) => console.error('status', s.key, e.data?.error ?? e.message));
   try {
     const out = await ctl.steer(s.key, text);
     if (out.includes('queued')) await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: "Got it. I'll pick that up as soon as I finish this step." });
-    else await startStatus(s, 'Working');
-  } catch (e) { await fail(client, s, e); }
+  } catch (e) {
+    // Close the timeline this message opened; nothing is running behind it.
+    if (!busyBefore) await updateStatus(s.key, fresh(s.key)?.state ?? 'active', { busy: false }).catch(() => {});
+    await fail(client, s, e);
+  }
 }
 
 // One status line per turn, edited in place while the agent works, so a quiet
