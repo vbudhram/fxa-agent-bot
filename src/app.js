@@ -61,7 +61,18 @@ app.message(async ({ message, client }) => {
 // One status line per turn, edited in place while the agent works, so a quiet
 // thread never looks like a dead one. Posted at once on a reply: a short turn
 // can finish between two polls and would otherwise show nothing.
-async function startStatus(s, verb) {
+// Status posts and edits for one session run one at a time. Without this the
+// reply handler and the poll both saw no status line and both posted one.
+const chains = new Map();
+function serial(key, fn) {
+  const next = (chains.get(key) ?? Promise.resolve()).then(fn, fn);
+  chains.set(key, next.catch(() => {}));
+  return next;
+}
+const fresh = (key) => sessions.all().find((x) => x.key === key);
+
+const startStatus = (s, verb) => serial(s.key, () => startStatusNow(s, verb));
+async function startStatusNow(s, verb) {
   const cur = sessions.all().find((x) => x.key === s.key) ?? s;
   if (cur.status_ts) return;
   const text = `${spinner(0)} ${verb} · 0s`;
@@ -73,8 +84,13 @@ const VERB = { starting: 'Setting up', wrapping: 'Wrapping up', active: 'Working
 // STATUS_EMOJI names an animated custom emoji (a spinner GIF); without one the
 // hourglass flips on each edit so the line still visibly ticks.
 const spinner = (n) => process.env.STATUS_EMOJI || (n % 2 ? ':hourglass:' : ':hourglass_flowing_sand:');
-async function updateStatus(key, state, activity) {
-  const s = sessions.all().find((x) => x.key === key);
+// Writes the status fields itself, inside the serial section, so no caller can
+// overwrite a status line posted in between with stale fields.
+const updateStatus = (key, state, activity) => serial(key, async () => {
+  const s = fresh(key);
+  sessions.put({ ...s, ...(await updateStatusNow(s, state, activity)) });
+});
+async function updateStatusNow(s, state, activity) {
   const post = (text) => app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text });
   const edit = (text) => app.client.chat.update({ channel: s.channel, ts: s.status_ts, text });
   if (activity?.busy) {
@@ -134,9 +150,8 @@ setInterval(async () => {
         const msg = render(s.key, ev);
         if (msg) await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...msg });
       }
-      const status = await updateStatus(s.key, state, activity).catch((e) => { console.error('status', s.key, e.message); return {}; });
-      // Re-read: a reply handler may have written the record during this poll.
-      sessions.put({ ...(sessions.all().find((x) => x.key === s.key) ?? s), ...status, cursor, state });
+      sessions.put({ ...fresh(s.key), cursor, state });
+      await updateStatus(s.key, state, activity).catch((e) => console.error('status', s.key, e.message));
     } catch (e) {
       console.error('events', s.key, e.stderr || e.message);
     } finally {
