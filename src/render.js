@@ -61,3 +61,31 @@ export function render(key, ev) {
     default: return null;
   }
 }
+
+// A step title → the phase it belongs to, so a long run shows one timeline entry
+// per kind of work (with a count) instead of one per command. The command itself
+// becomes the entry's detail, without its leading `cd <dir> &&`.
+export function phase(step) {
+  const t = String(step ?? '');
+  if (!t.startsWith('Running ')) {
+    if (t.startsWith('Reading ')) return { kind: 'read', label: 'Reading files', detail: t.slice(8) };
+    if (t.startsWith('Editing ')) return { kind: 'edit', label: 'Editing files', detail: t.slice(8) };
+    if (/^(Searching|Finding)/.test(t)) return { kind: 'search', label: 'Searching the code', detail: t };
+    if (t.startsWith('Delegating')) return { kind: 'agent', label: 'Working in a subagent', detail: t.slice(12) };
+    if (t.startsWith('Updating the plan')) return { kind: 'plan', label: 'Planning', detail: '' };
+    if (t.startsWith('Using /')) return { kind: t, label: t, detail: '' }; // each skill is its own phase
+    return { kind: 'other', label: t || 'Working', detail: '' };
+  }
+  const cmd = t.slice(8).replace(/^(cd\s+\S+\s*(&&|;)\s*)+/, '').trim();
+  const head = cmd.split('|')[0];
+  const rules = [
+    [/\b(jest|vitest|mocha|playwright|test-unit)\b|\b(yarn|npm|nx) (run )?test\b/, 'test', 'Running tests'],
+    [/\b(eslint|tsc|prettier)\b|\bnx (run-many.*)?(lint|build)\b|\blint\b/, 'check', 'Type-checking and linting'],
+    [/^(grep|rg|egrep|find|ls|tree|git grep|ag)\b/, 'search', 'Searching the code'],
+    [/^(cat|sed -n|head|tail|wc|less|jq)\b/, 'read', 'Reading files'],
+    [/^(sed -i|perl -\S*i|mv|cp|rm|mkdir|tee|patch|touch)\b/, 'edit', 'Editing files'],
+    [/^git\b/, 'git', 'Checking git'],
+  ];
+  for (const [re, kind, label] of rules) if (re.test(head)) return { kind, label, detail: cmd };
+  return { kind: 'shell', label: 'Running commands', detail: cmd };
+}

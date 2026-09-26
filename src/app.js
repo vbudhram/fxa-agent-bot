@@ -1,7 +1,7 @@
 import bolt from '@slack/bolt';
 import * as ctl from './ctl.js';
 import * as sessions from './sessions.js';
-import { render, setupCard } from './render.js';
+import { render, setupCard, phase } from './render.js';
 
 const { App } = bolt;
 const list = (v) => (v || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -111,25 +111,31 @@ function streamOff(e) {
   streamOk = false;
   console.error(`native streaming unavailable (${e.data?.error ?? e.message}); using the status line`);
 }
+// One timeline entry per turn, updated in place: the current kind of work and a
+// running step count, with the latest command as its detail.
 async function updateStreamNow(s, state, activity) {
   const at = { channel: s.channel, ts: s.status_ts };
-  let n = s.step_n ?? 0, last = s.last_act;
-  const task = (id, title, status) => ({ type: 'task_update', id: `t${id}`, title: String(title).slice(0, 250), status });
+  let n = s.step_n ?? 0, title = s.last_act, detail = s.last_detail ?? '';
+  const task = (status) => ({ type: 'task_update', id: 't0', title: title.slice(0, 250), details: detail.slice(0, 250), status });
   if (activity?.busy) {
     const news = unsent.get(s.key) ?? [];
     unsent.delete(s.key);
     // Boot steps and the no-stream fallback come from the poll, not the watch.
-    if (!news.length && activity.text && activity.text !== last && !watchers.has(s.key)) news.push(activity.text);
-    const chunks = [];
-    for (const t of news) { chunks.push(task(n, last, 'complete')); n += 1; chunks.push(task(n, t, 'in_progress')); last = t; }
-    if (chunks.length) await app.client.apiCall('chat.appendStream', { ...at, chunks });
-    return { step_n: n, last_act: last };
+    if (!news.length && activity.text && activity.text !== s.last_step && !watchers.has(s.key)) news.push(activity.text);
+    if (!news.length) return {};
+    if (state !== 'starting') n += news.length; // boot steps are not the agent's steps
+    const p = phase(news.at(-1));
+    title = state === 'starting' ? `Setting up: ${news.at(-1)}` : `${p.label} · ${n} step${n === 1 ? '' : 's'}`;
+    detail = state === 'starting' ? '' : p.detail;
+    await app.client.apiCall('chat.appendStream', { ...at, chunks: [task('in_progress')] });
+    return { step_n: n, last_act: title, last_detail: detail, last_step: news.at(-1) };
   }
+  if (state !== 'starting' && n) { title = `Done · ${n} step${n === 1 ? '' : 's'}`; detail = ''; }
   await app.client.apiCall('chat.stopStream', { ...at, chunks: [
-    task(n, last, 'complete'),
+    task('complete'),
     { type: 'markdown_text', text: `Finished in ${secs(Date.now() - s.busy_since)}` },
   ] });
-  return { status_ts: null, status_kind: null, busy_since: null, last_act: null, step_n: null };
+  return { status_ts: null, status_kind: null, busy_since: null, last_act: null, last_detail: null, last_step: null, step_n: null };
 }
 
 // While a turn runs, a watch stream feeds the status line within a second, and
