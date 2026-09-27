@@ -73,3 +73,14 @@ test('the Home tab lists your sessions, newest first, with thread and PR links',
   assert.equal(rows[1].accessory, undefined);
   assert.match(homeView([], {}, now).blocks.at(-1).text.text, /No sessions yet/);
 });
+
+test('bot errors become records that group like the controller\'s', async () => {
+  const { toRecord, signature } = await import('../src/errors.js');
+  const r = toRecord(['post', 'agent-ab12cd', 'question', 'invalid_blocks'], new Date('2026-09-27T12:00:00.123Z'));
+  assert.deepEqual({ source: r.source, kind: r.kind, key: r.key, where: r.where, message: r.message, at: r.at },
+    { source: 'bot', kind: 'post', key: 'agent-ab12cd', where: 'post', message: 'question invalid_blocks', at: '2026-09-27T12:00:00Z' });
+  const a = toRecord(['agent-aaaa11', 'ERROR: agent-aaaa11 is busy']);
+  assert.equal(a.where, 'bot action'); assert.equal(a.key, 'agent-aaaa11');
+  // Same masking and hash as lib/errors.sh: shasum of "where|message".
+  assert.equal(signature('x.sh:10 f', 'agent-aaaa11 failed at /tmp/a/b line 7'), signature('x.sh:99 f', 'agent-bbbb22 failed at /var/c line 8'));
+});

@@ -3,10 +3,12 @@ import { basename } from 'node:path';
 import { statSync, readFileSync, readdirSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import * as ctl from './ctl.js';
+import { installErrorLog } from './errors.js';
 import * as sessions from './sessions.js';
 import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, homeView } from './render.js';
 
 const { App } = bolt;
+installErrorLog(ctl.errorsPush);
 const list = (v) => (v || '').split(',').map((s) => s.trim()).filter(Boolean);
 const CHANNELS = list(process.env.ALLOWED_CHANNELS);
 const USERS = list(process.env.ALLOWED_USERS); // ponytail: static allowlist, Google group check later
