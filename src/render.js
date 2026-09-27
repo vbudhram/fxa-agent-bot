@@ -149,7 +149,9 @@ export function render(key, ev) {
         text: plain(ev.text || 'All set.'),
         blocks: [
           md(ev.text || 'All set.'),
-          buttons(key, ['Diff', 'diff'], ['Push branch', 'push_branch'], ['Open PR', 'open_pr'], ['Stop', 'stop']),
+          // No changed file: nothing to diff, push or open a PR for.
+          ev.changes === 0 ? buttons(key, ['Stop', 'stop'])
+            : buttons(key, ['Diff', 'diff'], ['Push branch', 'push_branch'], ['Open PR', 'open_pr'], ['Stop', 'stop']),
         ],
       };
       return null; // working: stay quiet

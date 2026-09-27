@@ -764,6 +764,7 @@ function explain(e, key) {
   if (op) return key && !firstOperatorNote(key, op.kind) ? null : op.text;
   const line = (err.match(/ERROR: ([^\n]+)/) ?? [])[1];
   if (/takes no messages/.test(err)) return 'This session has ended. Tag me again to start a new one.';
+  if (/nothing to push: no files changed/.test(err)) return 'There is nothing to push or open a PR for: I have not changed any files in this session.';
   if (/no Claude session id/.test(err)) return "I'm still starting up. Send that again in a minute.";
   if (/ETIMEDOUT|timed out|SIGTERM/.test(err)) return 'The sandbox did not answer in time. Try again, or `!restart` to start fresh.';
   return `Something went wrong${line ? `: ${line}` : ''}. Try again, or \`!restart\` to start fresh.`;
