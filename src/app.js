@@ -639,16 +639,27 @@ async function interrupt(s, client, body) {
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Interrupted. The work so far is kept. Tell me what to do instead.' });
 }
 const wrapping = new Set();
-ownerAction('open_pr', async (s, client) => {
-  if (wrapping.has(s.key) || fresh(s.key)?.state === 'wrapping') return;
+// A tap must show at once: swap the clicked buttons for a line that says what started.
+async function wrapTap(s, client, body, what) {
+  if (wrapping.has(s.key) || fresh(s.key)?.state === 'wrapping') {
+    working(s, body, 'Already wrapping up. I will post here when it is done.');
+    return false;
+  }
   wrapping.add(s.key); setTimeout(() => wrapping.delete(s.key), 30_000);
+  await client.chat.update({ channel: s.channel, ts: body.message.ts, text: body.message.text,
+    blocks: [...(body.message.blocks ?? []).filter((x) => x.type !== 'actions'),
+      { type: 'context', elements: [{ type: 'mrkdwn', text: `${what} · started by <@${body.user.id}>` }] }] }).catch(() => {});
+  if (fresh(s.key)?.buttons_msg?.ts === body.message.ts) sessions.patch(s.key, { buttons_msg: null });
+  return true;
+}
+ownerAction('open_pr', async (s, client, action, body) => {
+  if (!await wrapTap(s, client, body, 'Open PR')) return;
   // The note goes first; finish then returns at once and the poll posts the PR link.
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Wrapping up: review, PR description, then a draft PR. I will post the link here.' });
   await ctl.finish(s.key);
 });
-ownerAction('push_branch', async (s, client) => {
-  if (wrapping.has(s.key) || fresh(s.key)?.state === 'wrapping') return;
-  wrapping.add(s.key); setTimeout(() => wrapping.delete(s.key), 30_000);
+ownerAction('push_branch', async (s, client, action, body) => {
+  if (!await wrapTap(s, client, body, 'Push branch')) return;
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Wrapping up: review, then push the branch. No PR. The session stays open.' });
   await ctl.finish(s.key, true);
 });
