@@ -47,6 +47,10 @@ app.event('app_mention', async ({ event, client }) => {
   const cur = event.thread_ts && sessions.get(event.channel, event.thread_ts);
   if (cur && LIVE.includes(cur.state)) return; // the steer path handles it
   let prompt = strip(event.text);
+  // --codex or --claude picks the agent; otherwise AGENT_RUNTIME, else Claude.
+  const flag = prompt.match(/(^|\s)--(codex|claude)(?=\s|$)/);
+  const runtime = flag ? flag[2] : (process.env.AGENT_RUNTIME || undefined);
+  if (flag) prompt = prompt.replace(flag[0], ' ').trim();
   if (!prompt) return;
   if (!prompt.startsWith('!')) seen(event.channel, event.ts);
   const thread_ts = thread;
@@ -63,14 +67,14 @@ app.event('app_mention', async ({ event, client }) => {
   // The last session here stopped (a pause, Stop, or the runner limit): continue
   // its conversation and changes instead of starting from scratch.
   const resume_from = cur && ['stopped', 'failed', 'paused'].includes(cur.state) ? cur.key : undefined;
-  pending.set(key, { owner: event.user, channel: event.channel, thread_ts, resume_from });
+  pending.set(key, { owner: event.user, channel: event.channel, thread_ts, resume_from, runtime });
   // The card goes up first; reading a long thread for context can take seconds.
   const { ts } = await client.chat.postMessage({ channel: event.channel, thread_ts,
     text: resume_from ? `Picking up where we left off, in ${START_DELAY_S} seconds.` : `Starting in ${START_DELAY_S} seconds.`,
-    blocks: startCard(key, prompt, START_DELAY_S, Boolean(resume_from)) });
+    blocks: startCard(key, prompt, START_DELAY_S, Boolean(resume_from), flag ? runtime : undefined) });
   if (event.thread_ts) prompt += await threadContext(client, event);
   if (!pending.has(key)) return;
-  pending.set(key, { prompt, owner: event.user, channel: event.channel, thread_ts, card_ts: ts, resume_from, ack_ts: event.ts,
+  pending.set(key, { prompt, owner: event.user, channel: event.channel, thread_ts, card_ts: ts, resume_from, runtime, ack_ts: event.ts,
     timer: setTimeout(() => begin(key, client).catch((e) => console.error('begin', key, e.message)), START_DELAY_S * 1000) });
 });
 
@@ -92,7 +96,7 @@ async function launch(key, client, since = Date.now()) {
   const s = fresh(key);
   if (!s || s.state !== 'queued') return; // stopped or restarted while waiting
   try {
-    await ctl.task({ key, owner: s.owner, prompt: s.prompt, resumeFrom: s.resume_from });
+    await ctl.task({ key, owner: s.owner, prompt: s.prompt, resumeFrom: s.resume_from, runtime: s.resume_from ? undefined : s.runtime });
   } catch (e) {
     if (!/cap \d+ \(FXA_SESSION_MAX\)/.test(e.stderr ?? '')) { sessions.patch(key, { state: 'failed' }); await fail(client, s, e); return; }
     if (Date.now() - since > QUEUE_GIVE_UP_MS) {
