@@ -42,3 +42,18 @@ test('PR follow-up posts only what changed', async () => {
   assert.deepEqual(prChanges(infraRed, reviewed), ['rev1 approved the PR.']);
   assert.deepEqual(prChanges(reviewed, { ...reviewed, state: 'MERGED' }), ['The PR merged. 🎉']);
 });
+
+test('several questions get their own options and buttons', () => {
+  const msg = render('agent-x', { type: 'question', text: 'Intro',
+    questions: [{ q: 'Where?', options: ['Throwaway', 'Storybook'] }, { q: 'Which?', options: ['All three', 'Change one', 'Only A'] }] });
+  const ids = msg.blocks.map((b) => b.block_id ?? b.type);
+  assert.deepEqual(ids, ['markdown', 'q_0', 'answers_0', 'q_1', 'answers_1', 'answer_hint']);
+  assert.equal(msg.blocks[4].elements.length, 3);
+  assert.deepEqual(JSON.parse(msg.blocks[4].elements[2].value), { key: 'agent-x', q: 1, choice: 'Only A' });
+  assert.match(msg.blocks[1].text.text, /^\*1\. Where\?\*\n\*1\*  Throwaway\n\*2\*  Storybook$/);
+});
+
+test('one question keeps its options list apart from the text', () => {
+  const msg = render('agent-x', { type: 'question', text: '1. old list', options: ['a', 'b'] });
+  assert.deepEqual(msg.blocks.map((b) => b.block_id ?? b.type), ['markdown', 'answer_opts', 'actions', 'answer_hint']);
+});

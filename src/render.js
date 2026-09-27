@@ -97,6 +97,28 @@ export function render(key, ev) {
     case 'stage': return { text: `_${esc(ev.text)}_` };
     case 'plan': return { text: `Here's my plan:\n${esc(ev.text)}\nSound right? Reply here to adjust.` };
     case 'question': {
+      // Several decisions: each question gets its own options and its own row of
+      // number buttons; the bot sends the answers together once each has one.
+      if (ev.questions?.length) {
+        const qs = ev.questions.slice(0, 5);
+        return {
+          text: plain(ev.text || qs[0].q || 'A few questions'),
+          blocks: [
+            ...(ev.text ? [md(ev.text)] : []),
+            ...qs.flatMap((g, i) => {
+              const opts = g.options.slice(0, 5);
+              return [
+                { type: 'section', block_id: `q_${i}`, text: { type: 'mrkdwn',
+                  text: `*${i + 1}. ${esc(g.q ?? 'Question').slice(0, 300)}*\n${opts.map((o, j) => `*${j + 1}*  ${esc(o).slice(0, 500)}`).join('\n')}` } },
+                { type: 'actions', block_id: `answers_${i}`, elements: opts.map((o, j) => ({
+                  type: 'button', action_id: `answer_${i}_${j}`, text: { type: 'plain_text', text: String(j + 1) },
+                  value: JSON.stringify({ key, q: i, choice: o.slice(0, 1800) }), accessibility_label: o.slice(0, 75) })) },
+              ];
+            }),
+            { type: 'context', block_id: 'answer_hint', elements: [{ type: 'mrkdwn', text: 'Tap one answer for each question, or reply in the thread.' }] },
+          ],
+        };
+      }
       // Slack cuts a button label short (hard cap 75 chars, far less on a
       // phone), so the options are written out as a numbered list and the
       // buttons carry only the number. The full option rides in the value.

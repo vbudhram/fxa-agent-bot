@@ -493,15 +493,16 @@ const finishTurn = (key, msg, ev) => serial(key, async () => {
   const actions = (msg.blocks ?? []).filter((b) => b.type === 'actions' || b.block_id === 'answer_hint');
   if (s.status_kind === 'stream' && s.status_ts) {
     const summary = turnSummary(s, 'Done');
-    // The rendered answer: a question carries its numbered options in it.
-    const body = (msg.blocks ?? []).find((b) => b.type === 'markdown') ?? md(ev.text || 'Over to you.');
+    // The rendered answer and, for a question, its options lists; the buttons follow.
+    const body = (msg.blocks ?? []).filter((b) => b.type !== 'actions' && b.block_id !== 'answer_hint');
+    if (!body.length) body.push(md(ev.text || 'Over to you.'));
     try {
       await app.client.apiCall('chat.stopStream', { channel: s.channel, ts: s.status_ts,
         chunks: [{ type: 'task_update', id: 't0', title: summary, status: 'complete' }] });
       // Rewrite the finished stream: summary, answer, and this turn's buttons.
       // It also drops the Interrupt button, which a stream cannot remove.
       const steps = checklistLine(s);
-      const kept = [{ type: 'context', elements: [{ type: 'mrkdwn', text: summary }, ...(steps ? [{ type: 'mrkdwn', text: steps.slice(0, 2900) }] : [])] }, body];
+      const kept = [{ type: 'context', elements: [{ type: 'mrkdwn', text: summary }, ...(steps ? [{ type: 'mrkdwn', text: steps.slice(0, 2900) }] : [])] }, ...body];
       await app.client.chat.update({ channel: s.channel, ts: s.status_ts, text: msg.text, blocks: [...kept, ...actions] });
       sessions.patch(s.key, STATUS_CLEAR);
       if (actions.length) await retireButtons(key, { ts: s.status_ts, text: msg.text, blocks: kept });
@@ -678,7 +679,7 @@ ownerAction('stop', async (s, client, action, body) => {
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: await stoppedText(s.key) })
     .finally(() => stopping.delete(s.key));
 });
-app.action(/^answer_\d+$/, async ({ ack, body, action, client }) => {
+app.action(/^answer_\d+(_\d+)?$/, async ({ ack, body, action, client }) => {
   await ack();
   // Buttons posted before the value carried JSON hold only the key.
   let v; try { v = JSON.parse(action.value); } catch { v = { key: action.value, choice: action.text.text }; }
@@ -691,12 +692,37 @@ app.action(/^answer_\d+$/, async ({ ack, body, action, client }) => {
     await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: body.user.id, text: `Only <@${s.owner}> can answer in this session.` }).catch(() => {});
     return;
   }
+  if (Number.isInteger(v.q)) { await answerOneOfSeveral(s, v, body, client); return; }
   // Swap the buttons for the choice, so the question cannot be answered twice.
   const blocks = (body.message.blocks ?? []).filter((b) => b.type !== 'actions' && b.block_id !== 'answer_hint')
     .concat({ type: 'context', elements: [{ type: 'mrkdwn', text: `<@${body.user.id}> chose: *${v.choice.slice(0, 200)}*` }] });
   await client.chat.update({ channel: s.channel, ts: body.message.ts, text: body.message.text, blocks }).catch(() => {});
   if (fresh(s.key).buttons_msg?.ts === body.message.ts) sessions.patch(s.key, { buttons_msg: null });
   const answer = body.user.id === s.owner ? v.choice : `(From someone else in the thread, not the person who started this session.)\n${v.choice}`;
+  await steerAndAck(s, answer, client, body.user.id);
+});
+
+// One answer of several: swap that question's buttons for the choice, and send
+// the answers together once every question has one. Serial per session, so two
+// fast taps cannot lose each other's answer.
+const answerOneOfSeveral = (s, v, body, client) => serial(s.key, async () => {
+  const msgBlocks = body.message.blocks ?? [];
+  const groups = msgBlocks.filter((b) => /^(answers|answered)_\d+$/.test(b.block_id ?? '')).length;
+  const q = (msgBlocks.find((b) => b.block_id === `q_${v.q}`)?.text?.text ?? '').split('\n')[0].replace(/^\*\d+\.\s*|\*$/g, '');
+  const cur = fresh(s.key).answers_pending;
+  const pend = cur?.ts === body.message.ts ? cur : { ts: body.message.ts, got: {} };
+  pend.got[v.q] = { q, choice: v.choice, by: body.user.id };
+  const done = Object.keys(pend.got).length >= groups;
+  const blocks = msgBlocks
+    .map((b) => (b.block_id === `answers_${v.q}` ? { type: 'context', block_id: `answered_${v.q}`,
+      elements: [{ type: 'mrkdwn', text: `<@${body.user.id}> chose: *${v.choice.slice(0, 200)}*` }] } : b))
+    .filter((b) => !done || (b.type !== 'actions' && b.block_id !== 'answer_hint'));
+  await client.chat.update({ channel: s.channel, ts: body.message.ts, text: body.message.text, blocks }).catch(() => {});
+  if (!done) { sessions.patch(s.key, { answers_pending: pend }); return; }
+  sessions.patch(s.key, { answers_pending: null, ...(fresh(s.key).buttons_msg?.ts === body.message.ts ? { buttons_msg: null } : {}) });
+  const lines = Object.keys(pend.got).sort((a, b) => a - b).map((i) => `${Number(i) + 1}. ${pend.got[i].q} → ${pend.got[i].choice}`);
+  const others = Object.values(pend.got).some((a) => a.by !== s.owner);
+  const answer = `${others ? '(Some answers are from someone else in the thread, not the person who started this session.)\n' : ''}My answers:\n${lines.join('\n')}`;
   await steerAndAck(s, answer, client, body.user.id);
 });
 
