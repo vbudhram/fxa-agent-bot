@@ -363,9 +363,13 @@ function streamOff(e) {
 async function updateStreamNow(s, state, activity) {
   const at = { channel: s.channel, ts: s.status_ts };
   let n = s.step_n ?? 0, t = s.task_n ?? 0, kind = s.cur_kind ?? null, count = s.cur_count ?? 0, label = s.cur_label ?? s.last_act;
+  let lines = s.cur_lines ?? 0;
   const row = (id, title, status, details) => ({ type: 'task_update', id: `t${id}`, title: String(title).slice(0, 250),
     ...(details ? { details: details.slice(0, 250) } : {}), status });
-  const rowTitle = () => (count ? `${label} · ${count}` : label);
+  // Long turns: the running row shows the turn's time, so a quiet 15-minute
+  // test run still visibly moves.
+  const took = () => { const m = Math.floor((Date.now() - (s.busy_since ?? Date.now())) / 60_000); return m ? ` · ${m}m` : ''; };
+  const rowTitle = (running = false) => (count ? `${label} · ${count}` : label) + (running ? took() : '');
   if (activity?.busy) {
     const news = unsent.get(s.key) ?? [];
     unsent.delete(s.key);
@@ -373,7 +377,12 @@ async function updateStreamNow(s, state, activity) {
     if (!news.length && activity.text && activity.text !== s.last_step && !watchers.has(s.key)) news.push(activity.text);
     // Setup refreshes every poll, so its clock keeps moving between steps.
     if (!news.length && state === 'starting' && s.last_step) news.push(s.last_step);
-    if (!news.length) return {};
+    // Nothing new: refresh the running row's clock once a minute, no more.
+    if (!news.length) {
+      if (state === 'starting' || !kind || Date.now() - (s.title_at ?? 0) < 60_000) return {};
+      await app.client.apiCall('chat.appendStream', { ...at, chunks: [row(t, rowTitle(true), 'in_progress')] });
+      return { title_at: Date.now() };
+    }
     if (state === 'starting') {
       const up = Math.round((Date.now() - (s.busy_since ?? Date.now())) / 1000);
       label = `Setting up: ${news.at(-1)} · ${up}s of about ${SETUP_EXPECT_S}s`;
@@ -390,15 +399,19 @@ async function updateStreamNow(s, state, activity) {
       if (st.kind !== kind) {
         chunks.push(row(t, rowTitle(), 'complete'));
         if (count) done.push(rowTitle()); // work rows only, not the opening one
-        t += 1; kind = st.kind; label = st.label; count = 1;
-        chunks.push(row(t, rowTitle(), 'in_progress', line));
+        t += 1; kind = st.kind; label = st.label; count = 1; lines = 1;
+        chunks.push(row(t, rowTitle(true), 'in_progress', line));
       } else {
-        count += 1;
-        chunks.push(row(t, rowTitle(), 'in_progress', `\n${line}`));
+        // Details only append, so a long row stops listing steps after a while;
+        // its count keeps going.
+        count += 1; lines += 1;
+        const more = lines <= DETAIL_LINES ? `\n${line}` : lines === DETAIL_LINES + 1 ? '\n… more steps' : '';
+        chunks.push(row(t, rowTitle(true), 'in_progress', more));
       }
     }
     await app.client.apiCall('chat.appendStream', { ...at, chunks });
-    return { step_n: n, task_n: t, cur_kind: kind, cur_count: count, cur_label: label, last_act: rowTitle(), last_step: news.at(-1), rows_done: done };
+    return { step_n: n, task_n: t, cur_kind: kind, cur_count: count, cur_label: label, cur_lines: lines, title_at: Date.now(),
+      last_act: rowTitle(), last_step: news.at(-1), rows_done: done };
   }
   const summary = turnSummary(s, s.interrupted ? 'Interrupted' : 'Done');
   await app.client.apiCall('chat.stopStream', { ...at, chunks: [row(t, rowTitle(), 'complete')] });
@@ -406,8 +419,9 @@ async function updateStreamNow(s, state, activity) {
   return { ...STATUS_CLEAR, interrupted: null };
 }
 
+const DETAIL_LINES = 15; // steps listed per checklist row before "… more steps"
 const SETUP_EXPECT_S = 80; // measured boot to a running agent, 75-90 s
-const STATUS_CLEAR = { status_ts: null, status_kind: null, busy_since: null, last_act: null, last_detail: null, last_step: null, step_n: null, task_n: null, cur_kind: null, cur_count: null, cur_label: null, rows_done: null, interrupted: null };
+const STATUS_CLEAR = { status_ts: null, status_kind: null, busy_since: null, last_act: null, last_detail: null, last_step: null, step_n: null, task_n: null, cur_kind: null, cur_count: null, cur_label: null, cur_lines: null, title_at: null, rows_done: null, interrupted: null };
 // The finished turn's checklist, compact: every work row, ticked.
 const checklistLine = (s) => {
   const rows = [...(s.rows_done ?? []), ...(s.cur_count ? [`${s.cur_label} · ${s.cur_count}`] : [])];
