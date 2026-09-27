@@ -3,7 +3,7 @@ import { basename } from 'node:path';
 import { statSync, readFileSync } from 'node:fs';
 import * as ctl from './ctl.js';
 import * as sessions from './sessions.js';
-import { render, startCard, phase, md, buttons } from './render.js';
+import { render, startCard, stage, md, buttons } from './render.js';
 
 const { App } = bolt;
 const list = (v) => (v || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -382,16 +382,19 @@ async function updateStreamNow(s, state, activity) {
     }
     const chunks = [], done = [...(s.rows_done ?? [])];
     for (const step of news) {
-      const p = phase(step);
+      // A step with no stage of its own (a misc command) joins the current row;
+      // before any row exists it opens an exploring one.
+      const st = stage(step) ?? (kind ? { kind, label } : { kind: 'explore', label: 'Exploring the code' });
+      const line = String(step).slice(0, 200);
       n += 1;
-      if (p.kind !== kind) {
+      if (st.kind !== kind) {
         chunks.push(row(t, rowTitle(), 'complete'));
         if (count) done.push(rowTitle()); // work rows only, not the opening one
-        t += 1; kind = p.kind; label = p.label; count = 1;
-        chunks.push(row(t, rowTitle(), 'in_progress', p.detail));
+        t += 1; kind = st.kind; label = st.label; count = 1;
+        chunks.push(row(t, rowTitle(), 'in_progress', line));
       } else {
         count += 1;
-        chunks.push(row(t, rowTitle(), 'in_progress', p.detail ? `\n${p.detail}` : ''));
+        chunks.push(row(t, rowTitle(), 'in_progress', `\n${line}`));
       }
     }
     await app.client.apiCall('chat.appendStream', { ...at, chunks });

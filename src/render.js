@@ -93,3 +93,19 @@ export function phase(step) {
   for (const [re, kind, label] of rules) if (re.test(head)) return { kind, label, detail: cmd };
   return { kind: 'shell', label: 'Running commands', detail: cmd };
 }
+
+// The checklist stage a step belongs to. Coarser than phase(): the agent flips
+// between reading and searching constantly, and a row per flip buried the
+// progress. null means "no new row": the step joins the current one.
+const STAGES = {
+  explore: 'Exploring the code', edit: 'Making changes', verify: 'Verifying', review: 'Reviewing',
+};
+export function stage(step) {
+  const t = String(step ?? '');
+  const { kind } = phase(t);
+  if (['read', 'search', 'git', 'agent', 'plan'].includes(kind)) return { kind: 'explore', label: STAGES.explore };
+  if (kind === 'edit') return { kind: 'edit', label: STAGES.edit };
+  if (kind === 'test' || kind === 'check' || /^Using \/fxa-(verify|functional-local|stack)/.test(t)) return { kind: 'verify', label: STAGES.verify };
+  if (t.startsWith('Using /')) return { kind: 'review', label: STAGES.review };
+  return null;
+}

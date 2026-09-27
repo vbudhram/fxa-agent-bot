@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { phase } from '../src/render.js';
+import { phase, stage } from '../src/render.js';
 
 test('commands group by the kind of work', () => {
   const k = (s) => phase(s).kind;
@@ -21,4 +21,16 @@ test('the detail drops the leading cd', () => {
 
 test('each skill is its own phase', () => {
   assert.notEqual(phase('Using /fxa-review-quick').kind, phase('Using /humanizer').kind);
+});
+
+test('stages group reading and searching, and leave misc steps in place', () => {
+  const k = (x) => stage(x)?.kind ?? null;
+  assert.equal(k('Reading index.tsx'), 'explore');
+  assert.equal(k('Searching for "signin"'), 'explore');
+  assert.equal(k('Running git log -5'), 'explore');
+  assert.equal(k('Editing index.tsx'), 'edit');
+  assert.equal(k('Running npx jest Signin'), 'verify');
+  assert.equal(k('Using /fxa-verify'), 'verify');
+  assert.equal(k('Using /fxa-review-quick'), 'review');
+  assert.equal(k('Running node scripts/x.js'), null);
 });
