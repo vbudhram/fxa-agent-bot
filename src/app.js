@@ -48,8 +48,9 @@ app.event('app_mention', async ({ event, client }) => {
   if (cur && LIVE.includes(cur.state)) return; // the steer path handles it
   let prompt = strip(event.text);
   // --codex or --claude picks the agent; otherwise AGENT_RUNTIME, else Claude.
-  const flag = prompt.match(/(^|\s)--(codex|claude)(?=\s|$)/);
-  let runtime = flag ? flag[2] : (process.env.AGENT_RUNTIME || 'claude');
+  // Phones autocorrect "--" to an em or en dash.
+  const flag = prompt.match(/(^|\s)(?:--|\u2014|\u2013)(codex|claude)(?=\s|$)/i);
+  let runtime = flag ? flag[2].toLowerCase() : (process.env.AGENT_RUNTIME || 'claude');
   if (flag) prompt = prompt.replace(flag[0], ' ').trim();
   if (!prompt) return;
   if (!prompt.startsWith('!')) seen(event.channel, event.ts);
