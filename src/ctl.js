@@ -29,9 +29,10 @@ async function withFile(text, fn) {
   }
 }
 
-export const task = ({ key, owner, prompt, resumeFrom, runtime }) => withFile(prompt, (f) =>
+export const task = ({ key, owner, prompt, resumeFrom, runtime, link }) => withFile(prompt, (f) =>
   run(['task', '--source', 'slack', '--id', key, '--owner', owner, '--prompt-file', f,
-    ...(resumeFrom ? ['--resume-from', resumeFrom] : []), ...(runtime ? ['--runtime', runtime] : [])]));
+    ...(resumeFrom ? ['--resume-from', resumeFrom] : []), ...(runtime ? ['--runtime', runtime] : []),
+    ...(link ? ['--link', link] : [])]));
 
 export const steer = (key, message) => withFile(message, (f) => run(['steer', key, '--message-file', f]));
 

@@ -98,8 +98,10 @@ const QUEUE_RETRY_MS = 30_000, QUEUE_GIVE_UP_MS = 30 * 60_000;
 async function launch(key, client, since = Date.now()) {
   const s = fresh(key);
   if (!s || s.state !== 'queued') return; // stopped or restarted while waiting
+  // The dashboard links each session to its thread; a lookup failure only drops the link.
+  const link = await app.client.chat.getPermalink({ channel: s.channel, message_ts: s.thread_ts }).then((r) => r.permalink, () => undefined);
   try {
-    await ctl.task({ key, owner: s.owner, prompt: s.prompt, resumeFrom: s.resume_from, runtime: s.resume_from ? undefined : s.runtime });
+    await ctl.task({ key, owner: s.owner, prompt: s.prompt, resumeFrom: s.resume_from, runtime: s.resume_from ? undefined : s.runtime, link });
   } catch (e) {
     if (!/cap \d+ \(FXA_SESSION_MAX\)/.test(e.stderr ?? '')) { sessions.patch(key, { state: 'failed' }); await fail(client, s, e); return; }
     if (Date.now() - since > QUEUE_GIVE_UP_MS) {
