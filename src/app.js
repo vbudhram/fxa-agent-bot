@@ -356,10 +356,16 @@ function streamOff(e) {
 }
 // One timeline entry per turn, updated in place: the current kind of work and a
 // running step count, with the latest command as its detail.
+// The live timeline is a checklist, as in Claude Tag: a new row each time the
+// kind of work changes (the previous row ticks), and within a row a running
+// count, with each new command appended to its details. Slack appends
+// task_update details rather than replacing them, so only the new line is sent.
 async function updateStreamNow(s, state, activity) {
   const at = { channel: s.channel, ts: s.status_ts };
-  let n = s.step_n ?? 0, title = s.last_act, detail = s.last_detail ?? '';
-  const task = (status) => ({ type: 'task_update', id: 't0', title: title.slice(0, 250), details: detail.slice(0, 250), status });
+  let n = s.step_n ?? 0, t = s.task_n ?? 0, kind = s.cur_kind ?? null, count = s.cur_count ?? 0, label = s.cur_label ?? s.last_act;
+  const row = (id, title, status, details) => ({ type: 'task_update', id: `t${id}`, title: String(title).slice(0, 250),
+    ...(details ? { details: details.slice(0, 250) } : {}), status });
+  const rowTitle = () => (count ? `${label} · ${count}` : label);
   if (activity?.busy) {
     const news = unsent.get(s.key) ?? [];
     unsent.delete(s.key);
@@ -368,23 +374,42 @@ async function updateStreamNow(s, state, activity) {
     // Setup refreshes every poll, so its clock keeps moving between steps.
     if (!news.length && state === 'starting' && s.last_step) news.push(s.last_step);
     if (!news.length) return {};
-    if (state !== 'starting') n += news.length; // boot steps are not the agent's steps
-    const p = phase(news.at(-1));
-    const up = Math.round((Date.now() - (s.busy_since ?? Date.now())) / 1000);
-    title = state === 'starting' ? `Setting up: ${news.at(-1)} · ${up}s of about ${SETUP_EXPECT_S}s` : `${p.label} · ${n} step${n === 1 ? '' : 's'}`;
-    detail = state === 'starting' ? '' : p.detail;
-    await app.client.apiCall('chat.appendStream', { ...at, chunks: [task('in_progress')] });
-    return { step_n: n, last_act: title, last_detail: detail, last_step: news.at(-1) };
+    if (state === 'starting') {
+      const up = Math.round((Date.now() - (s.busy_since ?? Date.now())) / 1000);
+      label = `Setting up: ${news.at(-1)} · ${up}s of about ${SETUP_EXPECT_S}s`;
+      await app.client.apiCall('chat.appendStream', { ...at, chunks: [row(t, label, 'in_progress')] });
+      return { last_act: label, cur_label: label, last_step: news.at(-1) };
+    }
+    const chunks = [], done = [...(s.rows_done ?? [])];
+    for (const step of news) {
+      const p = phase(step);
+      n += 1;
+      if (p.kind !== kind) {
+        chunks.push(row(t, rowTitle(), 'complete'));
+        if (count) done.push(rowTitle()); // work rows only, not the opening one
+        t += 1; kind = p.kind; label = p.label; count = 1;
+        chunks.push(row(t, rowTitle(), 'in_progress', p.detail));
+      } else {
+        count += 1;
+        chunks.push(row(t, rowTitle(), 'in_progress', p.detail ? `\n${p.detail}` : ''));
+      }
+    }
+    await app.client.apiCall('chat.appendStream', { ...at, chunks });
+    return { step_n: n, task_n: t, cur_kind: kind, cur_count: count, cur_label: label, last_act: rowTitle(), last_step: news.at(-1), rows_done: done };
   }
   const summary = turnSummary(s, s.interrupted ? 'Interrupted' : 'Done');
-  title = summary; detail = '';
-  await app.client.apiCall('chat.stopStream', { ...at, chunks: [task('complete')] });
+  await app.client.apiCall('chat.stopStream', { ...at, chunks: [row(t, rowTitle(), 'complete')] });
   await app.client.chat.update({ ...at, text: summary, blocks: [{ type: 'context', elements: [{ type: 'mrkdwn', text: summary }] }] }).catch(() => {});
   return { ...STATUS_CLEAR, interrupted: null };
 }
 
 const SETUP_EXPECT_S = 80; // measured boot to a running agent, 75-90 s
-const STATUS_CLEAR = { status_ts: null, status_kind: null, busy_since: null, last_act: null, last_detail: null, last_step: null, step_n: null, interrupted: null };
+const STATUS_CLEAR = { status_ts: null, status_kind: null, busy_since: null, last_act: null, last_detail: null, last_step: null, step_n: null, task_n: null, cur_kind: null, cur_count: null, cur_label: null, rows_done: null, interrupted: null };
+// The finished turn's checklist, compact: every work row, ticked.
+const checklistLine = (s) => {
+  const rows = [...(s.rows_done ?? []), ...(s.cur_count ? [`${s.cur_label} · ${s.cur_count}`] : [])];
+  return rows.length ? rows.map((r) => `✓ ${r}`).join('  ·  ') : null;
+};
 const turnSummary = (s, word) => {
   const n = s.step_n ?? 0, took = secs(Date.now() - (s.busy_since ?? Date.now()));
   return `${word} · ${n ? `${n} step${n === 1 ? '' : 's'} · ` : ''}${took}`;
@@ -404,7 +429,8 @@ const finishTurn = (key, msg, ev) => serial(key, async () => {
         chunks: [{ type: 'task_update', id: 't0', title: summary, status: 'complete' }] });
       // Rewrite the finished stream: summary, answer, and this turn's buttons.
       // It also drops the Interrupt button, which a stream cannot remove.
-      const kept = [{ type: 'context', elements: [{ type: 'mrkdwn', text: summary }] }, body];
+      const steps = checklistLine(s);
+      const kept = [{ type: 'context', elements: [{ type: 'mrkdwn', text: summary }, ...(steps ? [{ type: 'mrkdwn', text: steps.slice(0, 2900) }] : [])] }, body];
       await app.client.chat.update({ channel: s.channel, ts: s.status_ts, text: msg.text, blocks: [...kept, ...actions] });
       sessions.patch(s.key, STATUS_CLEAR);
       if (actions.length) await retireButtons(key, { ts: s.status_ts, text: msg.text, blocks: kept });
