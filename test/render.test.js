@@ -28,3 +28,17 @@ test('a summary with nothing known is empty', () => {
   assert.equal(summaryLine(null), '');
   assert.equal(summaryLine({ minutes: null, turns: 0, cost: null, diff: '' }), '');
 });
+
+test('PR follow-up posts only what changed', async () => {
+  const { prChanges } = await import('../src/render.js');
+  const url = 'https://github.com/mozilla/fxa/pull/1';
+  const running = { url, state: 'OPEN', ci: 'running', failing: [], infra: [], reviews: [] };
+  assert.deepEqual(prChanges(null, running), []);
+  const infraRed = { ...running, ci: 'fail', failing: ['extract'], infra: ['extract'] };
+  const [line] = prChanges(running, infraRed);
+  assert.match(line, /CI failed: extract\. That is a known failure/);
+  assert.deepEqual(prChanges(infraRed, infraRed), []);
+  const reviewed = { ...infraRed, reviews: [{ login: 'rev1', state: 'APPROVED' }] };
+  assert.deepEqual(prChanges(infraRed, reviewed), ['rev1 approved the PR.']);
+  assert.deepEqual(prChanges(reviewed, { ...reviewed, state: 'MERGED' }), ['The PR merged. 🎉']);
+});

@@ -62,6 +62,29 @@ export function operatorProblem(text) {
 }
 const noteLines = (notes) => (notes ?? []).length ? `\n${notes.map((n) => `⚠️ ${esc(n)}`).join('\n')}` : '';
 // One line about the whole session: time, turns, cost and the size of the change.
+// What changed on a session's PR since the thread last heard, as lines to post.
+// A first look reports settled CI and any reviews already in.
+export function prChanges(prev, cur) {
+  if (!cur) return [];
+  const out = [], was = prev ?? { ci: 'running', reviews: [] };
+  const checks = gh(cur.url) ? ` <${cur.url}/checks|Checks>` : '';
+  if (cur.ci !== was.ci && cur.ci === 'fail') {
+    const infraOnly = cur.failing.length && cur.failing.every((n) => cur.infra.includes(n));
+    out.push(`CI failed: ${esc(cur.failing.join(', '))}.${infraOnly ? ' That is a known failure in the repo\'s CI setup, not in the change.' : ''}${checks}`);
+  } else if (cur.ci !== was.ci && cur.ci === 'pass') out.push('CI passed.');
+  const seen = new Map((was.reviews ?? []).map((r) => [r.login, r.state]));
+  for (const r of cur.reviews ?? []) {
+    if (seen.get(r.login) === r.state) continue;
+    const who = esc(r.login);
+    if (r.state === 'APPROVED') out.push(`${who} approved the PR.`);
+    else if (r.state === 'CHANGES_REQUESTED') out.push(`${who} asked for changes on the PR.`);
+    else if (r.state === 'COMMENTED') out.push(`${who} left review comments on the PR.`);
+  }
+  if (cur.state === 'MERGED' && was.state !== 'MERGED') out.push('The PR merged. 🎉');
+  if (cur.state === 'CLOSED' && was.state !== 'CLOSED') out.push('The PR was closed without merging.');
+  return out;
+}
+
 export function summaryLine(sm) {
   if (!sm) return '';
   const parts = [sm.minutes != null && `${sm.minutes} min`, sm.turns && `${sm.turns} turn${sm.turns === 1 ? '' : 's'}`,

@@ -4,7 +4,7 @@ import { statSync, readFileSync, readdirSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import * as ctl from './ctl.js';
 import * as sessions from './sessions.js';
-import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine } from './render.js';
+import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges } from './render.js';
 
 const { App } = bolt;
 const list = (v) => (v || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -860,6 +860,29 @@ async function pollOne(key) {
   }
 }
 setInterval(() => { for (const s of sessions.all()) pollOne(s.key); }, 5_000);
+
+// 4: after Open PR the thread follows the PR: CI results, reviews, and the merge
+// or close, for two weeks. One gh call per open PR every two minutes.
+const FOLLOW_MS = 14 * 86_400_000;
+let following = false;
+async function followPrs() {
+  if (following) return;
+  following = true;
+  try {
+    for (const s of sessions.all()) {
+      if (s.state !== 'pr_open' || s.pr_follow_done) continue;
+      const since = s.pr_follow_since ?? Date.now();
+      if (Date.now() - since > FOLLOW_MS) { sessions.patch(s.key, { pr_follow_done: true }); continue; }
+      const cur = await ctl.prStatus(s.key);
+      if (!cur) continue;
+      for (const text of prChanges(s.pr_seen, cur)) {
+        if (!s.muted) await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text }).catch((e) => console.error('follow', s.key, e.data?.error ?? e.message));
+      }
+      sessions.patch(s.key, { pr_seen: cur, pr_follow_since: since, ...(['MERGED', 'CLOSED'].includes(cur.state) ? { pr_follow_done: true } : {}) });
+    }
+  } finally { following = false; }
+}
+setInterval(followPrs, 120_000);
 // Watch streams run in their own process groups; end them with the bot.
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { for (const w of watchers.values()) w.stop(); process.exit(0); });
 
