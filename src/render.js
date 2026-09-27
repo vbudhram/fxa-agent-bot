@@ -42,22 +42,28 @@ export function render(key, ev) {
   switch (ev.type) {
     case 'stage': return { text: `_${ev.text}_` };
     case 'plan': return { text: `Here's my plan:\n${ev.text}\nSound right? Reply here to adjust.` };
-    case 'question': return {
-      text: plain(ev.text),
-      blocks: [
-        md(ev.text || 'Which way?'),
-        // Slack caps a label at 75 chars and rejects the message over it; the
-        // full option rides in the value and is what gets sent.
-        ...(ev.options?.length ? [{
-          type: 'actions',
-          elements: ev.options.slice(0, 5).map((o, i) => ({
-            type: 'button', action_id: `answer_${i}`,
-            text: { type: 'plain_text', text: o.length > 75 ? `${o.slice(0, 72)}...` : o },
-            value: JSON.stringify({ key, choice: o.slice(0, 1800) }),
-          })),
-        }] : []),
-      ],
-    };
+    case 'question': {
+      // Slack cuts a button label short (hard cap 75 chars, far less on a
+      // phone), so the options are written out as a numbered list and the
+      // buttons carry only the number. The full option rides in the value.
+      const opts = (ev.options ?? []).slice(0, 5);
+      const list = opts.map((o, i) => `${i + 1}. ${o}`).join('\n');
+      return {
+        text: plain(ev.text),
+        blocks: [
+          md(opts.length ? `${ev.text || 'Which way?'}\n\n${list}` : (ev.text || 'Which way?')),
+          ...(opts.length ? [{
+            type: 'actions',
+            elements: opts.map((o, i) => ({
+              type: 'button', action_id: `answer_${i}`,
+              text: { type: 'plain_text', text: String(i + 1) },
+              value: JSON.stringify({ key, choice: o.slice(0, 1800) }),
+              accessibility_label: o.slice(0, 75),
+            })),
+          }, { type: 'context', block_id: 'answer_hint', elements: [{ type: 'mrkdwn', text: 'Tap a number, or reply in the thread.' }] }] : []),
+        ],
+      };
+    }
     case 'turn_end':
       if (ev.status === 'needs-input') return { text: plain(ev.text || 'Over to you.'), blocks: [md(ev.text || 'Over to you.')] };
       if (ev.status === 'ready') return {

@@ -473,10 +473,12 @@ const turnSummary = (s, word) => {
 const finishTurn = (key, msg, ev) => serial(key, async () => {
   const s = fresh(key);
   settle(s);
-  const actions = (msg.blocks ?? []).filter((b) => b.type === 'actions');
+  // The buttons and their hint line go together; they are what retireButtons removes.
+  const actions = (msg.blocks ?? []).filter((b) => b.type === 'actions' || b.block_id === 'answer_hint');
   if (s.status_kind === 'stream' && s.status_ts) {
     const summary = turnSummary(s, 'Done');
-    const body = md(ev.text || 'Over to you.');
+    // The rendered answer: a question carries its numbered options in it.
+    const body = (msg.blocks ?? []).find((b) => b.type === 'markdown') ?? md(ev.text || 'Over to you.');
     try {
       await app.client.apiCall('chat.stopStream', { channel: s.channel, ts: s.status_ts,
         chunks: [{ type: 'task_update', id: 't0', title: summary, status: 'complete' }] });
@@ -500,7 +502,7 @@ async function postMsg(key, msg) {
   const s = fresh(key);
   if (s.muted) return;
   const { ts } = await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...msg });
-  const blocks = (msg.blocks ?? []).filter((b) => b.type !== 'actions');
+  const blocks = (msg.blocks ?? []).filter((b) => b.type !== 'actions' && b.block_id !== 'answer_hint');
   if (blocks.length !== (msg.blocks ?? []).length) await retireButtons(key, { ts, text: msg.text, blocks });
 }
 
@@ -655,7 +657,7 @@ app.action(/^answer_\d+$/, async ({ ack, body, action, client }) => {
     return;
   }
   // Swap the buttons for the choice, so the question cannot be answered twice.
-  const blocks = (body.message.blocks ?? []).filter((b) => b.type !== 'actions')
+  const blocks = (body.message.blocks ?? []).filter((b) => b.type !== 'actions' && b.block_id !== 'answer_hint')
     .concat({ type: 'context', elements: [{ type: 'mrkdwn', text: `<@${body.user.id}> chose: *${v.choice.slice(0, 200)}*` }] });
   await client.chat.update({ channel: s.channel, ts: body.message.ts, text: body.message.text, blocks }).catch(() => {});
   if (fresh(s.key).buttons_msg?.ts === body.message.ts) sessions.patch(s.key, { buttons_msg: null });
