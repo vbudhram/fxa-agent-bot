@@ -610,6 +610,10 @@ ownerAction('open_pr', async (s, client) => {
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Wrapping up: review, PR description, then a draft PR. I will post the link here.' });
   await ctl.finish(s.key);
 });
+ownerAction('push_branch', async (s, client) => {
+  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Wrapping up: review, then push the branch. No PR. The session stays open.' });
+  await ctl.finish(s.key, true);
+});
 ownerAction('stop', async (s, client) => {
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: STOPPED_TEXT(await stopSession(s.key)) });
 });
@@ -667,7 +671,7 @@ async function deliverMedia(key) {
 
 // 9: /fxa-agent status, and @fxa-agent !status outside a session thread, list
 // the sessions that are still going, with links.
-const STATE_WORD = { paused: 'paused (reply to resume)', queued: 'waiting for capacity', starting: 'setting up', active: 'working', wrapping: 'opening a PR', pr_open: 'PR open', stopped: 'stopped', failed: 'failed' };
+const STATE_WORD = { paused: 'paused (reply to resume)', queued: 'waiting for capacity', starting: 'setting up', active: 'working', wrapping: 'wrapping up', pr_open: 'PR open', stopped: 'stopped', failed: 'failed' };
 async function statusList(client, channel) {
   const live = sessions.all().filter((x) => !['stopped', 'failed'].includes(x.state) && x.channel === channel);
   if (!live.length) return 'No sessions are running in this channel. Tag @fxa-agent in a thread to start one.';

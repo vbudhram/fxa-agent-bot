@@ -64,11 +64,12 @@ export function render(key, ev) {
         text: plain(ev.text || 'All set.'),
         blocks: [
           md(ev.text || 'All set.'),
-          buttons(key, ['Diff', 'diff'], ['Open PR', 'open_pr'], ['Stop', 'stop']),
+          buttons(key, ['Diff', 'diff'], ['Push branch', 'push_branch'], ['Open PR', 'open_pr'], ['Stop', 'stop']),
         ],
       };
       return null; // working: stay quiet
     case 'pr': return { text: `Draft PR is up: ${ev.url}` };
+    case 'pushed': return { text: `Pushed \`${ev.branch}\`. <${ev.url}|Open a PR from it> when you are ready, or keep steering here.` };
     case 'ci': return { text: `CI: ${ev.text}` };
     case 'error': return { text: `Something went wrong: ${ev.text} Try again, or \`!restart\` to start fresh.` };
     default: return null;
