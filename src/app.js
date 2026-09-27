@@ -59,7 +59,7 @@ app.event('app_mention', async ({ event, client }) => {
   if (prompt.startsWith('!')) { if (!cur) await bang(null, prompt, { user: event.user, channel: event.channel, thread_ts, ts: event.ts }, client); return; }
   if (cur?.stop_failed) {
     await client.chat.postEphemeral({ channel: event.channel, thread_ts, user: event.user,
-      text: 'The last session here did not stop cleanly. `@fxa-agent !stop` first, so its runner is not left running.' }).catch(() => {});
+      text: 'The last session here did not stop cleanly. `@fxa-agent !stop` first, so its sandbox is not left running.' }).catch(() => {});
     return;
   }
   // Reserve the thread before any await: a second tag meanwhile would start a second session.
@@ -89,7 +89,7 @@ async function begin(key, client) {
   // Record the session before releasing the thread's reservation.
   sessions.put({ key, ...rest, cursor: 0, state: 'queued', started_at: Date.now() });
   pending.delete(key);
-  if (card_ts) await client.chat.update({ channel: p.channel, ts: card_ts, text: 'On it! Setup takes about a minute; the status below shows where I am.', blocks: [] }).catch(() => {});
+  if (card_ts) await client.chat.update({ channel: p.channel, ts: card_ts, text: 'On it! A sandbox takes about a minute to set up; the status below shows where I am.', blocks: [] }).catch(() => {});
   await launch(key, client);
 }
 
@@ -288,7 +288,7 @@ async function resumePaused(s, text, client) {
   const key = sessions.newKey();
   pending.set(key, { prompt: text, owner: s.owner, channel: s.channel, thread_ts: s.thread_ts, resume_from: s.key, ack_ts: fresh(s.key)?.ack_ts });
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts,
-    text: 'Picking up where we left off. Setting up takes about a minute; the status below shows where I am.' }).catch(() => {});
+    text: 'Picking up where we left off. A new sandbox takes about a minute to set up; the status below shows where I am.' }).catch(() => {});
   await begin(key, client);
 }
 
@@ -342,7 +342,7 @@ async function startStatusNow(s, verb) {
   const cur = fresh(s.key);
   if (!cur || cur.status_ts || cur.muted) return;
   steps.delete(s.key); unsent.delete(s.key);
-  const first = verb === 'Setting up' ? 'Setting up a runner' : `${verb} on it`;
+  const first = verb === 'Setting up' ? 'Setting up a sandbox' : `${verb} on it`;
   if (streamOk) {
     try {
       const { ts } = await app.client.apiCall('chat.startStream', {
@@ -405,7 +405,7 @@ async function updateStreamNow(s, state, activity) {
     }
     if (state === 'starting') {
       const up = Math.round((Date.now() - (s.busy_since ?? Date.now())) / 1000);
-      label = `Setting up: ${news.at(-1)} · ${up}s of about ${SETUP_EXPECT_S}s`;
+      label = `Setting up the sandbox: ${news.at(-1)} · ${up}s of about ${SETUP_EXPECT_S}s`;
       await app.client.apiCall('chat.appendStream', { ...at, chunks: [row(t, label, 'in_progress')] });
       return { last_act: label, cur_label: label, last_step: news.at(-1) };
     }
@@ -652,7 +652,7 @@ function explain(e) {
   const line = (err.match(/ERROR: ([^\n]+)/) ?? [])[1];
   if (/takes no messages/.test(err)) return 'This session has ended. Tag me again to start a new one.';
   if (/no Claude session id/.test(err)) return "I'm still starting up. Send that again in a minute.";
-  if (/ETIMEDOUT|timed out|SIGTERM/.test(err)) return 'The runner did not answer in time. Try again, or `!restart` to start fresh.';
+  if (/ETIMEDOUT|timed out|SIGTERM/.test(err)) return 'The sandbox did not answer in time. Try again, or `!restart` to start fresh.';
   return `Something went wrong${line ? `: ${line}` : ''}. Try again, or \`!restart\` to start fresh.`;
 }
 async function fail(client, s, e) {
@@ -715,10 +715,10 @@ async function mindLifetime(key, state) {
   const say = (text) => app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text });
   if (min >= PAUSE_AT_MIN) {
     await stopSession(key);
-    await say(`I paused: my runner reached its ${RUNNER_MIN}-minute limit. The work so far is saved as a patch on the host. Tag me again to start a new session.`);
+    await say(`I paused: my sandbox reached its ${RUNNER_MIN}-minute limit. The work so far is saved as a patch on the host. Tag me again to start a new session.`);
   } else if (min >= WARN_AT_MIN && !s.life_warned) {
     sessions.patch(key, { life_warned: true });
-    await say(`Heads-up: my runner stops at ${RUNNER_MIN} minutes. In about ${Math.round(PAUSE_AT_MIN - min)} minutes I'll pause and save the work so far.`);
+    await say(`Heads-up: my sandbox stops at ${RUNNER_MIN} minutes. In about ${Math.round(PAUSE_AT_MIN - min)} minutes I'll pause and save the work so far.`);
   }
 }
 
@@ -738,7 +738,7 @@ async function stopSession(key) {
   return ok;
 }
 const STOPPED_TEXT = (ok) => ok ? 'Stopped. The work so far is kept.'
-  : "I couldn't stop the runner cleanly. GCE deletes it at its 90-minute limit; `!stop` tries again.";
+  : "I couldn't stop the sandbox cleanly. It shuts down at its time limit anyway; `!stop` tries again.";
 
 // The 5 s poll owns state (replies, questions, errors, PR links); the watch
 // stream only makes the status line live between polls.
