@@ -11,10 +11,16 @@ const buttons = (key, ...names) => ({
 // markdown block renders it, where mrkdwn shows the raw syntax. The 12,000 char
 // cap is per message; a section block would have failed past 3,000.
 const MD_MAX = 11500;
-const md = (text) => ({
-  type: 'markdown',
-  text: text.length > MD_MAX ? `${text.slice(0, MD_MAX)}\n\n_(cut at ${MD_MAX} characters; ask for the rest)_` : text,
-});
+// Agent text is untrusted: it must not ping (@here, @channel, a user group)
+// or hide a link behind a label. Slack's special <...> forms become plain text.
+const defuse = (t) => String(t ?? '').replace(/<!(here|channel|everyone)[^>]*>/gi, '@$1').replace(/<!subteam\^[^>]*>/gi, '@group')
+  .replace(/<@[A-Z0-9]+>/g, '@someone');
+const esc = (t) => defuse(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const gh = (u) => (/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(pull\/\d+|compare\/[\w./%?=&-]+)$/.test(String(u ?? '')) ? u : '');
+const md = (raw) => {
+  const text = defuse(raw);
+  return { type: 'markdown', text: text.length > MD_MAX ? `${text.slice(0, MD_MAX)}\n\n_(cut at ${MD_MAX} characters; ask for the rest)_` : text };
+};
 // Notification and screen-reader fallback: the first line, plain.
 const plain = (text) => text.split('\n')[0].replace(/[*_`#>|]/g, '').slice(0, 150) || 'Reply';
 
@@ -40,8 +46,8 @@ export { md, buttons };
 
 export function render(key, ev) {
   switch (ev.type) {
-    case 'stage': return { text: `_${ev.text}_` };
-    case 'plan': return { text: `Here's my plan:\n${ev.text}\nSound right? Reply here to adjust.` };
+    case 'stage': return { text: `_${esc(ev.text)}_` };
+    case 'plan': return { text: `Here's my plan:\n${esc(ev.text)}\nSound right? Reply here to adjust.` };
     case 'question': {
       // Slack cuts a button label short (hard cap 75 chars, far less on a
       // phone), so the options are written out as a numbered list and the
@@ -74,10 +80,10 @@ export function render(key, ev) {
         ],
       };
       return null; // working: stay quiet
-    case 'pr': return { text: `Draft PR is up: ${ev.url}` };
-    case 'pushed': return { text: `Pushed \`${ev.branch}\`. <${ev.url}|Open a PR from it> when you are ready, or keep steering here.` };
-    case 'ci': return { text: `CI: ${ev.text}` };
-    case 'error': return { text: `Something went wrong: ${ev.text} Try again, or \`!restart\` to start fresh.` };
+    case 'pr': return gh(ev.url) ? { text: `Draft PR is up: ${gh(ev.url)}` } : { text: 'The draft PR is up; its link did not look like a GitHub PR, so check the repo.' };
+    case 'pushed': return { text: `Pushed \`${esc(ev.branch).replace(/`/g, '')}\`.${gh(ev.url) ? ` <${gh(ev.url)}|Open a PR from it> when you are ready, or keep steering here.` : ' Keep steering here, or open a PR from it on GitHub.'}` };
+    case 'ci': return { text: `CI: ${esc(ev.text)}` };
+    case 'error': return { text: `Something went wrong: ${esc(ev.text)} Try again, or \`!restart\` to start fresh.` };
     default: return null;
   }
 }

@@ -9,7 +9,8 @@ let sessions = {};
 try { sessions = JSON.parse(readFileSync(FILE, 'utf8')); } catch { /* first run */ }
 
 function save() {
-  writeFileSync(`${FILE}.tmp`, JSON.stringify(sessions, null, 2));
+  // Prompts carry other people's thread text: keep the file private.
+  writeFileSync(`${FILE}.tmp`, JSON.stringify(sessions, null, 2), { mode: 0o600 });
   renameSync(`${FILE}.tmp`, FILE);
 }
 

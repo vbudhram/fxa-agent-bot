@@ -1,6 +1,7 @@
 import bolt from '@slack/bolt';
 import { basename } from 'node:path';
-import { statSync, readFileSync } from 'node:fs';
+import { statSync, readFileSync, readdirSync, lstatSync } from 'node:fs';
+import { join } from 'node:path';
 import * as ctl from './ctl.js';
 import * as sessions from './sessions.js';
 import { render, startCard, stage, md, buttons, RUNTIMES } from './render.js';
@@ -72,9 +73,10 @@ app.event('app_mention', async ({ event, client }) => {
   const deadline = Date.now() + START_DELAY_S * 1000;
   pending.set(key, { prompt, owner: event.user, channel: event.channel, thread_ts, resume_from, runtime, deadline });
   // The card goes up first; reading a long thread for context can take seconds.
+  // A failed post must release the thread, or it stays reserved until a restart.
   const { ts } = await client.chat.postMessage({ channel: event.channel, thread_ts,
     text: resume_from ? `Picking up where we left off, in ${START_DELAY_S} seconds.` : `Starting in ${START_DELAY_S} seconds.`,
-    blocks: startCard(key, prompt, START_DELAY_S, Boolean(resume_from), runtime) });
+    blocks: startCard(key, prompt, START_DELAY_S, Boolean(resume_from), runtime) }).catch((e) => { pending.delete(key); throw e; })
   if (event.thread_ts) prompt += await threadContext(client, event);
   if (!pending.has(key)) return;
   // Spread the current entry: a Switch click while the thread was read changed its runtime.
@@ -173,7 +175,9 @@ async function threadContext(client, event) {
       if (!cursor) break;
     }
     const lines = msgs.filter((m) => m.ts !== event.ts && !m.bot_id && m.text)
-      .map((m) => `${m.user === event.user ? 'owner' : 'someone else'}: ${m.text.replace(/<@[A-Z0-9]+>/g, '@someone')}`);
+      .map((m) => { const who = m.user === event.user ? 'owner' : 'someone else';
+        // Label every line, so a line cannot pose as another speaker.
+        return m.text.replace(/<@[A-Z0-9]+>/g, '@someone').split('\n').map((l) => `${who}: ${l}`).join('\n'); });
     if (!lines.length) return '';
     let t = lines.join('\n');
     if (t.length > 6000) t = `...${t.slice(-6000)}`;
@@ -193,7 +197,8 @@ app.message(async ({ message, client }) => {
     : message.subtype === 'message_changed' && message.message?.subtype === 'tombstone' ? message.message.ts : null;
   if (gone) {
     const s = sessions.get(message.channel, gone);
-    if (s && LIVE.includes(s.state)) await stopSession(s.key);
+    const by = message.previous_message?.user ?? message.message?.user;
+    if (s && LIVE.includes(s.state) && (!by || by === s.owner)) await stopSession(s.key);
     return;
   }
   // A reply that also goes to the channel, or carries a file, still steers.
@@ -212,8 +217,9 @@ app.message(async ({ message, client }) => {
     return;
   }
   if (!LIVE.includes(s.state)) return;
-  if (s.state === 'queued' && (message.user === s.owner || STEER_ANYONE)) {
-    sessions.patch(s.key, { prompt: `${fresh(s.key).prompt}\n\nA later message in the thread:\n${text}` });
+  if (s.state === 'queued' && steers) {
+    const who = message.user === s.owner ? 'the person who started this session' : 'someone else in the thread, not the person who started this session';
+    sessions.patch(s.key, { prompt: `${fresh(s.key).prompt}\n\nA later message in the thread, from ${who}:\n${text}` });
     await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: message.user,
       text: "Got it. I'm still waiting for capacity; I'll include that when I start." }).catch(() => {});
     return;
@@ -309,7 +315,13 @@ async function resumePaused(s, text, client) {
 }
 
 // Every minute the ctl pauses sessions idle for 30 minutes (FXA_SESSION_IDLE_SECONDS).
+let sweeping = false;
 async function idleSweep() {
+  if (sweeping) return;
+  sweeping = true;
+  try { await sweepOnce(); } finally { sweeping = false; }
+}
+async function sweepOnce() {
   let paused = [];
   try { paused = await ctl.idleSweep(); } catch (e) { console.error('idle-sweep', e.stderr || e.message); return; }
   for (const key of paused) {
@@ -593,7 +605,7 @@ async function updateStatusNow(s, state, activity) {
 const ownerAction = (id, fn) => app.action(id, async ({ ack, body, action, client }) => {
   await ack();
   const s = sessions.all().find((x) => x.key === action.value);
-  if (!s || body.user.id !== s.owner) return;
+  if (!s || body.user.id !== s.owner || !allowed(s.channel, body.user.id)) return;
   await fn(s, client, action, body).catch((e) => fail(client, s, e));
 });
 
@@ -626,12 +638,17 @@ async function interrupt(s, client, body) {
   sessions.patch(s.key, { interrupted: true });
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Interrupted. The work so far is kept. Tell me what to do instead.' });
 }
+const wrapping = new Set();
 ownerAction('open_pr', async (s, client) => {
+  if (wrapping.has(s.key) || fresh(s.key)?.state === 'wrapping') return;
+  wrapping.add(s.key); setTimeout(() => wrapping.delete(s.key), 30_000);
   // The note goes first; finish then returns at once and the poll posts the PR link.
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Wrapping up: review, PR description, then a draft PR. I will post the link here.' });
   await ctl.finish(s.key);
 });
 ownerAction('push_branch', async (s, client) => {
+  if (wrapping.has(s.key) || fresh(s.key)?.state === 'wrapping') return;
+  wrapping.add(s.key); setTimeout(() => wrapping.delete(s.key), 30_000);
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Wrapping up: review, then push the branch. No PR. The session stays open.' });
   await ctl.finish(s.key, true);
 });
@@ -650,8 +667,11 @@ app.action(/^answer_\d+$/, async ({ ack, body, action, client }) => {
   await ack();
   // Buttons posted before the value carried JSON hold only the key.
   let v; try { v = JSON.parse(action.value); } catch { v = { key: action.value, choice: action.text.text }; }
-  const s = fresh(v.key);
-  if (!s || !allowed(s.channel, body.user.id)) return;
+  const s = fresh(v?.key);
+  if (!s || !allowed(s.channel, body.user.id) || typeof v.choice !== 'string') return;
+  // Only an option this message offered, for the session this thread holds.
+  const offered = (body.message.blocks ?? []).flatMap((b) => b.elements ?? []).map((e) => e.value).filter(Boolean);
+  if (!offered.includes(action.value) || s.channel !== body.channel?.id || s.thread_ts !== (body.message.thread_ts ?? body.message.ts)) return;
   if (!STEER_ANYONE && body.user.id !== s.owner) {
     await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: body.user.id, text: `Only <@${s.owner}> can answer in this session.` }).catch(() => {});
     return;
@@ -661,7 +681,8 @@ app.action(/^answer_\d+$/, async ({ ack, body, action, client }) => {
     .concat({ type: 'context', elements: [{ type: 'mrkdwn', text: `<@${body.user.id}> chose: *${v.choice.slice(0, 200)}*` }] });
   await client.chat.update({ channel: s.channel, ts: body.message.ts, text: body.message.text, blocks }).catch(() => {});
   if (fresh(s.key).buttons_msg?.ts === body.message.ts) sessions.patch(s.key, { buttons_msg: null });
-  await steerAndAck(s, v.choice, client, body.user.id);
+  const answer = body.user.id === s.owner ? v.choice : `(From someone else in the thread, not the person who started this session.)\n${v.choice}`;
+  await steerAndAck(s, answer, client, body.user.id);
 });
 
 // Every failure is explained in the thread with a next step, as in Claude Tag.
@@ -685,8 +706,15 @@ async function deliverMedia(key) {
   const s = fresh(key);
   try {
     const sent = new Set(s.media_sent ?? []);
-    const { dir, files } = await ctl.media(key);
+    const { dir } = await ctl.media(key);
     try {
+      // The files come from the sandbox, which the agent controls. Never trust
+      // ctl's printed list (a newline in a name could point outside dir): read
+      // dir here, and take only plain media files of a sane size.
+      const files = readdirSync(dir, { withFileTypes: true })
+        .filter((d) => d.isFile() && /^[A-Za-z0-9._-]{1,120}\.(png|jpe?g|gif|webp|mp4|webm)$/.test(d.name))
+        .map((d) => join(dir, d.name))
+        .filter((p) => { const st = lstatSync(p); return st.isFile() && st.size <= 50 * 1024 * 1024; });
       for (const path of files) {
         const id = `${basename(path)}:${statSync(path).size}`;
         if (sent.has(id)) continue;
