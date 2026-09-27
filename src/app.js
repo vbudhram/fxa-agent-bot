@@ -272,6 +272,15 @@ async function resumePaused(s, text, client) {
   await begin(key, client);
 }
 
+// The spinner tick. appendStream allows 100+ calls a minute, so the interval
+// grows with the number of live streams.
+function spinTick() {
+  const live = sessions.all().filter((x) => x.status_kind === 'stream' && x.status_ts && LIVE.includes(x.state));
+  for (const x of live) updateStatus(x.key, x.state, { busy: true, text: null, live: true, tick: true }).catch(() => {});
+  setTimeout(spinTick, 1500 * Math.max(1, live.length));
+}
+setTimeout(spinTick, 1500);
+
 // Every minute the ctl pauses sessions idle for 30 minutes (FXA_SESSION_IDLE_SECONDS).
 async function idleSweep() {
   let paused = [];
@@ -330,7 +339,7 @@ async function startStatusNow(s, verb) {
         chunks: [{ type: 'task_update', id: 't0', title: first, status: 'in_progress' },
           { type: 'blocks', blocks: [buttons(s.key, ['Interrupt', 'interrupt'])] }],
       });
-      sessions.patch(cur.key, { status_ts: ts, status_kind: 'stream', busy_since: Date.now(), status_opened_at: Date.now(), last_act: first, step_n: 0 });
+      sessions.patch(cur.key, { status_ts: ts, status_kind: 'stream', busy_since: Date.now(), status_opened_at: Date.now(), last_act: first, last_base: first, spin: 0, step_n: 0 });
       if (cur.state === 'active') ensureWatch(s.key);
       return;
     } catch (e) { streamOff(e); }
@@ -365,16 +374,23 @@ async function updateStreamNow(s, state, activity) {
     unsent.delete(s.key);
     // Boot steps and the no-stream fallback come from the poll, not the watch.
     if (!news.length && activity.text && activity.text !== s.last_step && !watchers.has(s.key)) news.push(activity.text);
-    // Setup refreshes every poll, so its clock keeps moving between steps.
-    if (!news.length && state === 'starting' && s.last_step) news.push(s.last_step);
-    if (!news.length) return {};
-    if (state !== 'starting') n += news.length; // boot steps are not the agent's steps
-    const p = phase(news.at(-1));
+    let base = s.last_base;
+    if (news.length) {
+      if (state !== 'starting') n += news.length; // boot steps are not the agent's steps
+      const p = phase(news.at(-1));
+      base = state === 'starting' ? `Setting up: ${news.at(-1)}` : `${p.label} · ${n} step${n === 1 ? '' : 's'}`;
+      detail = state === 'starting' ? '' : p.detail;
+    } else if (!activity.tick || !base) {
+      return {}; // nothing new, and no spinner tick to show
+    }
+    // Claude Code's spinner: the star steps on each tick, the verb every few.
+    const spin = s.spin ?? 0;
     const up = Math.round((Date.now() - (s.busy_since ?? Date.now())) / 1000);
-    title = state === 'starting' ? `Setting up: ${news.at(-1)} · ${up}s of about ${SETUP_EXPECT_S}s` : `${p.label} · ${n} step${n === 1 ? '' : 's'}`;
-    detail = state === 'starting' ? '' : p.detail;
+    title = state === 'starting'
+      ? `${SPIN[spin % SPIN.length]} ${base} · ${up}s of about ${SETUP_EXPECT_S}s`
+      : `${SPIN[spin % SPIN.length]} ${VERBS[Math.floor(spin / 6) % VERBS.length]}… · ${base}`;
     await app.client.apiCall('chat.appendStream', { ...at, chunks: [task('in_progress')] });
-    return { step_n: n, last_act: title, last_detail: detail, last_step: news.at(-1) };
+    return { step_n: n, last_act: title, last_detail: detail, last_base: base, spin: spin + 1, last_step: news.at(-1) ?? s.last_step };
   }
   const summary = turnSummary(s, s.interrupted ? 'Interrupted' : 'Done');
   title = summary; detail = '';
@@ -384,7 +400,9 @@ async function updateStreamNow(s, state, activity) {
 }
 
 const SETUP_EXPECT_S = 80; // measured boot to a running agent, 75-90 s
-const STATUS_CLEAR = { status_ts: null, status_kind: null, busy_since: null, last_act: null, last_detail: null, last_step: null, step_n: null, interrupted: null };
+const SPIN = ['·', '✢', '✳', '✶', '✻', '✽', '✻', '✶', '✳', '✢'];
+const VERBS = ['Pondering', 'Working', 'Crafting', 'Tinkering', 'Reasoning', 'Brewing', 'Computing', 'Cooking'];
+const STATUS_CLEAR = { status_ts: null, status_kind: null, busy_since: null, last_act: null, last_detail: null, last_step: null, last_base: null, spin: null, step_n: null, interrupted: null };
 const turnSummary = (s, word) => {
   const n = s.step_n ?? 0, took = secs(Date.now() - (s.busy_since ?? Date.now()));
   return `${word} · ${n ? `${n} step${n === 1 ? '' : 's'} · ` : ''}${took}`;
