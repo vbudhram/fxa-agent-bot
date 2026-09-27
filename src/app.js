@@ -201,6 +201,8 @@ app.message(async ({ message, client }) => {
     if (s && LIVE.includes(s.state) && (!by || by === s.owner)) await stopSession(s.key);
     return;
   }
+  // 7: an edited reply goes to the agent as a correction; it already has the old text.
+  if (message.subtype === 'message_changed') { await steerEdit(message, client); return; }
   // A reply that also goes to the channel, or carries a file, still steers.
   if (!message.thread_ts || message.bot_id) return;
   if (message.subtype && !['thread_broadcast', 'file_share'].includes(message.subtype)) return;
@@ -234,6 +236,24 @@ app.message(async ({ message, client }) => {
   sessions.patch(s.key, { ack_ts: message.ts });
   await steerAndAck(s, message.user === s.owner ? text : `(From someone else in the thread, not the person who started this session.)\n${text}`, client, message.user);
 });
+
+async function steerEdit(message, client) {
+  const m = message.message ?? {};
+  const before = strip(message.previous_message?.text), after = strip(m.text);
+  // A link unfurl or a reaction edits the message without changing its text.
+  if (!m.thread_ts || m.bot_id || !after || after === before || after.startsWith('!')) return;
+  const s = sessions.get(message.channel, m.thread_ts);
+  if (!s || !(allowed(message.channel, m.user) && (m.user === s.owner || STEER_ANYONE))) return;
+  // Only a message the agent received: one sent after the session started.
+  if (Number(m.ts) * 1000 < (s.started_at ?? Infinity) - 60_000) return;
+  const from = m.user === s.owner ? '' : '(From someone else in the thread, not the person who started this session.)\n';
+  const text = `${from}I edited an earlier message. It now says:\n${after}`;
+  if (s.state === 'queued') { sessions.patch(s.key, { prompt: `${fresh(s.key).prompt}\n\n${text}` }); return; }
+  seen(message.channel, m.ts);
+  sessions.patch(s.key, { ack_ts: m.ts });
+  if (s.state === 'paused') { await resumePaused(s, text, client); return; }
+  if (LIVE.includes(s.state)) await steerAndAck(s, text, client, m.user);
+}
 
 // Bang commands, as in Claude Tag: @fxa-agent !status, !help, and so on. The
 // ones that change the session are for its owner.
