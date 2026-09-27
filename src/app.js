@@ -660,7 +660,7 @@ ownerAction('open_pr', async (s, client, action, body) => {
 });
 ownerAction('push_branch', async (s, client, action, body) => {
   if (!await wrapTap(s, client, body, 'Push branch')) return;
-  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Wrapping up: review, then push the branch. No PR. The session stays open.' });
+  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Pushing the branch: a commit title, the safety checks, then the push. No PR, and the session stays open. The review runs when you open the PR.' });
   await ctl.finish(s.key, true);
 });
 const stopping = new Set();
