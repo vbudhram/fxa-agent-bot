@@ -614,8 +614,16 @@ ownerAction('push_branch', async (s, client) => {
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Wrapping up: review, then push the branch. No PR. The session stays open.' });
   await ctl.finish(s.key, true);
 });
-ownerAction('stop', async (s, client) => {
-  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: STOPPED_TEXT(await stopSession(s.key)) });
+const stopping = new Set();
+ownerAction('stop', async (s, client, action, body) => {
+  // Checked before any await: two fast taps both passed a later check.
+  if (stopping.has(s.key) || !LIVE.includes(fresh(s.key)?.state)) return;
+  stopping.add(s.key);
+  await client.chat.update({ channel: s.channel, ts: body.message.ts, text: body.message.text,
+    blocks: (body.message.blocks ?? []).filter((x) => x.type !== 'actions') }).catch(() => {});
+  if (fresh(s.key)?.buttons_msg?.ts === body.message.ts) sessions.patch(s.key, { buttons_msg: null });
+  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: STOPPED_TEXT(await stopSession(s.key)) })
+    .finally(() => stopping.delete(s.key));
 });
 app.action(/^answer_\d+$/, async ({ ack, body, action, client }) => {
   await ack();
