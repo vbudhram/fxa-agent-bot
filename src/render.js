@@ -44,6 +44,31 @@ export function startCard(key, prompt, seconds, resuming = false, runtime = 'cla
 }
 export { md, buttons };
 
+// Problems only the operator can fix, told plainly: a raw gcloud or auth error in
+// every thread helps nobody. Each has a kind, so a thread hears it once.
+const OPERATOR = [
+  [/Reauthentication failed|gcloud auth login|problem refreshing your current auth tokens|invalid_grant/i, 'gcloud',
+    "The operator's Google Cloud sign-in expired, so I can't reach the sandbox. The operator must run `gcloud auth login`. Then try again."],
+  [/OAuth token has expired|Invalid API key|authentication_error|Please run \/login|CLAUDE_CODE_OAUTH_TOKEN is unset/i, 'claude',
+    "The agent's Claude token was rejected. The operator must renew `CLAUDE_CODE_OAUTH_TOKEN`. Then send your message again."],
+  [/Codex auth|codex login|refresh_token_reused|token_expired/i, 'codex',
+    'The Codex sign-in on the host expired. The operator must sign in to Codex again. Then send your message again.'],
+  [/could not mint a GitHub App installation token/i, 'github-app',
+    'The GitHub App could not get a token. The operator must check its key and installation. The work is not lost; try again after that.'],
+];
+export function operatorProblem(text) {
+  const hit = OPERATOR.find(([re]) => re.test(String(text ?? '')));
+  return hit ? { kind: hit[1], text: hit[2] } : null;
+}
+const noteLines = (notes) => (notes ?? []).length ? `\n${notes.map((n) => `⚠️ ${esc(n)}`).join('\n')}` : '';
+// One line about the whole session: time, turns, cost and the size of the change.
+export function summaryLine(sm) {
+  if (!sm) return '';
+  const parts = [sm.minutes != null && `${sm.minutes} min`, sm.turns && `${sm.turns} turn${sm.turns === 1 ? '' : 's'}`,
+    sm.cost != null && `$${Number(sm.cost).toFixed(2)}`, sm.diff && esc(sm.diff)].filter(Boolean);
+  return parts.length ? `Session: ${parts.join(' · ')}` : '';
+}
+
 export function render(key, ev) {
   switch (ev.type) {
     case 'stage': return { text: `_${esc(ev.text)}_` };
@@ -83,10 +108,17 @@ export function render(key, ev) {
         ],
       };
       return null; // working: stay quiet
-    case 'pr': return gh(ev.url) ? { text: `Draft PR is up: ${gh(ev.url)}` } : { text: 'The draft PR is up; its link did not look like a GitHub PR, so check the repo.' };
-    case 'pushed': return { text: `Pushed \`${esc(ev.branch).replace(/`/g, '')}\`.${gh(ev.url) ? ` <${gh(ev.url)}|Open a PR from it> when you are ready, or keep steering here.` : ' Keep steering here, or open a PR from it on GitHub.'}` };
+    case 'pr': {
+      const head = gh(ev.url) ? `Draft PR is up: ${gh(ev.url)}` : 'The draft PR is up; its link did not look like a GitHub PR, so check the repo.';
+      const sm = summaryLine(ev.summary);
+      return { text: `${head}${noteLines(ev.notes)}${sm ? `\n_${sm}_` : ''}` };
+    }
+    case 'pushed': return { text: `Pushed \`${esc(ev.branch).replace(/`/g, '')}\`.${gh(ev.url) ? ` <${gh(ev.url)}|Open a PR from it> when you are ready, or keep steering here.` : ' Keep steering here, or open a PR from it on GitHub.'}${noteLines(ev.notes)}` };
     case 'ci': return { text: `CI: ${esc(ev.text)}` };
-    case 'error': return { text: `Something went wrong: ${esc(ev.text)} Try again, or \`!restart\` to start fresh.` };
+    case 'error': {
+      const op = operatorProblem(ev.text);
+      return op ? { text: op.text, operator: op.kind } : { text: `Something went wrong: ${esc(ev.text)} Try again, or \`!restart\` to start fresh.` };
+    }
     default: return null;
   }
 }

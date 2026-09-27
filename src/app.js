@@ -4,7 +4,7 @@ import { statSync, readFileSync, readdirSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import * as ctl from './ctl.js';
 import * as sessions from './sessions.js';
-import { render, startCard, stage, md, buttons, RUNTIMES } from './render.js';
+import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine } from './render.js';
 
 const { App } = bolt;
 const list = (v) => (v || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -270,7 +270,7 @@ async function bang(s, text, m, client) {
     await say(s, 'Interrupted. The work so far is kept. Tell me what to do instead.');
   } else if (cmd === 'stop') {
     if (ownerOnly()) return;
-    await say(s, STOPPED_TEXT(await stopSession(s.key)));
+    await say(s, await stoppedText(s.key));
   } else if (cmd === 'restart') {
     if (ownerOnly()) return;
     if (LIVE.includes(s.state) && !(await stopSession(s.key))) { await say(s, STOPPED_TEXT(false)); return; }
@@ -422,7 +422,8 @@ async function updateStreamNow(s, state, activity) {
     const news = unsent.get(s.key) ?? [];
     unsent.delete(s.key);
     // Boot steps and the no-stream fallback come from the poll, not the watch.
-    if (!news.length && activity.text && activity.text !== s.last_step && !watchers.has(s.key)) news.push(activity.text);
+    if (!news.length && activity.text && activity.text !== s.last_step && (activity.host || !watchers.has(s.key)))
+      news.push(activity.host ? { host: activity.text } : activity.text);
     // Setup refreshes every poll, so its clock keeps moving between steps.
     if (!news.length && state === 'starting' && s.last_step) news.push(s.last_step);
     // Nothing new: refresh the running row's clock once a minute, no more.
@@ -438,16 +439,19 @@ async function updateStreamNow(s, state, activity) {
       return { last_act: label, cur_label: label, last_step: news.at(-1) };
     }
     const chunks = [], done = [...(s.rows_done ?? [])];
-    for (const step of news) {
+    for (const item of news) {
+      // A host step of Open PR or Push branch is a row of its own, with no details.
+      const step = item?.host ?? item;
       // A step with no stage of its own (a misc command) joins the current row;
       // before any row exists it opens an exploring one.
-      const st = stage(step) ?? (kind ? { kind, label } : { kind: 'explore', label: 'Exploring the code' });
-      const line = String(step).slice(0, 200);
+      const st = item?.host ? { kind: `host:${step}`, label: step }
+        : stage(step) ?? (kind ? { kind, label } : { kind: 'explore', label: 'Exploring the code' });
+      const line = item?.host ? '' : String(step).slice(0, 200);
       n += 1;
       if (st.kind !== kind) {
         chunks.push(row(t, rowTitle(), 'complete'));
         if (count) done.push(rowTitle()); // work rows only, not the opening one
-        t += 1; kind = st.kind; label = st.label; count = 1; lines = 1;
+        t += 1; kind = st.kind; label = st.label; count = item?.host ? 0 : 1; lines = 1;
         chunks.push(row(t, rowTitle(true), 'in_progress', line));
       } else {
         // Details only append, so a long row stops listing steps after a while;
@@ -459,7 +463,7 @@ async function updateStreamNow(s, state, activity) {
     }
     await app.client.apiCall('chat.appendStream', { ...at, chunks });
     return { step_n: n, task_n: t, cur_kind: kind, cur_count: count, cur_label: label, cur_lines: lines, title_at: Date.now(),
-      last_act: rowTitle(), last_step: news.at(-1), rows_done: done };
+      last_act: rowTitle(), last_step: news.at(-1)?.host ?? news.at(-1), rows_done: done };
   }
   const summary = turnSummary(s, s.interrupted ? 'Interrupted' : 'Done');
   await app.client.apiCall('chat.stopStream', { ...at, chunks: [row(t, rowTitle(), 'complete')] });
@@ -671,7 +675,7 @@ ownerAction('stop', async (s, client, action, body) => {
   await client.chat.update({ channel: s.channel, ts: body.message.ts, text: body.message.text,
     blocks: (body.message.blocks ?? []).filter((x) => x.type !== 'actions') }).catch(() => {});
   if (fresh(s.key)?.buttons_msg?.ts === body.message.ts) sessions.patch(s.key, { buttons_msg: null });
-  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: STOPPED_TEXT(await stopSession(s.key)) })
+  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: await stoppedText(s.key) })
     .finally(() => stopping.delete(s.key));
 });
 app.action(/^answer_\d+$/, async ({ ack, body, action, client }) => {
@@ -697,8 +701,19 @@ app.action(/^answer_\d+$/, async ({ ack, body, action, client }) => {
 });
 
 // Every failure is explained in the thread with a next step, as in Claude Tag.
-function explain(e) {
+// A thread hears each operator problem once an hour, not on every poll or tap.
+const operatorSaid = new Map();
+function firstOperatorNote(key, kind) {
+  const id = `${key}:${kind}`, at = operatorSaid.get(id) ?? 0;
+  if (Date.now() - at < 3_600_000) return false;
+  if (![...operatorSaid.keys()].some((k) => k.endsWith(`:${kind}`))) console.error(`operator problem: ${kind}`);
+  operatorSaid.set(id, Date.now());
+  return true;
+}
+function explain(e, key) {
   const err = `${e.stderr ?? ''}\n${e.message ?? ''}`;
+  const op = operatorProblem(err);
+  if (op) return key && !firstOperatorNote(key, op.kind) ? null : op.text;
   const line = (err.match(/ERROR: ([^\n]+)/) ?? [])[1];
   if (/takes no messages/.test(err)) return 'This session has ended. Tag me again to start a new one.';
   if (/no Claude session id/.test(err)) return "I'm still starting up. Send that again in a minute.";
@@ -708,7 +723,8 @@ function explain(e) {
 async function fail(client, s, e) {
   console.error(s.key, e.stderr || e.message);
   settle(s, false);
-  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: explain(e) });
+  const text = explain(e, s.key);
+  if (text) await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text });
 }
 
 // Screenshots and videos the agent saved during the turn, posted once each. A
@@ -796,6 +812,12 @@ async function stopSession(key) {
 }
 const STOPPED_TEXT = (ok) => ok ? 'Stopped. The work so far is kept.'
   : "I couldn't stop the sandbox cleanly. It shuts down at its time limit anyway; `!stop` tries again.";
+// Stop, then the session's one-line summary, which the stop recorded before the runner went.
+async function stoppedText(key) {
+  const ok = await stopSession(key);
+  const sm = ok ? summaryLine(await ctl.summary(key)) : '';
+  return STOPPED_TEXT(ok) + (sm ? `\n_${sm}_` : '');
+}
 
 // The 5 s poll owns state (replies, questions, errors, PR links); the watch
 // stream only makes the status line live between polls.
@@ -815,6 +837,7 @@ async function pollOne(key) {
     for (const [i, ev] of events.entries()) {
       const msg = render(s.key, ev);
       if (!msg) continue;
+      if (msg.operator) { const kind = msg.operator; delete msg.operator; if (!firstOperatorNote(key, kind)) continue; }
       await (i === endAt ? finishTurn(key, msg, ev) : postMsg(key, msg))
         .catch((e) => console.error('post', key, ev.type, e.data?.error ?? e.message));
     }

@@ -56,6 +56,7 @@ export const cleanup = (dir) => rm(dir, { recursive: true, force: true });
 // Starts the wrap-up in the background; events reports the PR or the failure.
 export const finish = (key, noPr = false) => run(['finish', '--session', key, ...(noPr ? ['--no-pr'] : [])], { timeout: 60_000 });
 export const stop = (key) => run(['stop', key]);
+export const summary = async (key) => { try { return JSON.parse((await run(['session', 'summary', key])).trim() || 'null'); } catch { return null; } };
 export const interrupt = (key) => run(['interrupt', key], { timeout: 60_000 });
 // Pauses sessions idle past the ctl's threshold; returns the keys it paused.
 export const idleSweep = async () => (await run(['session', 'idle-sweep'], { timeout: 10 * 60_000 }))
