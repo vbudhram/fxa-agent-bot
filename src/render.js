@@ -18,14 +18,22 @@ const md = (text) => ({
 // Notification and screen-reader fallback: the first line, plain.
 const plain = (text) => text.split('\n')[0].replace(/[*_`#>|]/g, '').slice(0, 150) || 'Reply';
 
+// ponytail: the model defaults repeat ctl's runtime-*.sh; set the env on both if one changes.
+export const RUNTIMES = {
+  claude: { name: 'Claude', provider: 'Anthropic', model: process.env.FXA_AGENT_MODEL || 'claude-opus-5-5' },
+  codex: { name: 'Codex', provider: 'OpenAI', model: process.env.FXA_CODEX_MODEL || 'gpt-6-astra' },
+};
+
 // Shown for the few seconds before a mention starts a session, so a mistaken
-// tag can be taken back.
-export function startCard(key, prompt, seconds, resuming = false, runtime) {
-  const who = runtime ? ` with ${runtime === 'codex' ? 'Codex' : 'Claude'}` : '';
-  const lead = resuming ? `Picking up where we left off, with your changes and our conversation, in ${seconds} seconds:` : `Starting${who} in ${seconds} seconds:`;
+// tag can be taken back or moved to the other agent. A resume keeps its agent.
+export function startCard(key, prompt, seconds, resuming = false, runtime = 'claude') {
+  const r = RUNTIMES[runtime] ?? RUNTIMES.claude;
+  const other = runtime === 'codex' ? 'claude' : 'codex';
+  const lead = resuming ? `Picking up where we left off, with your changes and our conversation, in ${seconds} seconds:` : `Starting in ${seconds} seconds:`;
   return [
     { type: 'section', text: { type: 'mrkdwn', text: `${lead}\n>${prompt.split('\n\nEarlier messages')[0].slice(0, 500).replace(/\n/g, '\n>')}` } },
-    buttons(key, ['Cancel', 'cancel']),
+    { type: 'context', elements: [{ type: 'mrkdwn', text: `${r.name} · \`${r.model}\` · ${r.provider}` }] },
+    resuming ? buttons(key, ['Cancel', 'cancel']) : buttons(key, ['Cancel', 'cancel'], [`Switch to ${RUNTIMES[other].name}`, 'switch_runtime']),
   ];
 }
 export { md, buttons };

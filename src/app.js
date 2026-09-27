@@ -3,7 +3,7 @@ import { basename } from 'node:path';
 import { statSync, readFileSync } from 'node:fs';
 import * as ctl from './ctl.js';
 import * as sessions from './sessions.js';
-import { render, startCard, stage, md, buttons } from './render.js';
+import { render, startCard, stage, md, buttons, RUNTIMES } from './render.js';
 
 const { App } = bolt;
 const list = (v) => (v || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -49,7 +49,7 @@ app.event('app_mention', async ({ event, client }) => {
   let prompt = strip(event.text);
   // --codex or --claude picks the agent; otherwise AGENT_RUNTIME, else Claude.
   const flag = prompt.match(/(^|\s)--(codex|claude)(?=\s|$)/);
-  const runtime = flag ? flag[2] : (process.env.AGENT_RUNTIME || undefined);
+  let runtime = flag ? flag[2] : (process.env.AGENT_RUNTIME || 'claude');
   if (flag) prompt = prompt.replace(flag[0], ' ').trim();
   if (!prompt) return;
   if (!prompt.startsWith('!')) seen(event.channel, event.ts);
@@ -67,21 +67,24 @@ app.event('app_mention', async ({ event, client }) => {
   // The last session here stopped (a pause, Stop, or the runner limit): continue
   // its conversation and changes instead of starting from scratch.
   const resume_from = cur && ['stopped', 'failed', 'paused'].includes(cur.state) ? cur.key : undefined;
-  pending.set(key, { owner: event.user, channel: event.channel, thread_ts, resume_from, runtime });
+  if (resume_from) runtime = cur.runtime || 'claude'; // ctl resumes with the session's own agent
+  const deadline = Date.now() + START_DELAY_S * 1000;
+  pending.set(key, { prompt, owner: event.user, channel: event.channel, thread_ts, resume_from, runtime, deadline });
   // The card goes up first; reading a long thread for context can take seconds.
   const { ts } = await client.chat.postMessage({ channel: event.channel, thread_ts,
     text: resume_from ? `Picking up where we left off, in ${START_DELAY_S} seconds.` : `Starting in ${START_DELAY_S} seconds.`,
-    blocks: startCard(key, prompt, START_DELAY_S, Boolean(resume_from), flag ? runtime : undefined) });
+    blocks: startCard(key, prompt, START_DELAY_S, Boolean(resume_from), runtime) });
   if (event.thread_ts) prompt += await threadContext(client, event);
   if (!pending.has(key)) return;
-  pending.set(key, { prompt, owner: event.user, channel: event.channel, thread_ts, card_ts: ts, resume_from, runtime, ack_ts: event.ts,
+  // Spread the current entry: a Switch click while the thread was read changed its runtime.
+  pending.set(key, { ...pending.get(key), prompt, card_ts: ts, ack_ts: event.ts,
     timer: setTimeout(() => begin(key, client).catch((e) => console.error('begin', key, e.message)), START_DELAY_S * 1000) });
 });
 
 async function begin(key, client) {
   const p = pending.get(key);
   if (!p) return;
-  const { timer, card_ts, ...rest } = p;
+  const { timer, card_ts, deadline, ...rest } = p;
   // Record the session before releasing the thread's reservation.
   sessions.put({ key, ...rest, cursor: 0, state: 'queued', started_at: Date.now() });
   pending.delete(key);
@@ -126,6 +129,16 @@ app.action('cancel', async ({ ack, body, action, client }) => {
   clearTimeout(p.timer);
   pending.delete(action.value);
   await client.chat.update({ channel: p.channel, ts: p.card_ts, text: 'Cancelled. Nothing was started.', blocks: [] }).catch(() => {});
+});
+
+app.action('switch_runtime', async ({ ack, body, action, client }) => {
+  await ack();
+  const p = pending.get(action.value);
+  if (!p || p.resume_from || body.user.id !== p.owner) return;
+  p.runtime = p.runtime === 'codex' ? 'claude' : 'codex';
+  const left = Math.max(1, Math.ceil((p.deadline - Date.now()) / 1000));
+  await client.chat.update({ channel: body.channel.id, ts: body.message.ts, text: `Starting with ${RUNTIMES[p.runtime].name} in ${left} seconds.`,
+    blocks: startCard(action.value, p.prompt, left, false, p.runtime) }).catch(() => {});
 });
 
 // Tagged inside a discussion: the earlier messages ride along as context. They
