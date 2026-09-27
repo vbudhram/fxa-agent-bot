@@ -102,7 +102,8 @@ async function launch(key, client, since = Date.now()) {
   // The dashboard links each session to its thread; a lookup failure only drops the link.
   const link = await app.client.chat.getPermalink({ channel: s.channel, message_ts: s.thread_ts }).then((r) => r.permalink, () => undefined);
   try {
-    await ctl.task({ key, owner: s.owner, prompt: s.prompt, resumeFrom: s.resume_from, runtime: s.resume_from ? undefined : s.runtime, link });
+    const who = await whoIs(app.client, s.owner);
+    await ctl.task({ key, owner: s.owner, prompt: s.prompt, resumeFrom: s.resume_from, runtime: s.resume_from ? undefined : s.runtime, link, who });
   } catch (e) {
     if (!/cap \d+ \(FXA_SESSION_MAX\)/.test(e.stderr ?? '')) { sessions.patch(key, { state: 'failed' }); await fail(client, s, e); return; }
     if (Date.now() - since > QUEUE_GIVE_UP_MS) {
@@ -124,6 +125,21 @@ async function launch(key, client, since = Date.now()) {
   await startStatus(fresh(key), 'Setting up').catch((e) => console.error('status', key, e.data?.error ?? e.message));
 }
 const say = (s, text) => app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text });
+
+// Name and picture for the dashboard's conversation view. Needs the users:read
+// scope; without it the lookup fails once an hour and the page shows an icon.
+const people = new Map();
+async function whoIs(client, id) {
+  const hit = people.get(id);
+  if (hit && Date.now() - hit.at < 3600_000) return hit.who;
+  let who = null;
+  try {
+    const { user } = await client.users.info({ user: id });
+    who = { name: user.profile?.display_name || user.real_name || user.name, image: user.profile?.image_48 };
+  } catch (e) { console.error('users.info', e.data?.error ?? e.message); }
+  people.set(id, { at: Date.now(), who });
+  return who;
+}
 
 app.action('cancel', async ({ ack, body, action, client }) => {
   await ack();
@@ -210,7 +226,7 @@ app.message(async ({ message, client }) => {
     return;
   }
   sessions.patch(s.key, { ack_ts: message.ts });
-  await steerAndAck(s, message.user === s.owner ? text : `(From someone else in the thread, not the person who started this session.)\n${text}`, client);
+  await steerAndAck(s, message.user === s.owner ? text : `(From someone else in the thread, not the person who started this session.)\n${text}`, client, message.user);
 });
 
 // Bang commands, as in Claude Tag: @fxa-agent !status, !help, and so on. The
@@ -311,11 +327,11 @@ setInterval(() => { idleSweep(); }, 60_000);
 // The timeline opens first, so the reply is visible in under a second while
 // steer spends ~2 s over ssh starting the turn. A turn already running keeps
 // its own timeline, and startStatus leaves it alone.
-async function steerAndAck(s, text, client) {
+async function steerAndAck(s, text, client, userId) {
   const busyBefore = Boolean(fresh(s.key)?.status_ts);
   if (!busyBefore) await startStatus(s, 'Working').catch((e) => console.error('status', s.key, e.data?.error ?? e.message));
   try {
-    const out = await ctl.steer(s.key, text);
+    const out = await ctl.steer(s.key, text, userId ? await whoIs(client, userId) : null);
     if (out.includes('queued')) await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: "Got it. I'll pick that up as soon as I finish this step." });
   } catch (e) {
     // Close the timeline this message opened; nothing is running behind it.
@@ -643,7 +659,7 @@ app.action(/^answer_\d+$/, async ({ ack, body, action, client }) => {
     .concat({ type: 'context', elements: [{ type: 'mrkdwn', text: `<@${body.user.id}> chose: *${v.choice.slice(0, 200)}*` }] });
   await client.chat.update({ channel: s.channel, ts: body.message.ts, text: body.message.text, blocks }).catch(() => {});
   if (fresh(s.key).buttons_msg?.ts === body.message.ts) sessions.patch(s.key, { buttons_msg: null });
-  await steerAndAck(s, v.choice, client);
+  await steerAndAck(s, v.choice, client, body.user.id);
 });
 
 // Every failure is explained in the thread with a next step, as in Claude Tag.

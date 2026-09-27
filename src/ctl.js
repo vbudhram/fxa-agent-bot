@@ -29,12 +29,14 @@ async function withFile(text, fn) {
   }
 }
 
-export const task = ({ key, owner, prompt, resumeFrom, runtime, link }) => withFile(prompt, (f) =>
+export const task = ({ key, owner, prompt, resumeFrom, runtime, link, who }) => withFile(prompt, (f) =>
   run(['task', '--source', 'slack', '--id', key, '--owner', owner, '--prompt-file', f,
     ...(resumeFrom ? ['--resume-from', resumeFrom] : []), ...(runtime ? ['--runtime', runtime] : []),
-    ...(link ? ['--link', link] : [])]));
+    ...(link ? ['--link', link] : []),
+    ...(who?.name ? ['--owner-name', who.name] : []), ...(who?.image ? ['--owner-image', who.image] : [])]));
 
-export const steer = (key, message) => withFile(message, (f) => run(['steer', key, '--message-file', f]));
+export const steer = (key, message, who) => withFile(message, (f) => run(['steer', key, '--message-file', f,
+  ...(who?.name ? ['--from-name', who.name] : []), ...(who?.image ? ['--from-image', who.image] : [])]));
 
 // Returns { cursor, state, events: [{ type, text, ... }] }.
 export async function events(key, since) {
