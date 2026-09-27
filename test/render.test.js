@@ -57,3 +57,19 @@ test('one question keeps its options list apart from the text', () => {
   const msg = render('agent-x', { type: 'question', text: '1. old list', options: ['a', 'b'] });
   assert.deepEqual(msg.blocks.map((b) => b.block_id ?? b.type), ['markdown', 'answer_opts', 'actions', 'answer_hint']);
 });
+
+test('the Home tab lists your sessions, newest first, with thread and PR links', async () => {
+  const { homeView } = await import('../src/render.js');
+  const now = 1_000_000_000_000;
+  const v = homeView([
+    { key: 'agent-old', state: 'paused', prompt: 'Old request', started_at: now - 3 * 3_600_000 },
+    { key: 'agent-new', state: 'pr_open', prompt: 'New request\nmore', started_at: now - 5 * 60_000, pr_seen: { url: 'https://github.com/mozilla/fxa/pull/2' } },
+  ], { 'agent-new': 'https://slack.example.com/t/1' }, now);
+  assert.equal(v.type, 'home');
+  const rows = v.blocks.filter((b) => b.type === 'section');
+  assert.match(rows[0].text.text, /New request\*\nPR open · 5m ago · `agent-new` · <https:\/\/github.com\/mozilla\/fxa\/pull\/2\|PR>/);
+  assert.equal(rows[0].accessory.url, 'https://slack.example.com/t/1');
+  assert.match(rows[1].text.text, /Paused: reply in the thread to resume · 3h ago/);
+  assert.equal(rows[1].accessory, undefined);
+  assert.match(homeView([], {}, now).blocks.at(-1).text.text, /No sessions yet/);
+});

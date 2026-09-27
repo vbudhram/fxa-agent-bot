@@ -6,6 +6,9 @@ features:
   bot_user:
     display_name: fxa-agent
     always_online: true
+  app_home:
+    home_tab_enabled: true
+    messages_tab_enabled: false
   slash_commands:
     - command: /fxa-agent
       description: List the agent sessions that are running
@@ -26,6 +29,7 @@ settings:
   event_subscriptions:
     bot_events:
       - app_mention
+      - app_home_opened
       - message.channels
       - message.groups
       - reaction_added

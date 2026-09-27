@@ -4,7 +4,7 @@ import { statSync, readFileSync, readdirSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import * as ctl from './ctl.js';
 import * as sessions from './sessions.js';
-import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges } from './render.js';
+import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, homeView } from './render.js';
 
 const { App } = bolt;
 const list = (v) => (v || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -813,6 +813,19 @@ async function statusList(client, channel) {
   }));
   return `${live.length} session${live.length === 1 ? '' : 's'}:\n${lines.join('\n')}`;
 }
+// 8: the App Home tab lists the viewer's own sessions each time they open it.
+app.event('app_home_opened', async ({ event, client }) => {
+  if (event.tab !== 'home') return;
+  const mine = sessions.all().filter((x) => x.owner === event.user);
+  const links = {};
+  await Promise.all(mine.slice(0, 15).map(async (x) => {
+    links[x.key] = await client.chat.getPermalink({ channel: x.channel, message_ts: x.thread_ts }).then((r) => r.permalink).catch(() => null);
+  }));
+  await client.views.publish({ user_id: event.user, view: homeView(mine, links) }).catch((e) => console.error('home', e.data?.error ?? e.message));
+});
+// A URL button still sends an action; acknowledge it so Slack shows no error.
+app.action(/^home_open_/, async ({ ack }) => { await ack(); });
+
 app.command('/fxa-agent', async ({ ack, command, respond, client }) => {
   await ack();
   if (!allowed(command.channel_id, command.user_id)) {

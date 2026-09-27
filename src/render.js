@@ -211,3 +211,27 @@ export function stage(step) {
   if (t.startsWith('Using /')) return { kind: 'review', label: STAGES.review };
   return null;
 }
+
+// 8: the App Home tab: the viewer's own sessions, newest first, each with a
+// link to its thread and, once there is one, its PR.
+const HOME_STATE = { queued: ['⏳', 'Waiting for capacity'], starting: ['🔧', 'Setting up'], active: ['🟢', 'Working'],
+  wrapping: ['📦', 'Wrapping up'], paused: ['⏸️', 'Paused: reply in the thread to resume'], pr_open: ['🔀', 'PR open'],
+  stopped: ['⏹️', 'Stopped'], failed: ['⚠️', 'Failed'] };
+export function homeView(list, links = {}, now = Date.now()) {
+  const mine = [...list].sort((a, b) => (b.started_at ?? 0) - (a.started_at ?? 0)).slice(0, 15);
+  const age = (t) => { const m = Math.round((now - (t ?? now)) / 60_000); return m < 60 ? `${m}m ago` : m < 2880 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`; };
+  const blocks = [
+    { type: 'header', text: { type: 'plain_text', text: 'Your agent sessions' } },
+    { type: 'context', elements: [{ type: 'mrkdwn', text: 'Tag @fxa-agent in a thread to start one. Reply in its thread to steer it.' }] },
+    { type: 'divider' },
+  ];
+  if (!mine.length) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: '_No sessions yet._' } });
+  for (const x of mine) {
+    const [icon, word] = HOME_STATE[x.state] ?? ['•', x.state];
+    const title = esc((x.prompt ?? '').split('\n')[0].slice(0, 120)) || x.key;
+    const pr = gh(x.pr_seen?.url) ? ` · <${x.pr_seen.url}|PR>` : '';
+    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `${icon} *${title}*\n${word} · ${age(x.started_at)} · \`${x.key}\`${pr}` },
+      ...(links[x.key] ? { accessory: { type: 'button', text: { type: 'plain_text', text: 'Open thread' }, url: links[x.key], action_id: `home_open_${x.key}` } } : {}) });
+  }
+  return { type: 'home', blocks };
+}
