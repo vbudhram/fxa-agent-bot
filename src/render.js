@@ -53,12 +53,15 @@ export function render(key, ev) {
       // phone), so the options are written out as a numbered list and the
       // buttons carry only the number. The full option rides in the value.
       const opts = (ev.options ?? []).slice(0, 5);
-      const list = opts.map((o, i) => `${i + 1}. ${o}`).join('\n');
+      // The options go in their own mrkdwn block: in the markdown block, a
+      // numbered list in the agent's text and this one merged into one list,
+      // and its numbers stopped matching the buttons.
+      const list = opts.map((o, i) => `*${i + 1}*  ${esc(o).slice(0, 500)}`).join('\n');
       return {
         text: plain(ev.text),
         blocks: [
-          md(opts.length ? `${ev.text || 'Which way?'}\n\n${list}` : (ev.text || 'Which way?')),
-          ...(opts.length ? [{
+          md(ev.text || 'Which way?'),
+          ...(opts.length ? [{ type: 'section', block_id: 'answer_opts', text: { type: 'mrkdwn', text: `*Pick one:*\n${list}` } }, {
             type: 'actions',
             elements: opts.map((o, i) => ({
               type: 'button', action_id: `answer_${i}`,
