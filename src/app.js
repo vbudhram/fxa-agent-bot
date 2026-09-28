@@ -28,6 +28,8 @@ const busy = new Set();    // sessions with a poll in flight
 const allowed = (channel, user) => CHANNELS.includes(channel) && (USERS.includes('*') || USERS.includes(user));
 
 const START_DELAY_S = 10;
+// Codex needs a Codex login on the controller host; off unless CODEX_ENABLED=1.
+const CODEX = process.env.CODEX_ENABLED === '1';
 
 // The first visible answer to any message: one reactions.add, sent before any
 // other work and not awaited. It turns into ✅ (or ⚠️) when the turn ends.
@@ -56,6 +58,7 @@ app.event('app_mention', async ({ event, client }) => {
   // Phones autocorrect "--" to an em or en dash.
   const flag = prompt.match(/(^|\s)(?:--|\u2014|\u2013)(codex|claude)(?=\s|$)/i);
   let runtime = flag ? flag[2].toLowerCase() : (process.env.AGENT_RUNTIME || 'claude');
+  if (!CODEX) runtime = 'claude'; // Codex is off: --codex is ignored
   if (flag) prompt = prompt.replace(flag[0], ' ').trim();
   if (!prompt) return;
   if (!prompt.startsWith('!')) seen(event.channel, event.ts);
@@ -82,7 +85,7 @@ app.event('app_mention', async ({ event, client }) => {
   // A failed post must release the thread, or it stays reserved until a restart.
   const { ts } = await client.chat.postMessage({ channel: event.channel, thread_ts,
     text: resume_from ? `Picking up where we left off, in ${START_DELAY_S} seconds.` : `Starting in ${START_DELAY_S} seconds.`,
-    blocks: startCard(key, prompt, START_DELAY_S, Boolean(resume_from), runtime) }).catch((e) => { pending.delete(key); throw e; })
+    blocks: startCard(key, prompt, START_DELAY_S, Boolean(resume_from), runtime, CODEX) }).catch((e) => { pending.delete(key); throw e; })
   if (event.thread_ts) prompt += await threadContext(client, event);
   if (!pending.has(key)) return;
   // Spread the current entry: a Switch click while the thread was read changed its runtime.
@@ -174,12 +177,13 @@ app.action('cancel', async ({ ack, body, action, client }) => {
 
 app.action('switch_runtime', async ({ ack, body, action, client }) => {
   await ack();
+  if (!CODEX) return;
   const p = pending.get(action.value);
   if (!p || p.resume_from || body.user.id !== p.owner) return;
   p.runtime = p.runtime === 'codex' ? 'claude' : 'codex';
   const left = Math.max(1, Math.ceil((p.deadline - Date.now()) / 1000));
   await client.chat.update({ channel: body.channel.id, ts: body.message.ts, text: `Starting with ${RUNTIMES[p.runtime].name} in ${left} seconds.`,
-    blocks: startCard(action.value, p.prompt, left, false, p.runtime) }).catch(() => {});
+    blocks: startCard(action.value, p.prompt, left, false, p.runtime, CODEX) }).catch(() => {});
 });
 
 // Tagged inside a discussion: the earlier messages ride along as context. They
@@ -859,6 +863,7 @@ function explain(e, key) {
   // The operator's kill switch (fxa-sandbox-ctl sessions pause).
   const paused = err.match(/agent sessions are paused by the operator: ([^\n]+)/);
   if (paused) return `Agent sessions are paused right now (${paused[1].trim()}). Nothing was started. Try again later.`;
+  if (/Codex sessions are turned off/.test(err)) return 'This session used Codex, which is turned off for now, so I cannot resume it. Tag me in a new thread to start fresh with Claude.';
   const op = operatorProblem(err);
   if (op) return key && !firstOperatorNote(key, op.kind) ? null : op.text;
   // gcloud puts the reason on the next line ("Could not fetch resource:\n - Internal error ...").
