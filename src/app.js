@@ -686,7 +686,10 @@ const finishTurn = (key, msg, ev) => serial(key, async function finishTurn() {
       // It also drops the Interrupt button, which a stream cannot remove.
       const steps = checklistLine(s);
       const kept = [{ type: 'context', elements: [{ type: 'mrkdwn', text: summary }, ...(steps ? [{ type: 'mrkdwn', text: steps.slice(0, 2900) }] : [])] }, ...body];
-      await app.client.chat.update({ channel: s.channel, ts: s.status_ts, text: msg.text, blocks: [...kept, ...actions] });
+      // The answer's own order: with several questions, each row of buttons sits
+      // under its question, not all together at the end.
+      const ordered = (msg.blocks ?? []).length ? [kept[0], ...msg.blocks] : [...kept, ...actions];
+      await app.client.chat.update({ channel: s.channel, ts: s.status_ts, text: msg.text, blocks: ordered });
       sessions.patch(s.key, STATUS_CLEAR);
       if (actions.length) await retireButtons(key, { ts: s.status_ts, text: msg.text, blocks: kept });
       return;
