@@ -1,5 +1,5 @@
 {
-  "name": "agent-tag",
+  "name": "fxa-agent",
   "version": "0.1.0",
   "private": true,
   "description": "Slack front door for fxa-sandbox-ctl agent sessions",

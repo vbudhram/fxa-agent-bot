@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 
-const FILE = process.env.AGENT_TAG_STATE || `${process.env.HOME}/.agent-tag-sessions.json`;
+const FILE = process.env.FXA_AGENT_STATE || `${process.env.HOME}/.fxa-agent-sessions.json`;
 
 let sessions = {};
 try { sessions = JSON.parse(readFileSync(FILE, 'utf8')); } catch { /* first run */ }

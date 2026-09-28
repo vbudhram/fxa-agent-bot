@@ -291,7 +291,7 @@ async function takeFiles(s, message, client) {
     return message.text?.trim() ? '' : null;
   }
   const files = message.files.filter((f) => f.url_private_download && f.size <= 25 * 1024 * 1024).slice(0, 5);
-  const dir = await mkdtemp(join(tmpdir(), 'agent-tag-files-'));
+  const dir = await mkdtemp(join(tmpdir(), 'fxa-agent-files-'));
   const paths = [];
   try {
     for (const f of files) {
@@ -1100,7 +1100,7 @@ setInterval(followPrs, 120_000);
 // 6: DM the operator once for each new or reopened error signature. The first
 // look only records what is already there, so a restart sends no flood.
 const OPERATOR = process.env.SLACK_OPERATOR || USERS.find((u) => u !== '*');
-const SEEN_FILE = `${process.env.HOME}/.agent-tag-errors-seen.json`;
+const SEEN_FILE = `${process.env.HOME}/.fxa-agent-errors-seen.json`;
 async function watchErrors() {
   const rows = await ctl.errorsList();
   if (!rows || !OPERATOR) return;
@@ -1121,4 +1121,4 @@ await app.start();
 teamId = (await app.client.auth.test()).team_id;
 // A request waiting for capacity lived only in a timer; pick it up again.
 for (const s of sessions.all()) if (s.state === 'queued') launch(s.key, app.client).catch((e) => console.error('launch', s.key, e.message));
-console.log('agent-tag is running (Socket Mode)');
+console.log('fxa-agent is running (Socket Mode)');

@@ -1,4 +1,4 @@
-# agent-tag
+# fxa-agent
 
 A Slack front door for `fxa-sandbox-ctl`. An engineer tags `@fxa-agent` in a thread, taps Start, and steers the agent by replying. The bot keeps no session state of its own. It calls the ctl CLI and posts what the CLI reports.
 

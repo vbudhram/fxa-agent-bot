@@ -19,7 +19,7 @@ function run(args, { timeout = 15 * 60_000 } = {}) {
 // Slack text goes to the ctl in a file, never an argument, and the file is
 // deleted once the ctl has read it: it can hold other people's messages.
 async function withFile(text, fn) {
-  const dir = await mkdtemp(join(tmpdir(), 'agent-tag-'));
+  const dir = await mkdtemp(join(tmpdir(), 'fxa-agent-'));
   const file = join(dir, 'message.md');
   try {
     await writeFile(file, text, { mode: 0o600 });
@@ -48,7 +48,7 @@ export const diff = (key) => run(['diff', key], { timeout: 60_000 });
 // Copies the agent's screenshots and videos off the runner; returns local paths.
 // The caller deletes the returned dir once it has uploaded what it needs.
 export async function media(key) {
-  const dir = await mkdtemp(join(tmpdir(), 'agent-tag-media-'));
+  const dir = await mkdtemp(join(tmpdir(), 'fxa-agent-media-'));
   const out = await run(['media', key, dir], { timeout: 120_000 }).catch(async (e) => { await rm(dir, { recursive: true, force: true }); throw e; });
   return { dir, files: out.split('\n').filter(Boolean) };
 }
