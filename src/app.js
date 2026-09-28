@@ -115,9 +115,17 @@ async function launch(key, client, since = Date.now()) {
       await say(s, 'I waited 30 minutes and no session freed up, so I dropped this request. Tag me again to retry.');
       return;
     }
-    if (!s.queued_note) {
-      sessions.patch(key, { queued_note: true });
-      await say(s, "Still waiting for available capacity. Your request is queued, and I'll start as soon as a session frees up.");
+    // 8: say where the request is in line, and keep that one message current.
+    const line = sessions.all().filter((x) => x.state === 'queued').sort((a, b) => (a.started_at ?? 0) - (b.started_at ?? 0));
+    const pos = line.findIndex((x) => x.key === key) + 1;
+    const text = `Waiting for capacity: all sessions are busy. You are ${ordinal(pos)} in line, and I'll start as soon as one frees up.`;
+    const cur = fresh(key);
+    if (!cur.queue_ts) {
+      const r = await say(s, text).catch(() => null);
+      sessions.patch(key, { queued_note: true, queue_ts: r?.ts ?? null, queue_pos: pos });
+    } else if (cur.queue_pos !== pos) {
+      await app.client.chat.update({ channel: s.channel, ts: cur.queue_ts, text }).catch(() => {});
+      sessions.patch(key, { queue_pos: pos });
     }
     setTimeout(() => launch(key, client, since).catch((err) => console.error('launch', key, err.message)), QUEUE_RETRY_MS);
     return;
@@ -126,9 +134,11 @@ async function launch(key, client, since = Date.now()) {
   if (fresh(key)?.state !== 'queued') { await ctl.stop(key).catch((e) => console.error('stop', key, e.message)); return; }
   // The runner is booting from here on: a Slack hiccup is logged, not fatal.
   sessions.patch(key, { state: 'starting', started_at: Date.now() });
+  if (fresh(key).queue_ts) await app.client.chat.update({ channel: s.channel, ts: fresh(key).queue_ts, text: 'A session freed up; starting now.' }).catch(() => {});
   await startStatus(fresh(key), 'Setting up').catch((e) => console.error('status', key, e.data?.error ?? e.message));
 }
 const say = (s, text) => app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text });
+const ordinal = (n) => { const t = n % 100, u = n % 10; return `${n}${t >= 11 && t <= 13 ? 'th' : u === 1 ? 'st' : u === 2 ? 'nd' : u === 3 ? 'rd' : 'th'}`; };
 
 // Name and picture for the dashboard's conversation view. Needs the users:read
 // scope; without it the lookup fails once an hour and the page shows an icon.
