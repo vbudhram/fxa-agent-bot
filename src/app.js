@@ -108,7 +108,7 @@ async function begin(key, client) {
   const pr = from?.pr_seen ? { pr_seen: from.pr_seen, pr_follow_since: from.pr_follow_since } : {};
   sessions.put({ key, ...rest, ...pr, cursor: 0, state: 'queued', started_at: Date.now() });
   pending.delete(key);
-  if (card_ts) await client.chat.update({ channel: p.channel, ts: card_ts, text: 'On it! A sandbox takes about a minute to set up; the status below shows where I am.', blocks: [] }).catch(() => {});
+  if (card_ts) await client.chat.update({ channel: p.channel, ts: card_ts, text: 'On it! Setting up a sandbox; the status below shows each step and how long it took.', blocks: [] }).catch(() => {});
   await launch(key, client);
 }
 
@@ -535,6 +535,13 @@ async function updateStreamNow(s, state, activity) {
   // test run still visibly moves.
   const took = () => { const m = Math.floor((Date.now() - (s.busy_since ?? Date.now())) / 60_000); return m ? ` · ${m}m` : ''; };
   const rowTitle = (running = false) => (count ? `${label} · ${count}` : label) + (running ? took() : '');
+  if (activity?.boot?.done && !s.boot_shown && !kind) {
+    const { details, boot_n } = bootDetails(s, activity.boot, true);
+    label = `Sandbox ready in ${activity.boot.total}s`;
+    await app.client.apiCall('chat.appendStream', { ...at, chunks: [row(t, label, 'in_progress', details)] });
+    s = { ...s, boot_n, boot_shown: true, cur_label: label, last_act: label };
+    sessions.patch(s.key, { boot_n, boot_shown: true, cur_label: label, last_act: label });
+  }
   if (activity?.busy) {
     const news = unsent.get(s.key) ?? [];
     unsent.delete(s.key);
@@ -550,10 +557,12 @@ async function updateStreamNow(s, state, activity) {
       return { title_at: Date.now() };
     }
     if (state === 'starting') {
-      const up = Math.round((Date.now() - (s.busy_since ?? Date.now())) / 1000);
-      label = `Setting up the sandbox: ${news.at(-1)} · ${up}s of about ${SETUP_EXPECT_S}s`;
-      await app.client.apiCall('chat.appendStream', { ...at, chunks: [row(t, label, 'in_progress')] });
-      return { last_act: label, cur_label: label, last_step: news.at(-1) };
+      const b = activity.boot;
+      const up = Math.round(b?.elapsed ?? (Date.now() - (s.busy_since ?? Date.now())) / 1000);
+      label = `Setting up the sandbox: ${news.at(-1)} · ${up}s of about ${b?.expect ?? SETUP_EXPECT_S}s`;
+      const { details, boot_n } = bootDetails(s, b, false);
+      await app.client.apiCall('chat.appendStream', { ...at, chunks: [row(t, label, 'in_progress', details)] });
+      return { last_act: label, cur_label: label, last_step: news.at(-1), boot_n };
     }
     const chunks = [], done = [...(s.rows_done ?? [])];
     for (const item of news) {
@@ -589,6 +598,14 @@ async function updateStreamNow(s, state, activity) {
 }
 
 const DETAIL_LINES = 15; // steps listed per checklist row before "… more steps"
+// Boot steps not yet listed under the setup row, one line each with its time.
+// A step is listed once it is over: when the next one starts, or at the end.
+function bootDetails(s, b, done) {
+  const steps = b?.steps ?? [], upto = done ? steps.length : steps.length - 1, from = s.boot_n ?? 0;
+  const lines = steps.slice(from, Math.max(from, upto)).map((x) => `✓ ${x.step} · ${x.s}s`
+    + (x.step.startsWith('restoring') && b.restore ? ` (snapshot loaded in ${b.restore.restore_ms} ms)` : ''));
+  return { details: lines.length ? (from ? '\n' : '') + lines.join('\n') : undefined, boot_n: Math.max(from, upto) };
+}
 const SETUP_EXPECT_S = 80; // measured boot to a running agent, 75-90 s
 const STATUS_CLEAR = { status_ts: null, status_kind: null, busy_since: null, last_act: null, last_detail: null, last_step: null, step_n: null, task_n: null, cur_kind: null, cur_count: null, cur_label: null, cur_lines: null, title_at: null, rows_done: null, interrupted: null };
 // The finished turn's checklist, compact: every work row, ticked.
@@ -605,7 +622,9 @@ const endWord = (s, state) => {
 };
 const turnSummary = (s, word, used) => {
   const n = s.step_n ?? 0, took = secs(Date.now() - (s.busy_since ?? Date.now()));
-  return `${word} · ${n ? `${n} step${n === 1 ? '' : 's'} · ` : ''}${took}${typeof used === 'number' ? ` · ${tokens(used)} so far` : ''}`;
+  // ack_ts is the Slack time of the message this turn answers.
+  const asked = Number(s.ack_ts) ? ` · reply ${secs(Date.now() - Number(s.ack_ts) * 1000)} after your message` : '';
+  return `${word} · ${n ? `${n} step${n === 1 ? '' : 's'} · ` : ''}${took}${asked}${typeof used === 'number' ? ` · ${tokens(used)} so far` : ''}`;
 };
 
 // 1: the turn's reply closes its own stream, so a turn is one message: what the
@@ -1026,7 +1045,8 @@ async function pollOne(key) {
   busy.add(key);
   const polledAt = Date.now();
   try {
-    const { cursor, state, events, activity } = await ctl.events(s.key, s.cursor);
+    const { cursor, state, events, activity: act, boot } = await ctl.events(s.key, s.cursor);
+    const activity = { ...act, boot };
     const endAt = events.findLastIndex((e) => e.type === 'turn_end' || e.type === 'question');
     // Each event posts on its own: ctl has already moved the cursor past this
     // batch, so a failed post is logged and skipped, never re-sent every 5 s.
@@ -1057,7 +1077,18 @@ async function pollOne(key) {
     if (again.delete(key)) setTimeout(() => pollOne(key), 0);
   }
 }
-setInterval(() => { for (const s of sessions.all()) pollOne(s.key); }, 5_000);
+// Each poll starts the controller once per session. A boot takes 15-80 s and
+// every step shows in Slack, so a starting session polls each second; the rest
+// every 5 s (a running turn streams through its watch, not the poll).
+const lastPoll = new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const s of sessions.all()) {
+    if (s.state !== 'starting' && now - (lastPoll.get(s.key) ?? 0) < 5_000) continue;
+    lastPoll.set(s.key, now);
+    pollOne(s.key);
+  }
+}, 1_000);
 
 // 4: after Open PR the thread follows the PR: CI results, reviews, and the merge
 // or close, for two weeks. One gh call per open PR every two minutes.
