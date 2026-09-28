@@ -20,6 +20,11 @@ const app = new App({
   appToken: process.env.SLACK_APP_TOKEN,
   socketMode: true,
 });
+// Timing: Slack's client waits out a rate limit silently, and anything queued
+// behind that call for the same session waits with it. Say so in the log.
+app.client.on('rate_limited', (sec, info) => console.error(`slack rate limited: ${info?.method ?? 'a call'} waits ${sec}s`));
+const SLOW_MS = 3000;
+const resultAt = new Map(); // key → when the watch saw the turn's result
 
 const pending = new Map(); // key → { prompt, owner, channel, thread_ts } until Start
 const busy = new Set();    // sessions with a poll in flight
@@ -498,7 +503,15 @@ async function steerAndAck(s, text, client, userId, ts) {
 // reply handler and the poll both saw no status line and both posted one.
 const chains = new Map();
 function serial(key, fn) {
-  const next = (chains.get(key) ?? Promise.resolve()).then(fn, fn);
+  const queued = Date.now();
+  const timed = async () => {
+    const start = Date.now();
+    try { return await fn(); } finally {
+      const waited = start - queued, ran = Date.now() - start;
+      if (waited > SLOW_MS || ran > SLOW_MS) console.error(`slow ${key}: ${fn.name || 'status call'} waited ${waited} ms, ran ${ran} ms`);
+    }
+  };
+  const next = (chains.get(key) ?? Promise.resolve()).then(timed, timed);
   chains.set(key, next.catch(() => {}));
   return next;
 }
@@ -653,8 +666,10 @@ const turnSummary = (s, word, used) => {
 
 // 1: the turn's reply closes its own stream, so a turn is one message: what the
 // agent did, then what it says. Without a live stream it posts as before.
-const finishTurn = (key, msg, ev) => serial(key, async () => {
+const finishTurn = (key, msg, ev) => serial(key, async function finishTurn() {
   clearTimeout(drafts.get(key)?.timer); drafts.delete(key);
+  const seenAt = resultAt.get(key); resultAt.delete(key);
+  if (seenAt) console.error(`timing ${key}: reply posting ${Date.now() - seenAt} ms after the turn's result`);
   const s = fresh(key);
   settle(s);
   // The buttons and their hint line go together; they are what retireButtons removes.
@@ -709,7 +724,7 @@ function ensureWatch(key) {
   if (watchers.has(key)) return;
   const w = ctl.watch(key, (ev) => {
     if (ev.type === 'step') { pushStep(key, ev.text); unsent.set(key, [...(unsent.get(key) ?? []), ev.text]); liveEdit(key); }
-    if (ev.type === 'result') setTimeout(() => pollOne(key), 300);
+    if (ev.type === 'result') { resultAt.set(key, Date.now()); setTimeout(() => pollOne(key), 300); }
     if (ev.type === 'text_start') draftText(key, null);
     if (ev.type === 'text') draftText(key, ev.text);
   });
@@ -736,7 +751,7 @@ function draftText(key, text) {
   d.buf += text;
   if (!d.timer) d.timer = setTimeout(() => flushDraft(key), 1000);
 }
-const flushDraft = (key) => serial(key, async () => {
+const flushDraft = (key) => serial(key, async function flushDraft() {
   const d = drafts.get(key);
   if (!d) return;
   d.timer = null;
@@ -777,7 +792,7 @@ function liveEdit(key) {
 
 // Writes the status fields itself, inside the serial section, so no caller can
 // overwrite a status line posted in between with stale fields.
-const updateStatus = (key, state, activity) => serial(key, async () => {
+const updateStatus = (key, state, activity) => serial(key, async function updateStatus() {
   const s = fresh(key);
   // A turn the bot did not start itself (a queued message, the first plan): open its status now.
   if (!s.status_ts && activity?.busy) {
@@ -1112,8 +1127,10 @@ async function pollOne(key) {
   if (busy.has(key)) { again.add(key); return; }
   busy.add(key);
   const polledAt = Date.now();
+  let ctlMs = 0;
   try {
     const { cursor, state, events, activity: act, boot } = await ctl.events(s.key, s.cursor);
+    ctlMs = Date.now() - polledAt;
     const activity = { ...act, boot };
     const endAt = events.findLastIndex((e) => e.type === 'turn_end' || e.type === 'question');
     // Each event posts on its own: ctl has already moved the cursor past this
@@ -1148,6 +1165,8 @@ async function pollOne(key) {
     console.error('events', key, e.stderr || e.message);
   } finally {
     busy.delete(key);
+    const took = Date.now() - polledAt;
+    if (took > SLOW_MS) console.error(`slow ${key}: poll took ${took} ms (ctl events ${ctlMs} ms)`);
     if (again.delete(key)) setTimeout(() => pollOne(key), 0);
   }
 }
