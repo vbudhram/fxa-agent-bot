@@ -371,10 +371,20 @@ async function bang(s, text, m, client) {
     const sm = await ctl.cost(s.key);
     await note(`${summaryLine(sm) || 'No usage recorded yet.'}\nI pause this session when it reaches its usage limit.`);
   } else if (cmd === 'desktop') {
-    // The dashboard opens the tunnel, so the link works only where it runs.
     if (ownerOnly()) return;
+    const what = 'Firefox against the running stack, and the repo read-only';
+    // With the IAP gateway the link works anywhere, for the owner's Google account only.
+    if (process.env.DESKTOP_GATEWAY) {
+      await note('Starting the desktop. This takes about a minute the first time.');
+      const email = await client.users.info({ user: s.owner }).then((r) => r.user?.profile?.email, () => null);
+      if (!email) { await note('I could not read your email from Slack (the app needs the users:read.email scope), so I cannot open the desktop for you.'); return; }
+      const url = await ctl.desktop(s.key, email).catch((e) => { console.error('desktop', s.key, e.stderr || e.message); return null; });
+      await note(url ? `<${url}|Open the desktop> for this session: ${what}. Sign in with ${email}.` : 'The desktop did not start. The error is in the bot log.');
+      return;
+    }
+    // The dashboard opens the tunnel, so the link works only where it runs.
     const base = process.env.DASHBOARD_URL || 'http://localhost:8787';
-    await note(`<${base}/desktop/${s.key}|Open the desktop> for this session: Firefox against the running stack, and the repo read-only. It works on the Mac that runs the dashboard. The first open takes about a minute.`);
+    await note(`<${base}/desktop/${s.key}|Open the desktop> for this session: ${what}. It works on the Mac that runs the dashboard. The first open takes about a minute.`);
   } else if (cmd === 'plan') {
     const p = await ctl.plan(s.key);
     await note(planLines(p) || 'There is no test plan yet. The first turn writes it.');

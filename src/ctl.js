@@ -64,6 +64,11 @@ export const errorsList = async () => { try { return JSON.parse((await run(['err
 export const attach = (key, paths) => run(['session', 'attach', key, ...paths], { timeout: 5 * 60_000 });
 export const errorsPush = () => run(['errors', 'push', '--now'], { timeout: 120_000 });
 export const prStatus = async (key) => { try { return JSON.parse((await run(['session', 'pr-status', key], { timeout: 60_000 })).trim() || 'null'); } catch { return null; } };
+// The desktop's gateway link when the ctl has one (FXA_DESKTOP_GATEWAY), else null.
+export const desktop = async (key, email) => {
+  const out = await run(['session', 'desktop', key, ...(email ? [email] : [])], { timeout: 300_000 });
+  return out.match(/^url=(https:\/\/\S+)$/m)?.[1] ?? null;
+};
 export const summary = async (key) => { try { return JSON.parse((await run(['session', 'summary', key])).trim() || 'null'); } catch { return null; } };
 export const interrupt = (key) => run(['interrupt', key], { timeout: 60_000 });
 // Pauses sessions idle past the ctl's threshold; returns the keys it paused.
