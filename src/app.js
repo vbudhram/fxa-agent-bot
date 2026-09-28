@@ -122,7 +122,7 @@ async function begin(key, client) {
   // Continuing a PR: the new session replaces the old one in the thread, so it
   // takes over following the PR from what the old one saw.
   const from = rest.resume_from && fresh(rest.resume_from);
-  const pr = from?.pr_seen ? { pr_seen: from.pr_seen, pr_follow_since: from.pr_follow_since } : {};
+  const pr = from?.pr_seen || from?.pr_url ? { pr_seen: from.pr_seen, pr_follow_since: from.pr_follow_since, pr_url: from.pr_url } : {};
   sessions.put({ key, ...rest, ...pr, cursor: 0, state: 'queued', started_at: Date.now() });
   pending.delete(key);
   if (card_ts) await client.chat.update({ channel: p.channel, ts: card_ts, text: 'On it! Setting up a sandbox; the status below shows each step and how long it took.', blocks: [] }).catch(() => {});
@@ -905,7 +905,10 @@ async function wrapTap(s, client, body, what) {
 ownerAction('open_pr', async (s, client, action, body) => {
   if (!await wrapTap(s, client, body, 'Open PR')) return;
   // The note goes first; finish then returns at once and the poll posts the PR link.
-  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Wrapping up: review, PR description, then a draft PR. I will post the link here.' });
+  // The session stays open after its PR, so a second Open PR updates that PR.
+  const text = fresh(s.key)?.pr_url ? 'Updating the PR: review, the safety checks, then a push to it. The session stays open.'
+    : 'Wrapping up: review, PR description, then a draft PR. I will post the link here, and the session stays open.';
+  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text });
   await ctl.finish(s.key);
 });
 ownerAction('push_branch', async (s, client, action, body) => {
@@ -1156,6 +1159,8 @@ async function pollOne(key) {
     // Each event posts on its own: ctl has already moved the cursor past this
     // batch, so a failed post is logged and skipped, never re-sent every 5 s.
     for (const [i, ev] of events.entries()) {
+      // The PR outlives the session's state: the thread follows it from here.
+      if (ev.type === 'pr' && ev.url) sessions.patch(key, { pr_url: ev.url, pr_follow_since: fresh(key)?.pr_follow_since ?? Date.now() });
       const msg = render(s.key, ev);
       if (!msg) continue;
       if (msg.operator) { const kind = msg.operator; delete msg.operator; if (!firstOperatorNote(key, kind)) continue; }
@@ -1213,7 +1218,9 @@ async function followPrs() {
   following = true;
   try {
     for (const s of sessions.all()) {
-      if (s.state !== 'pr_open' || s.pr_follow_done) continue;
+      // Any session with a PR, while it is the thread's current one: a continued
+      // session inherits the PR, and two followers would post each review twice.
+      if (!(s.state === 'pr_open' || s.pr_url) || s.pr_follow_done || sessions.get(s.channel, s.thread_ts)?.key !== s.key) continue;
       const since = s.pr_follow_since ?? Date.now();
       if (Date.now() - since > FOLLOW_MS) { sessions.patch(s.key, { pr_follow_done: true }); continue; }
       const cur = await ctl.prStatus(s.key);

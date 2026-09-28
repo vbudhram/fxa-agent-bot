@@ -155,12 +155,14 @@ export function render(key, ev) {
           md(ev.text || 'All set.'),
           // No changed file: nothing to diff, push or open a PR for.
           ev.changes === 0 ? buttons(key, ['Stop', 'stop'])
+            : ev.pr ? buttons(key, ['Diff', 'diff'], ['Update PR', 'open_pr'], ['Stop', 'stop'])
             : buttons(key, ['Diff', 'diff'], ['Push branch', 'push_branch'], ['Open PR', 'open_pr'], ['Stop', 'stop']),
         ],
       };
       return null; // working: stay quiet
     case 'pr': {
-      const head = gh(ev.url) ? `Draft PR is up: ${gh(ev.url)}` : 'The draft PR is up; its link did not look like a GitHub PR, so check the repo.';
+      const head = !gh(ev.url) ? 'The PR is up; its link did not look like a GitHub PR, so check the repo.'
+        : ev.updated ? `Updated the PR: ${gh(ev.url)}` : `Draft PR is up: ${gh(ev.url)}. I am still here: reply to change it or to ask about the review.`;
       const sm = summaryLine(ev.summary);
       return { text: `${head}${noteLines(ev.notes)}${sm ? `\n_${sm}_` : ''}` };
     }
