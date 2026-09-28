@@ -274,6 +274,15 @@ app.message(async ({ message, client }) => {
     await resumePaused(s, message.user === s.owner ? text : `(From someone else in the thread, not the person who started this session.)\n${text}`, client);
     return;
   }
+  // The PR merged or closed: the work is done, and a reply is not a new task.
+  // Answer it anyway, so the thread does not look dead; a tag starts new work.
+  if (steers && s.state === 'pr_open' && !prOpen) {
+    await client.reactions.add({ channel: message.channel, timestamp: message.ts, name: 'raised_hands' }).catch(() => {});
+    const how = s.pr_seen?.state === 'MERGED' ? 'merged' : 'closed';
+    await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: message.user,
+      text: `This PR is ${how}, so this session is done. Tag me here to start something new.` }).catch(() => {});
+    return;
+  }
   if (!LIVE.includes(s.state)) return;
   if (s.state === 'queued' && steers) {
     const who = message.user === s.owner ? 'the person who started this session' : 'someone else in the thread, not the person who started this session';
