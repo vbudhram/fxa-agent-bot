@@ -101,3 +101,13 @@ test('a test plan renders as one short line per item', async () => {
   assert.equal(out, '• *check* — GET /v1/x returns 404\n• *ci* — relier flow _(CI: needs Stripe)_');
   assert.equal(planLines(null), '');
 });
+
+test('a resumed session says where it left off', async () => {
+  const { resumeNote } = await import('../src/render.js');
+  const out = resumeNote([{ role: 'user', text: 'q' }, { role: 'agent', text: '\n**Fixed** the footer test.\nMore.' }],
+    { minutes: 12, turns: 3, cost: 1.5, diff: '' });
+  assert.match(out, /^Picking up where we left off\./);
+  assert.match(out, /Last time: _Fixed the footer test\._/);
+  assert.match(out, /_Session: 12 min · 3 turns · \$1\.50_/);
+  assert.doesNotMatch(resumeNote([], null), /Last time/);
+});

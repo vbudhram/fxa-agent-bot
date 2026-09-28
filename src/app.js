@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import * as ctl from './ctl.js';
 import { installErrorLog } from './errors.js';
 import * as sessions from './sessions.js';
-import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, homeView, planLines } from './render.js';
+import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, homeView, planLines, resumeNote } from './render.js';
 
 const { App } = bolt;
 installErrorLog(ctl.errorsPush);
@@ -349,8 +349,8 @@ async function resumePaused(s, text, client) {
   if ([...pending.values()].some((p) => p.channel === s.channel && p.thread_ts === s.thread_ts)) return;
   const key = sessions.newKey();
   pending.set(key, { prompt: text, owner: s.owner, channel: s.channel, thread_ts: s.thread_ts, resume_from: s.key, ack_ts: fresh(s.key)?.ack_ts });
-  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts,
-    text: 'Picking up where we left off. A new sandbox takes about a minute to set up; the status below shows where I am.' }).catch(() => {});
+  const [hist, sm] = await Promise.all([ctl.history(s.key), ctl.summary(s.key)]);
+  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: resumeNote(hist, sm) }).catch(() => {});
   await begin(key, client);
 }
 
