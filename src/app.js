@@ -654,6 +654,7 @@ const turnSummary = (s, word, used) => {
 // 1: the turn's reply closes its own stream, so a turn is one message: what the
 // agent did, then what it says. Without a live stream it posts as before.
 const finishTurn = (key, msg, ev) => serial(key, async () => {
+  clearTimeout(drafts.get(key)?.timer); drafts.delete(key);
   const s = fresh(key);
   settle(s);
   // The buttons and their hint line go together; they are what retireButtons removes.
@@ -709,11 +710,54 @@ function ensureWatch(key) {
   const w = ctl.watch(key, (ev) => {
     if (ev.type === 'step') { pushStep(key, ev.text); unsent.set(key, [...(unsent.get(key) ?? []), ev.text]); liveEdit(key); }
     if (ev.type === 'result') setTimeout(() => pollOne(key), 300);
+    if (ev.type === 'text_start') draftText(key, null);
+    if (ev.type === 'text') draftText(key, ev.text);
   });
   w.child.on('exit', () => { if (watchers.get(key) === w) watchers.delete(key); });
   watchers.set(key, w);
 }
 function stopWatch(key) { watchers.get(key)?.stop(); watchers.delete(key); }
+
+// The reply streams into the turn's message as Claude writes it, at most once a
+// second. Control lines (status:, OPTION:, QUESTION:) are dropped, and a line
+// that may become one waits until it is whole. finishTurn then rewrites the
+// message with the formatted answer and its buttons.
+let streamText = process.env.STREAM_TEXT !== '0';
+const drafts = new Map(); // key → { buf, timer, sent }
+const CONTROL = ['status:', 'OPTION:', 'QUESTION:'];
+const isControl = (l) => CONTROL.some((c) => l.startsWith(c));
+const mayBeControl = (l) => CONTROL.some((c) => c.startsWith(l) || l.startsWith(c));
+function draftText(key, text) {
+  if (!streamText) return;
+  const d = drafts.get(key) ?? { buf: '', timer: null, sent: false };
+  drafts.set(key, d);
+  // A new block of text after some was shown: a paragraph break.
+  if (text === null) { if (d.sent || d.buf) d.buf += '\n\n'; return; }
+  d.buf += text;
+  if (!d.timer) d.timer = setTimeout(() => flushDraft(key), 1000);
+}
+const flushDraft = (key) => serial(key, async () => {
+  const d = drafts.get(key);
+  if (!d) return;
+  d.timer = null;
+  const s = fresh(key);
+  if (!s || DONE.includes(s.state)) { drafts.delete(key); return; }
+  // The turn's status is not open yet (a queued turn): try again shortly.
+  if (s.status_kind !== 'stream' || !s.status_ts) { if (s.status_kind !== 'line') d.timer = setTimeout(() => flushDraft(key), 1000); else drafts.delete(key); return; }
+  const lines = d.buf.split('\n'), tail = lines.pop();
+  const keep = mayBeControl(tail) ? tail : '';
+  const out = lines.filter((l) => !isControl(l)).map((l) => `${l}\n`).join('') + (keep ? '' : tail);
+  d.buf = keep;
+  if (!out) return;
+  try {
+    await app.client.apiCall('chat.appendStream', { channel: s.channel, ts: s.status_ts, chunks: [{ type: 'markdown_text', text: out }] });
+    d.sent = true;
+  } catch (e) {
+    // Slack refused text chunks: keep the task timeline and stop trying.
+    if (/invalid|unknown|chunk/i.test(e.data?.error ?? '')) { streamText = false; console.error(`reply streaming off (${e.data?.error})`); }
+    else console.error('draft', key, e.data?.error ?? e.message);
+  }
+});
 function pushStep(key, text) {
   if (!text) return;
   const list = steps.get(key) ?? [];
