@@ -61,6 +61,7 @@ export const pause = (key) => run(['session', 'pause', key], { timeout: 5 * 60_0
 export const plan = async (key) => { try { return JSON.parse((await run(['session', 'plan', key], { timeout: 60_000 })).trim() || 'null'); } catch { return null; } };
 export const history = async (key) => { try { return JSON.parse((await run(['session', 'history', key], { timeout: 30_000 })).trim() || '[]'); } catch { return []; } };
 export const errorsList = async () => { try { return JSON.parse((await run(['errors', '--json'], { timeout: 60_000 })).trim() || '[]'); } catch { return null; } };
+export const attach = (key, paths) => run(['session', 'attach', key, ...paths], { timeout: 5 * 60_000 });
 export const errorsPush = () => run(['errors', 'push', '--now'], { timeout: 120_000 });
 export const prStatus = async (key) => { try { return JSON.parse((await run(['session', 'pr-status', key], { timeout: 60_000 })).trim() || 'null'); } catch { return null; } };
 export const summary = async (key) => { try { return JSON.parse((await run(['session', 'summary', key])).trim() || 'null'); } catch { return null; } };
