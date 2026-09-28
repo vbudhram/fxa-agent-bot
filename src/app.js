@@ -856,6 +856,9 @@ function firstOperatorNote(key, kind) {
 }
 function explain(e, key) {
   const err = `${e.stderr ?? ''}\n${e.message ?? ''}`;
+  // The operator's kill switch (fxa-sandbox-ctl sessions pause).
+  const paused = err.match(/agent sessions are paused by the operator: ([^\n]+)/);
+  if (paused) return `Agent sessions are paused right now (${paused[1].trim()}). Nothing was started. Try again later.`;
   const op = operatorProblem(err);
   if (op) return key && !firstOperatorNote(key, op.kind) ? null : op.text;
   // gcloud puts the reason on the next line ("Could not fetch resource:\n - Internal error ...").
