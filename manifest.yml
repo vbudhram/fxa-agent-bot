@@ -27,6 +27,7 @@ oauth_config:
       - files:read
       - commands
       - reactions:read
+      - reactions:write
       - users:read
       - users:read.email
 settings:
