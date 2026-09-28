@@ -329,6 +329,7 @@ const HELP = [
   '`!mute` / `!unmute` stop or resume my replies here (👎 on my message also mutes)',
   '`!usage` the tokens this session has used so far',
   '`!plan` the test plan: how each change will be verified',
+  '`!desktop` a Linux desktop with Firefox on this session\'s sandbox, just for you',
   '`!help` this list',
 ].join('\n');
 async function bang(s, text, m, client) {
@@ -369,6 +370,11 @@ async function bang(s, text, m, client) {
   } else if (cmd === 'usage') {
     const sm = await ctl.cost(s.key);
     await note(`${summaryLine(sm) || 'No usage recorded yet.'}\nI pause this session when it reaches its usage limit.`);
+  } else if (cmd === 'desktop') {
+    // The dashboard opens the tunnel, so the link works only where it runs.
+    if (ownerOnly()) return;
+    const base = process.env.DASHBOARD_URL || 'http://localhost:8787';
+    await note(`<${base}/desktop/${s.key}|Open the desktop> for this session: Firefox against the running stack, and the repo read-only. It works on the Mac that runs the dashboard. The first open takes about a minute.`);
   } else if (cmd === 'plan') {
     const p = await ctl.plan(s.key);
     await note(planLines(p) || 'There is no test plan yet. The first turn writes it.');
