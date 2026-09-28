@@ -27,7 +27,8 @@ const busy = new Set();    // sessions with a poll in flight
 // ALLOWED_USERS=* lets anyone in an allowed channel start a session; empty lets nobody.
 const allowed = (channel, user) => CHANNELS.includes(channel) && (USERS.includes('*') || USERS.includes(user));
 
-const START_DELAY_S = 10;
+// A pause to switch runtime or cancel. With Codex off there is nothing to switch, so start at once.
+const START_DELAY_S = process.env.CODEX_ENABLED === '1' ? 10 : 0;
 // DESKTOP_EMAILS=U123:me@example.com,U456:you@example.com maps a Slack user to
 // the Google account the desktop gateway lets in, when it differs from Slack's.
 const DESKTOP_EMAILS = new Map((process.env.DESKTOP_EMAILS || '').split(',').map((p) => p.trim().split(':')).filter(([u, e]) => /^[UW][A-Z0-9]+$/.test(u ?? '') && /^[^@\s]+@[^@\s]+$/.test(e ?? '')));
@@ -87,7 +88,7 @@ app.event('app_mention', async ({ event, client }) => {
   // The card goes up first; reading a long thread for context can take seconds.
   // A failed post must release the thread, or it stays reserved until a restart.
   const { ts } = await client.chat.postMessage({ channel: event.channel, thread_ts,
-    text: resume_from ? `Picking up where we left off, in ${START_DELAY_S} seconds.` : `Starting in ${START_DELAY_S} seconds.`,
+    text: resume_from ? 'Picking up where we left off.' : 'Starting.',
     blocks: startCard(key, prompt, START_DELAY_S, Boolean(resume_from), runtime, CODEX) }).catch((e) => { pending.delete(key); throw e; })
   if (event.thread_ts) prompt += await threadContext(client, event);
   if (!pending.has(key)) return;

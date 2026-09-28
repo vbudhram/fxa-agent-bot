@@ -35,7 +35,8 @@ export const RUNTIMES = {
 export function startCard(key, prompt, seconds, resuming = false, runtime = 'claude', switchable = true) {
   const r = RUNTIMES[runtime] ?? RUNTIMES.claude;
   const other = runtime === 'codex' ? 'claude' : 'codex';
-  const lead = resuming ? `Picking up where we left off, with your changes and our conversation, in ${seconds} seconds:` : `Starting in ${seconds} seconds:`;
+  const when = seconds ? ` in ${seconds} seconds` : ' now';
+  const lead = resuming ? `Picking up where we left off, with your changes and our conversation,${when}:` : `Starting${when}:`;
   return [
     { type: 'section', text: { type: 'mrkdwn', text: `${lead}\n>${prompt.split('\n\nEarlier messages')[0].slice(0, 500).replace(/\n/g, '\n>')}` } },
     { type: 'context', elements: [{ type: 'mrkdwn', text: `${r.name} · \`${r.model}\` · ${r.provider}` }] },
