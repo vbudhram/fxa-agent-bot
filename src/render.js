@@ -61,7 +61,6 @@ export function operatorProblem(text) {
   return hit ? { kind: hit[1], text: hit[2] } : null;
 }
 const noteLines = (notes) => (notes ?? []).length ? `\n${notes.map((n) => `⚠️ ${esc(n)}`).join('\n')}` : '';
-// One line about the whole session: time, turns, cost and the size of the change.
 // What changed on a session's PR since the thread last heard, as lines to post.
 // A first look reports settled CI and any reviews already in.
 export function prChanges(prev, cur) {
@@ -85,10 +84,14 @@ export function prChanges(prev, cur) {
   return out;
 }
 
+// Token counts for people; the dollar cost stays with the operator.
+export const tokens = (n) => (typeof n !== 'number' ? '' : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M tokens` : n >= 1e3 ? `${Math.round(n / 1e3)}k tokens` : `${n} tokens`);
+
+// One line about the whole session: time, turns, tokens and the size of the change.
 export function summaryLine(sm) {
   if (!sm) return '';
   const parts = [sm.minutes != null && `${sm.minutes} min`, sm.turns && `${sm.turns} turn${sm.turns === 1 ? '' : 's'}`,
-    sm.cost != null && `$${Number(sm.cost).toFixed(2)}`, sm.diff && esc(sm.diff)].filter(Boolean);
+    tokens(sm.tokens), sm.diff && esc(sm.diff)].filter(Boolean);
   return parts.length ? `Session: ${parts.join(' · ')}` : '';
 }
 

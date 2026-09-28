@@ -18,15 +18,15 @@ test('an operator error renders the plain message and its kind', () => {
 test('the PR message carries its notes and the session summary', () => {
   const msg = render('agent-x', { type: 'pr', url: 'https://github.com/mozilla/fxa/pull/1',
     notes: ['6 screenshot(s) did not upload, so the PR is missing them.'],
-    summary: { minutes: 34, turns: 5, cost: 2.1, diff: '3 files changed, 10 insertions(+)' } });
+    summary: { minutes: 34, turns: 5, cost: 2.1, tokens: 2100000, diff: '3 files changed, 10 insertions(+)' } });
   assert.match(msg.text, /pull\/1/);
   assert.match(msg.text, /⚠️ 6 screenshot/);
-  assert.match(msg.text, /Session: 34 min · 5 turns · \$2\.10 · 3 files changed/);
+  assert.match(msg.text, /Session: 34 min · 5 turns · 2.1M tokens · 3 files changed/);
 });
 
 test('a summary with nothing known is empty', () => {
   assert.equal(summaryLine(null), '');
-  assert.equal(summaryLine({ minutes: null, turns: 0, cost: null, diff: '' }), '');
+  assert.equal(summaryLine({ minutes: null, turns: 0, tokens: null, diff: '' }), '');
 });
 
 test('PR follow-up posts only what changed', async () => {
@@ -105,10 +105,10 @@ test('a test plan renders as one short line per item', async () => {
 test('a resumed session says where it left off', async () => {
   const { resumeNote } = await import('../src/render.js');
   const out = resumeNote([{ role: 'user', text: 'q' }, { role: 'agent', text: '\n**Fixed** the footer test.\nMore.' }],
-    { minutes: 12, turns: 3, cost: 1.5, diff: '' });
+    { minutes: 12, turns: 3, cost: 1.5, tokens: 45000, diff: '' });
   assert.match(out, /^Picking up where we left off\./);
   assert.match(out, /Last time: _Fixed the footer test\._/);
-  assert.match(out, /_Session: 12 min · 3 turns · \$1\.50_/);
+  assert.match(out, /_Session: 12 min · 3 turns · 45k tokens_/);
   assert.doesNotMatch(resumeNote([], null), /Last time/);
 });
 
@@ -119,4 +119,9 @@ test('new errors make one short DM', async () => {
   assert.match(out, /`abc1234567` \*reopened\* ctl\/crash at fxa-sandbox-ctl:10 f/);
   assert.match(out, /sessions: agent-aa11bb/);
   assert.equal(errorDigest([]), '');
+});
+
+test('summaryLine shows tokens, never dollars', () => {
+  const line = summaryLine({ minutes: 5, turns: 2, cost: 3.5, tokens: 1234567, diff: '' });
+  assert.equal(line, 'Session: 5 min · 2 turns · 1.2M tokens');
 });
