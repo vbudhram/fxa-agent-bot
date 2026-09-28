@@ -573,7 +573,7 @@ async function updateStreamNow(s, state, activity) {
     return { step_n: n, task_n: t, cur_kind: kind, cur_count: count, cur_label: label, cur_lines: lines, title_at: Date.now(),
       last_act: rowTitle(), last_step: news.at(-1)?.host ?? news.at(-1), rows_done: done };
   }
-  const summary = turnSummary(s, s.interrupted ? 'Interrupted' : 'Done');
+  const summary = turnSummary(s, endWord(s, state));
   await app.client.apiCall('chat.stopStream', { ...at, chunks: [row(t, rowTitle(), 'complete')] });
   await app.client.chat.update({ ...at, text: summary, blocks: [{ type: 'context', elements: [{ type: 'mrkdwn', text: summary }] }] }).catch(() => {});
   return { ...STATUS_CLEAR, interrupted: null };
@@ -586,6 +586,13 @@ const STATUS_CLEAR = { status_ts: null, status_kind: null, busy_since: null, las
 const checklistLine = (s) => {
   const rows = [...(s.rows_done ?? []), ...(s.cur_count ? [`${s.cur_label} · ${s.cur_count}`] : [])];
   return rows.length ? rows.map((r) => `✓ ${r}`).join('  ·  ') : null;
+};
+// How a status line reads when it closes: a failure must not say Done.
+const endWord = (s, state) => {
+  if (state === 'failed') return s.step_n ? 'Failed' : 'Setup failed';
+  if (state === 'stopped') return 'Stopped';
+  if (state === 'paused') return 'Paused';
+  return s.interrupted ? 'Interrupted' : 'Done';
 };
 const turnSummary = (s, word, used) => {
   const n = s.step_n ?? 0, took = secs(Date.now() - (s.busy_since ?? Date.now()));
@@ -711,7 +718,10 @@ async function updateStatusNow(s, state, activity) {
     return { busy_since: since, last_act: doing, status_ts, status_text: text, tick };
   }
   steps.delete(s.key);
-  if (s.status_ts) await edit(`:white_check_mark: Finished in ${secs(Date.now() - s.busy_since)}`);
+  if (s.status_ts) {
+    const word = endWord(s, state);
+    await edit(`${word === 'Done' ? ':white_check_mark: Finished' : `:warning: ${word}`} in ${secs(Date.now() - s.busy_since)}`);
+  }
   return { busy_since: null, last_act: null, status_ts: null, status_text: null };
 }
 
