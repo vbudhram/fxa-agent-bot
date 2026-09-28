@@ -858,7 +858,9 @@ function explain(e, key) {
   const err = `${e.stderr ?? ''}\n${e.message ?? ''}`;
   const op = operatorProblem(err);
   if (op) return key && !firstOperatorNote(key, op.kind) ? null : op.text;
-  const line = (err.match(/ERROR: ([^\n]+)/) ?? [])[1];
+  // gcloud puts the reason on the next line ("Could not fetch resource:\n - Internal error ...").
+  const m = err.match(/ERROR: ([^\n]+)(?:\n\s*-\s*([^\n]+))?/);
+  const line = m && (m[1].endsWith(':') && m[2] ? `${m[1]} ${m[2]}` : m[1]);
   if (/takes no messages/.test(err)) return 'This session has ended. Tag me again to start a new one.';
   if (/nothing to push: no files changed/.test(err)) return 'There is nothing to push or open a PR for: I have not changed any files in this session.';
   if (/no Claude session id/.test(err)) return "I'm still starting up. Send that again in a minute.";
