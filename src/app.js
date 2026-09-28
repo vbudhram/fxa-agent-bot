@@ -72,7 +72,9 @@ app.event('app_mention', async ({ event, client }) => {
   const key = sessions.newKey();
   // The last session here stopped (a pause, Stop, or the runner limit): continue
   // its conversation and changes instead of starting from scratch.
-  const resume_from = cur && ['stopped', 'failed', 'paused'].includes(cur.state) ? cur.key : undefined;
+  // After Open PR, a tag continues that PR while it is open.
+  const prOpen = cur?.state === 'pr_open' && !['MERGED', 'CLOSED'].includes(cur.pr_seen?.state);
+  const resume_from = cur && (['stopped', 'failed', 'paused'].includes(cur.state) || prOpen) ? cur.key : undefined;
   if (resume_from) runtime = cur.runtime || 'claude'; // ctl resumes with the session's own agent
   const deadline = Date.now() + START_DELAY_S * 1000;
   pending.set(key, { prompt, owner: event.user, channel: event.channel, thread_ts, resume_from, runtime, deadline });
@@ -93,7 +95,11 @@ async function begin(key, client) {
   if (!p) return;
   const { timer, card_ts, deadline, ...rest } = p;
   // Record the session before releasing the thread's reservation.
-  sessions.put({ key, ...rest, cursor: 0, state: 'queued', started_at: Date.now() });
+  // Continuing a PR: the new session replaces the old one in the thread, so it
+  // takes over following the PR from what the old one saw.
+  const from = rest.resume_from && fresh(rest.resume_from);
+  const pr = from?.pr_seen ? { pr_seen: from.pr_seen, pr_follow_since: from.pr_follow_since } : {};
+  sessions.put({ key, ...rest, ...pr, cursor: 0, state: 'queued', started_at: Date.now() });
   pending.delete(key);
   if (card_ts) await client.chat.update({ channel: p.channel, ts: card_ts, text: 'On it! A sandbox takes about a minute to set up; the status below shows where I am.', blocks: [] }).catch(() => {});
   await launch(key, client);
