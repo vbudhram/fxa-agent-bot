@@ -946,7 +946,10 @@ app.action(/^answer_\d+(_\d+)?$/, async ({ ack, body, action, client }) => {
 // One answer of several: swap that question's buttons for the choice, and send
 // the answers together once every question has one. Serial per session, so two
 // fast taps cannot lose each other's answer.
-const answerOneOfSeveral = (s, v, body, client) => serial(s.key, async () => {
+// The answers are sent after the serial step, not inside it: steerAndAck opens a
+// status line through serial too, and awaiting that from inside one hung the session.
+async function answerOneOfSeveral(s, v, body, client) {
+  const answer = await serial(s.key, async function collectAnswers() {
   const msgBlocks = body.message.blocks ?? [];
   const groups = msgBlocks.filter((b) => /^(answers|answered)_\d+$/.test(b.block_id ?? '')).length;
   const q = (msgBlocks.find((b) => b.block_id === `q_${v.q}`)?.text?.text ?? '').split('\n')[0].replace(/^\*\d+\.\s*|\*$/g, '');
@@ -959,13 +962,14 @@ const answerOneOfSeveral = (s, v, body, client) => serial(s.key, async () => {
       elements: [{ type: 'mrkdwn', text: `<@${body.user.id}> chose: *${v.choice.slice(0, 200)}*` }] } : b))
     .filter((b) => !done || (b.type !== 'actions' && b.block_id !== 'answer_hint'));
   await client.chat.update({ channel: s.channel, ts: body.message.ts, text: body.message.text, blocks }).catch(() => {});
-  if (!done) { sessions.patch(s.key, { answers_pending: pend }); return; }
+  if (!done) { sessions.patch(s.key, { answers_pending: pend }); return null; }
   sessions.patch(s.key, { answers_pending: null, ...(fresh(s.key).buttons_msg?.ts === body.message.ts ? { buttons_msg: null } : {}) });
   const lines = Object.keys(pend.got).sort((a, b) => a - b).map((i) => `${Number(i) + 1}. ${pend.got[i].q} → ${pend.got[i].choice}`);
   const others = Object.values(pend.got).some((a) => a.by !== s.owner);
-  const answer = `${others ? '(Some answers are from someone else in the thread, not the person who started this session.)\n' : ''}My answers:\n${lines.join('\n')}`;
-  await steerAndAck(s, answer, client, body.user.id);
-});
+  return `${others ? '(Some answers are from someone else in the thread, not the person who started this session.)\n' : ''}My answers:\n${lines.join('\n')}`;
+  });
+  if (answer) await steerAndAck(s, answer, client, body.user.id);
+}
 
 // Every failure is explained in the thread with a next step, as in Claude Tag.
 // A thread hears each operator problem once an hour, not on every poll or tap.
