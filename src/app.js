@@ -264,8 +264,12 @@ app.message(async ({ message, client }) => {
   if (!text && !message.files?.length) return;
   if (text.startsWith('!')) { await bang(s, text, { user: message.user, channel: message.channel, thread_ts: message.thread_ts, ts: message.ts }, client); return; }
   const steers = allowed(message.channel, message.user) && (message.user === s.owner || STEER_ANYONE);
-  if (steers && (LIVE.includes(s.state) || s.state === 'paused')) seen(message.channel, message.ts);
-  if (s.state === 'paused' && steers) {
+  // A reply continues a session that has ended, as a tag does: paused, stopped,
+  // failed, or with its PR still open (the reply is often about the review).
+  const prOpen = s.state === 'pr_open' && !['MERGED', 'CLOSED'].includes(s.pr_seen?.state);
+  const resumable = ['paused', 'stopped', 'failed'].includes(s.state) || prOpen;
+  if (steers && (LIVE.includes(s.state) || resumable)) seen(message.channel, message.ts);
+  if (resumable && steers && !s.stop_failed) {
     addAck(s.key, message.ts);
     await resumePaused(s, message.user === s.owner ? text : `(From someone else in the thread, not the person who started this session.)\n${text}`, client);
     return;
