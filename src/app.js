@@ -21,7 +21,8 @@ const app = new App({
   socketMode: true,
 });
 // Timing: Slack's client waits out a rate limit silently, and anything queued
-// behind that call for the same session waits with it. Say so in the log.
+// behind that call for the same session waits with it. A rate limit is recorded
+// as an error; the slow and timing lines below only go to the log.
 app.client.on('rate_limited', (sec, info) => console.error(`slack rate limited: ${info?.method ?? 'a call'} waits ${sec}s`));
 const SLOW_MS = 3000;
 const resultAt = new Map(); // key → when the watch saw the turn's result
@@ -479,6 +480,14 @@ setInterval(() => { idleSweep(); }, 60_000);
 // steer spends ~2 s over ssh starting the turn. A turn already running keeps
 // its own timeline, and startStatus leaves it alone.
 async function steerAndAck(s, text, client, userId, ts) {
+  // A tapped answer or an edit after the session ended (paused, Stop, a failure):
+  // continue it on a new runner, as a reply to a paused session does.
+  const ended = fresh(s.key);
+  if (['paused', 'stopped', 'failed'].includes(ended?.state)) {
+    // Only the thread's current session, and not one whose runner may still be up.
+    if (sessions.get(ended.channel, ended.thread_ts)?.key !== ended.key || ended.stop_failed) return;
+    addAck(s.key, ts); await resumePaused(ended, text, client); return;
+  }
   const busyBefore = Boolean(fresh(s.key)?.status_ts);
   if (!busyBefore) await startStatus(s, 'Working').catch((e) => console.error('status', s.key, e.data?.error ?? e.message));
   try {
@@ -508,7 +517,7 @@ function serial(key, fn) {
     const start = Date.now();
     try { return await fn(); } finally {
       const waited = start - queued, ran = Date.now() - start;
-      if (waited > SLOW_MS || ran > SLOW_MS) console.error(`slow ${key}: ${fn.name || 'status call'} waited ${waited} ms, ran ${ran} ms`);
+      if (waited > SLOW_MS || ran > SLOW_MS) console.log(`slow ${key}: ${fn.name || 'status call'} waited ${waited} ms, ran ${ran} ms`);
     }
   };
   const next = (chains.get(key) ?? Promise.resolve()).then(timed, timed);
@@ -669,7 +678,7 @@ const turnSummary = (s, word, used) => {
 const finishTurn = (key, msg, ev) => serial(key, async function finishTurn() {
   clearTimeout(drafts.get(key)?.timer); drafts.delete(key);
   const seenAt = resultAt.get(key); resultAt.delete(key);
-  if (seenAt) console.error(`timing ${key}: reply posting ${Date.now() - seenAt} ms after the turn's result`);
+  if (seenAt) console.log(`timing ${key}: reply posting ${Date.now() - seenAt} ms after the turn's result`);
   const s = fresh(key);
   settle(s);
   // The buttons and their hint line go together; they are what retireButtons removes.
@@ -1169,7 +1178,7 @@ async function pollOne(key) {
   } finally {
     busy.delete(key);
     const took = Date.now() - polledAt;
-    if (took > SLOW_MS) console.error(`slow ${key}: poll took ${took} ms (ctl events ${ctlMs} ms)`);
+    if (took > SLOW_MS) console.log(`slow ${key}: poll took ${took} ms (ctl events ${ctlMs} ms)`);
     if (again.delete(key)) setTimeout(() => pollOne(key), 0);
   }
 }
