@@ -8,7 +8,9 @@ features:
     always_online: true
   app_home:
     home_tab_enabled: true
-    messages_tab_enabled: false
+    # Read-only: the bot DMs the operator about new errors; nobody chats with it there.
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: true
   slash_commands:
     - command: /fxa-agent
       description: List the agent sessions that are running

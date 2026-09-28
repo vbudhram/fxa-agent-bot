@@ -1,11 +1,11 @@
 import bolt from '@slack/bolt';
 import { basename } from 'node:path';
-import { statSync, readFileSync, readdirSync, lstatSync } from 'node:fs';
+import { statSync, readFileSync, readdirSync, lstatSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as ctl from './ctl.js';
 import { installErrorLog } from './errors.js';
 import * as sessions from './sessions.js';
-import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, homeView, planLines, resumeNote } from './render.js';
+import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, homeView, planLines, resumeNote, errorDigest } from './render.js';
 
 const { App } = bolt;
 installErrorLog(ctl.errorsPush);
@@ -1016,6 +1016,24 @@ async function followPrs() {
   } finally { following = false; }
 }
 setInterval(followPrs, 120_000);
+
+// 6: DM the operator once for each new or reopened error signature. The first
+// look only records what is already there, so a restart sends no flood.
+const OPERATOR = process.env.SLACK_OPERATOR || USERS.find((u) => u !== '*');
+const SEEN_FILE = `${process.env.HOME}/.agent-tag-errors-seen.json`;
+async function watchErrors() {
+  const rows = await ctl.errorsList();
+  if (!rows || !OPERATOR) return;
+  let seen = null;
+  try { seen = JSON.parse(readFileSync(SEEN_FILE, 'utf8')); } catch {}
+  const live = rows.filter((e) => e.status !== 'resolved');
+  const fresh_ = seen ? live.filter((e) => !seen[e.sig] || seen[e.sig] < e.last && e.status === 'reopened') : [];
+  const next = { ...(seen ?? {}) };
+  for (const e of live) next[e.sig] = e.last;
+  try { writeFileSync(SEEN_FILE, JSON.stringify(next), { mode: 0o600 }); } catch {}
+  if (fresh_.length) await app.client.chat.postMessage({ channel: OPERATOR, text: errorDigest(fresh_) }).catch((e) => console.error('errors-dm', e.data?.error ?? e.message));
+}
+setInterval(watchErrors, 120_000);
 // Watch streams run in their own process groups; end them with the bot.
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { for (const w of watchers.values()) w.stop(); process.exit(0); });
 

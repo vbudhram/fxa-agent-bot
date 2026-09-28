@@ -253,3 +253,12 @@ export function resumeNote(history, summary) {
   return ['Picking up where we left off. A new sandbox takes about a minute to set up; the status below shows where I am.',
     gist ? `Last time: _${gist}_` : null, sm ? `_${sm}_` : null].filter(Boolean).join('\n');
 }
+
+// 6: new or reopened error signatures, as one DM for the operator.
+export function errorDigest(rows) {
+  if (!rows?.length) return '';
+  const lines = rows.slice(0, 5).map((e) => `• \`${esc(e.sig)}\` ${e.status === 'reopened' ? '*reopened* ' : ''}${esc(e.source)}/${esc(e.kind)} at ${esc(e.where)}`
+    + `\n    ${esc(String(e.message)).slice(0, 180)}${e.keys?.length ? `\n    sessions: ${e.keys.map(esc).join(', ')}` : ''}`);
+  return `${rows.length === 1 ? 'A new error' : `${rows.length} new errors`} in the agent pipeline:\n${lines.join('\n')}`
+    + `${rows.length > 5 ? `\n…and ${rows.length - 5} more.` : ''}\nDetails: \`fxa-sandbox-ctl errors show <sig>\`, or the dashboard's Errors page.`;
+}

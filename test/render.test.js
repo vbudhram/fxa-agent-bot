@@ -111,3 +111,12 @@ test('a resumed session says where it left off', async () => {
   assert.match(out, /_Session: 12 min · 3 turns · \$1\.50_/);
   assert.doesNotMatch(resumeNote([], null), /Last time/);
 });
+
+test('new errors make one short DM', async () => {
+  const { errorDigest } = await import('../src/render.js');
+  const out = errorDigest([{ sig: 'abc1234567', status: 'reopened', source: 'ctl', kind: 'crash', where: 'fxa-sandbox-ctl:10 f', message: 'exit 1: grep', keys: ['agent-aa11bb'] }]);
+  assert.match(out, /^A new error in the agent pipeline:/);
+  assert.match(out, /`abc1234567` \*reopened\* ctl\/crash at fxa-sandbox-ctl:10 f/);
+  assert.match(out, /sessions: agent-aa11bb/);
+  assert.equal(errorDigest([]), '');
+});
