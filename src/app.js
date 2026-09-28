@@ -266,8 +266,10 @@ app.message(async ({ message, client }) => {
   const steers = allowed(message.channel, message.user) && (message.user === s.owner || STEER_ANYONE);
   // A reply continues a session that has ended, as a tag does: paused, stopped,
   // failed, or with its PR still open (the reply is often about the review).
-  const prOpen = s.state === 'pr_open' && !['MERGED', 'CLOSED'].includes(s.pr_seen?.state);
-  const resumable = ['paused', 'stopped', 'failed'].includes(s.state) || prOpen;
+  const prDone = ['MERGED', 'CLOSED'].includes(s.pr_seen?.state);
+  const prOpen = s.state === 'pr_open' && !prDone;
+  // After the PR merged or closed, a reply is not a new task (a tag is).
+  const resumable = (['paused', 'stopped', 'failed'].includes(s.state) && !prDone) || prOpen;
   if (steers && (LIVE.includes(s.state) || resumable)) seen(message.channel, message.ts);
   if (resumable && steers && !s.stop_failed) {
     addAck(s.key, message.ts);
@@ -276,7 +278,7 @@ app.message(async ({ message, client }) => {
   }
   // The PR merged or closed: the work is done, and a reply is not a new task.
   // Answer it anyway, so the thread does not look dead; a tag starts new work.
-  if (steers && s.state === 'pr_open' && !prOpen) {
+  if (steers && prDone && !LIVE.includes(s.state)) {
     await client.reactions.add({ channel: message.channel, timestamp: message.ts, name: 'raised_hands' }).catch(() => {});
     const how = s.pr_seen?.state === 'MERGED' ? 'merged' : 'closed';
     await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: message.user,
@@ -1227,6 +1229,14 @@ async function followPrs() {
   following = true;
   try {
     for (const s of sessions.all()) {
+      // The PR merged or closed while its session still runs: the work is done,
+      // so stop it and free the sandbox, once no turn is running.
+      if (s.pr_ended && s.state === 'active' && !s.status_ts && !busy.has(s.key) && sessions.get(s.channel, s.thread_ts)?.key === s.key) {
+        const ok = await stopSession(s.key);
+        if (!s.muted) await say(s, ok ? `The PR ${s.pr_ended === 'MERGED' ? 'merged' : 'closed'}, so I stopped this session and freed its sandbox. The work is kept; tag me here to continue it.`
+          : STOPPED_TEXT(false)).catch(() => {});
+        continue;
+      }
       // Any session with a PR, while it is the thread's current one: a continued
       // session inherits the PR, and two followers would post each review twice.
       if (!(s.state === 'pr_open' || s.pr_url) || s.pr_follow_done || sessions.get(s.channel, s.thread_ts)?.key !== s.key) continue;
@@ -1237,7 +1247,7 @@ async function followPrs() {
       for (const text of prChanges(s.pr_seen, cur)) {
         if (!s.muted) await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text }).catch((e) => console.error('follow', s.key, e.data?.error ?? e.message));
       }
-      sessions.patch(s.key, { pr_seen: cur, pr_follow_since: since, ...(['MERGED', 'CLOSED'].includes(cur.state) ? { pr_follow_done: true } : {}) });
+      sessions.patch(s.key, { pr_seen: cur, pr_follow_since: since, ...(['MERGED', 'CLOSED'].includes(cur.state) ? { pr_follow_done: true, pr_ended: cur.state } : {}) });
     }
   } finally { following = false; }
 }
