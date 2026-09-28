@@ -56,6 +56,9 @@ export const cleanup = (dir) => rm(dir, { recursive: true, force: true });
 // Starts the wrap-up in the background; events reports the PR or the failure.
 export const finish = (key, noPr = false) => run(['finish', '--session', key, ...(noPr ? ['--no-pr'] : [])], { timeout: 60_000 });
 export const stop = (key) => run(['stop', key]);
+export const cost = async (key) => { try { return JSON.parse((await run(['session', 'cost', key], { timeout: 60_000 })).trim() || 'null'); } catch { return null; } };
+export const pause = (key) => run(['session', 'pause', key], { timeout: 5 * 60_000 });
+export const plan = async (key) => { try { return JSON.parse((await run(['session', 'plan', key], { timeout: 60_000 })).trim() || 'null'); } catch { return null; } };
 export const errorsPush = () => run(['errors', 'push', '--now'], { timeout: 120_000 });
 export const prStatus = async (key) => { try { return JSON.parse((await run(['session', 'pr-status', key], { timeout: 60_000 })).trim() || 'null'); } catch { return null; } };
 export const summary = async (key) => { try { return JSON.parse((await run(['session', 'summary', key])).trim() || 'null'); } catch { return null; } };

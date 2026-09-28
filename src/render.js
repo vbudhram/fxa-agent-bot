@@ -237,3 +237,10 @@ export function homeView(list, links = {}, now = Date.now()) {
   }
   return { type: 'home', blocks };
 }
+
+// A test plan as short lines: the level, then the behavior it proves.
+export function planLines(plan) {
+  const items = Array.isArray(plan?.items) ? plan.items.slice(0, 20) : [];
+  return items.map((i) => `• *${esc(String(i.level ?? 'unit'))}* — ${esc(String(i.behavior ?? i.spec ?? '').slice(0, 160))}`
+    + (i.level === 'ci' && i.why ? ` _(CI: ${esc(String(i.why).slice(0, 80))})_` : '')).join('\n');
+}

@@ -92,3 +92,12 @@ test('a ready turn with no changed file offers only Stop', () => {
   // Unknown count (the runner did not answer): keep every button.
   assert.deepEqual(ids(render('agent-x', { type: 'turn_end', status: 'ready', text: 'Done.' })), ['diff', 'push_branch', 'open_pr', 'stop']);
 });
+
+test('a test plan renders as one short line per item', async () => {
+  const { planLines } = await import('../src/render.js');
+  const out = planLines({ items: [
+    { level: 'check', behavior: 'GET /v1/x returns 404' },
+    { level: 'ci', behavior: 'relier flow', why: 'needs Stripe' }] });
+  assert.equal(out, '• *check* — GET /v1/x returns 404\n• *ci* — relier flow _(CI: needs Stripe)_');
+  assert.equal(planLines(null), '');
+});

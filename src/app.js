@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import * as ctl from './ctl.js';
 import { installErrorLog } from './errors.js';
 import * as sessions from './sessions.js';
-import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, homeView } from './render.js';
+import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, homeView, planLines } from './render.js';
 
 const { App } = bolt;
 installErrorLog(ctl.errorsPush);
@@ -265,6 +265,8 @@ const HELP = [
   '`!stop` end the session and keep the work',
   '`!restart` end it and start fresh, rereading the thread',
   '`!mute` / `!unmute` stop or resume my replies here (👎 on my message also mutes)',
+  '`!cost` what this session has cost so far, and where it pauses',
+  '`!plan` the test plan: how each change will be verified',
   '`!help` this list',
 ].join('\n');
 async function bang(s, text, m, client) {
@@ -302,6 +304,12 @@ async function bang(s, text, m, client) {
     await say(s, 'Starting fresh, with the thread so far as context.');
     pending.set(key, { prompt, owner: s.owner, channel: s.channel, thread_ts: s.thread_ts });
     await begin(key, client);
+  } else if (cmd === 'cost') {
+    const sm = await ctl.cost(s.key);
+    await note(`${summaryLine(sm) || 'No cost recorded yet.'}\nI pause this session at $${capOf(s).toFixed(2)} and warn at $${COST_WARN.toFixed(2)}.`);
+  } else if (cmd === 'plan') {
+    const p = await ctl.plan(s.key);
+    await note(planLines(p) || 'There is no test plan yet. The first turn writes it.');
   } else if (cmd === 'mute' || cmd === 'unmute') {
     if (steerOnly()) return;
     sessions.patch(s.key, { muted: cmd === 'mute' });
@@ -501,9 +509,9 @@ const checklistLine = (s) => {
   const rows = [...(s.rows_done ?? []), ...(s.cur_count ? [`${s.cur_label} · ${s.cur_count}`] : [])];
   return rows.length ? rows.map((r) => `✓ ${r}`).join('  ·  ') : null;
 };
-const turnSummary = (s, word) => {
+const turnSummary = (s, word, cost) => {
   const n = s.step_n ?? 0, took = secs(Date.now() - (s.busy_since ?? Date.now()));
-  return `${word} · ${n ? `${n} step${n === 1 ? '' : 's'} · ` : ''}${took}`;
+  return `${word} · ${n ? `${n} step${n === 1 ? '' : 's'} · ` : ''}${took}${typeof cost === 'number' ? ` · $${cost.toFixed(2)} so far` : ''}`;
 };
 
 // 1: the turn's reply closes its own stream, so a turn is one message: what the
@@ -514,7 +522,7 @@ const finishTurn = (key, msg, ev) => serial(key, async () => {
   // The buttons and their hint line go together; they are what retireButtons removes.
   const actions = (msg.blocks ?? []).filter((b) => b.type === 'actions' || b.block_id === 'answer_hint');
   if (s.status_kind === 'stream' && s.status_ts) {
-    const summary = turnSummary(s, 'Done');
+    const summary = turnSummary(s, 'Done', ev?.cost);
     // The rendered answer and, for a question, its options lists; the buttons follow.
     const body = (msg.blocks ?? []).filter((b) => b.type !== 'actions' && b.block_id !== 'answer_hint');
     if (!body.length) body.push(md(ev.text || 'Over to you.'));
@@ -857,6 +865,29 @@ async function mindLifetime(key, state) {
   }
 }
 
+// 3: a session warns at SESSION_COST_WARN and pauses at SESSION_COST_CAP (model
+// cost of its transcript). A reply resumes it on a new runner, whose cost starts
+// again from zero, so each resumed part gets its own cap.
+const COST_WARN = Number(process.env.SESSION_COST_WARN || 5), COST_CAP = Number(process.env.SESSION_COST_CAP || 15);
+const capOf = (s) => Number(s?.cost_cap || COST_CAP);
+async function mindCost(key, spent) {
+  const s = fresh(key);
+  if (!s) return;
+  sessions.patch(key, { cost: spent });
+  if (spent >= capOf(s) && s.state === 'active' && !s.cost_paused) {
+    sessions.patch(key, { cost_paused: true });
+    const ok = await ctl.pause(key).then(() => true, (e) => { console.error('cost-pause', key, e.stderr || e.message); return false; });
+    if (!ok) return;
+    stopWatch(key);
+    await updateStatus(key, 'paused', { busy: false }).catch(() => {});
+    sessions.patch(key, { state: 'paused' });
+    await say(s, `I paused: this session has cost $${spent.toFixed(2)}, which reached its $${capOf(s).toFixed(2)} limit. Everything is saved. Reply here to continue; the next part starts a new $${capOf(s).toFixed(2)} limit.`).catch(() => {});
+  } else if (spent >= COST_WARN && !s.cost_warned) {
+    sessions.patch(key, { cost_warned: true });
+    await say(s, `Heads-up: this session has cost $${spent.toFixed(2)} so far. I pause at $${capOf(s).toFixed(2)}.`).catch(() => {});
+  }
+}
+
 // 11: one way to end a session, so no path leaves the live stream, the watch,
 // or the runner behind. False when the runner could not be stopped.
 async function stopSession(key) {
@@ -908,6 +939,8 @@ async function pollOne(key) {
     sessions.patch(key, { cursor, ...(fresh(key).state === 'stopped' ? {} : { state }) });
     await mindLifetime(key, state);
     if (events.some((e) => e.type === 'turn_end' || e.type === 'question')) await deliverMedia(key);
+    const spent = events.findLast((e) => typeof e.cost === 'number')?.cost;
+    if (spent != null) await mindCost(key, spent);
     // 14: a reply can open a turn while this poll was reading "idle". Its
     // stream is newer than what this poll saw, so leave it open.
     const opened = fresh(key)?.status_opened_at ?? 0;
