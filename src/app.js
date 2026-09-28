@@ -28,6 +28,9 @@ const busy = new Set();    // sessions with a poll in flight
 const allowed = (channel, user) => CHANNELS.includes(channel) && (USERS.includes('*') || USERS.includes(user));
 
 const START_DELAY_S = 10;
+// DESKTOP_EMAILS=U123:me@example.com,U456:you@example.com maps a Slack user to
+// the Google account the desktop gateway lets in, when it differs from Slack's.
+const DESKTOP_EMAILS = new Map((process.env.DESKTOP_EMAILS || '').split(',').map((p) => p.trim().split(':')).filter(([u, e]) => /^[UW][A-Z0-9]+$/.test(u ?? '') && /^[^@\s]+@[^@\s]+$/.test(e ?? '')));
 // Codex needs a Codex login on the controller host; off unless CODEX_ENABLED=1.
 const CODEX = process.env.CODEX_ENABLED === '1';
 
@@ -380,7 +383,8 @@ async function bang(s, text, m, client) {
     // With the IAP gateway the link works anywhere, for the owner's Google account only.
     if (process.env.DESKTOP_GATEWAY) {
       await note('Starting the desktop. This takes about a minute the first time.');
-      const email = await client.users.info({ user: s.owner }).then((r) => r.user?.profile?.email, () => null);
+      // A person whose Slack email is not the Google account they sign in with.
+      const email = DESKTOP_EMAILS.get(s.owner) ?? await client.users.info({ user: s.owner }).then((r) => r.user?.profile?.email, () => null);
       if (!email) { await note('I could not read your email from Slack (the app needs the users:read.email scope), so I cannot open the desktop for you.'); return; }
       const url = await ctl.desktop(s.key, email).catch((e) => { console.error('desktop', s.key, e.stderr || e.message); return null; });
       await note(url ? `<${url}|Open the desktop> for this session: ${what}. Sign in with ${email}.` : 'The desktop did not start. The error is in the bot log.');
