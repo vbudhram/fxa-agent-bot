@@ -955,33 +955,6 @@ async function mindLifetime(key, state) {
   }
 }
 
-// 4: the first test plan goes up as a card, so the owner can approve how the
-// work will be verified before code is written. Once per session.
-async function offerPlan(key) {
-  const s = fresh(key);
-  if (!s || s.plan_offered || s.muted) return;
-  const p = await ctl.plan(key);
-  const lines = planLines(p);
-  if (!lines) return;
-  sessions.patch(key, { plan_offered: true });
-  await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Test plan: how I will verify the change',
-    blocks: [
-      { type: 'section', text: { type: 'mrkdwn', text: `*Test plan: how I will verify the change*\n${lines}`.slice(0, 2900) } },
-      buttons(key, ['Approve plan', 'approve_plan']),
-      { type: 'context', block_id: 'plan_hint', elements: [{ type: 'mrkdwn', text: 'Approve it, or reply to change it.' }] },
-    ] }).catch((e) => console.error('plan', key, e.data?.error ?? e.message));
-}
-app.action('approve_plan', async ({ ack, body, action, client }) => {
-  await ack();
-  const s = fresh(action.value);
-  if (!s || !allowed(s.channel, body.user.id) || (!STEER_ANYONE && body.user.id !== s.owner)) return;
-  const blocks = (body.message.blocks ?? []).filter((b) => b.type !== 'actions' && b.block_id !== 'plan_hint')
-    .concat({ type: 'context', elements: [{ type: 'mrkdwn', text: `<@${body.user.id}> approved the plan.` }] });
-  await client.chat.update({ channel: s.channel, ts: body.message.ts, text: body.message.text, blocks }).catch(() => {});
-  const who = body.user.id === s.owner ? '' : '(From someone else in the thread, not the person who started this session.)\n';
-  await steerAndAck(s, `${who}The test plan is approved. Go ahead with the change, and verify it with the plan.`, client, body.user.id);
-});
-
 // 3: a session warns at SESSION_COST_WARN and pauses at SESSION_COST_CAP (model
 // cost of its transcript). Slack shows tokens only; the dollar limits stay here. A reply resumes it on a new runner, whose cost starts
 // again from zero, so each resumed part gets its own cap.
@@ -1058,7 +1031,6 @@ async function pollOne(key) {
     if (events.some((e) => e.type === 'turn_end' || e.type === 'question')) await deliverMedia(key);
     const last = events.findLast((e) => typeof e.cost === 'number');
     if (last) await mindCost(key, last.cost, last.tokens);
-    if (events.some((e) => e.type === 'turn_end' || e.type === 'question')) await offerPlan(key);
     // 14: a reply can open a turn while this poll was reading "idle". Its
     // stream is newer than what this poll saw, so leave it open.
     const opened = fresh(key)?.status_opened_at ?? 0;
