@@ -535,7 +535,8 @@ async function updateStreamNow(s, state, activity) {
   // test run still visibly moves.
   const took = () => { const m = Math.floor((Date.now() - (s.busy_since ?? Date.now())) / 60_000); return m ? ` · ${m}m` : ''; };
   const rowTitle = (running = false) => (count ? `${label} · ${count}` : label) + (running ? took() : '');
-  if (activity?.boot?.done && !s.boot_shown && !kind) {
+  // Not while still starting: a stack prewarm keeps the state there after the boot.
+  if (state !== 'starting' && activity?.boot?.done && !s.boot_shown && !kind) {
     const { details, boot_n } = bootDetails(s, activity.boot, true);
     label = `Sandbox ready in ${activity.boot.total}s`;
     await app.client.apiCall('chat.appendStream', { ...at, chunks: [row(t, label, 'in_progress', details)] });
@@ -1060,6 +1061,9 @@ async function pollOne(key) {
     if (!fresh(key)) return; // restarted or replaced while this poll ran
     // A stop made while this poll ran wins over the state the poll read.
     sessions.patch(key, { cursor, ...(fresh(key).state === 'stopped' ? {} : { state }) });
+    // Stopped or paused while this poll ran: its state is stale, so it must not
+    // open a watch or a new status line that nothing would close.
+    if (DONE.includes(fresh(key).state) && !DONE.includes(state)) { stopWatch(key); return; }
     await mindLifetime(key, state);
     if (events.some((e) => e.type === 'turn_end' || e.type === 'question')) await deliverMedia(key);
     const last = events.findLast((e) => typeof e.cost === 'number');
