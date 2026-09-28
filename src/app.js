@@ -38,12 +38,23 @@ const CODEX = process.env.CODEX_ENABLED === '1';
 // The first visible answer to any message: one reactions.add, sent before any
 // other work and not awaited. It turns into ✅ (or ⚠️) when the turn ends.
 const seen = (channel, ts) => app.client.reactions.add({ channel, timestamp: ts, name: 'eyes' }).catch(() => {});
+// acks: the messages the current turn answers. A reply queued behind a running
+// turn belongs to the next one (next_acks) and moves up when this turn settles.
+const ackList = (s) => s?.acks ?? (s?.ack_ts ? [s.ack_ts] : []);
+function addAck(key, ts, queued = false) {
+  const cur = fresh(key);
+  if (!cur || !ts) return;
+  sessions.patch(key, queued ? { next_acks: [...(cur.next_acks ?? []), ts] } : { acks: [...ackList(cur), ts], ack_ts: null });
+}
 async function settle(s, ok = true) {
   const cur = fresh(s.key);
-  if (!cur?.ack_ts) return;
-  sessions.patch(s.key, { ack_ts: null });
-  await app.client.reactions.remove({ channel: cur.channel, timestamp: cur.ack_ts, name: 'eyes' }).catch(() => {});
-  await app.client.reactions.add({ channel: cur.channel, timestamp: cur.ack_ts, name: ok ? 'white_check_mark' : 'warning' }).catch(() => {});
+  if (!cur) return;
+  const done = ackList(cur);
+  sessions.patch(s.key, { acks: cur.next_acks ?? [], next_acks: [], ack_ts: null });
+  for (const ts of done) {
+    await app.client.reactions.remove({ channel: cur.channel, timestamp: ts, name: 'eyes' }).catch(() => {});
+    await app.client.reactions.add({ channel: cur.channel, timestamp: ts, name: ok ? 'white_check_mark' : 'warning' }).catch(() => {});
+  }
 }
 const strip = (t) => (t ?? '').replace(/<@[A-Z0-9]+>/g, '').trim();
 
@@ -65,7 +76,6 @@ app.event('app_mention', async ({ event, client }) => {
   if (!CODEX) runtime = 'claude'; // Codex is off: --codex is ignored
   if (flag) prompt = prompt.replace(flag[0], ' ').trim();
   if (!prompt) return;
-  if (!prompt.startsWith('!')) seen(event.channel, event.ts);
   const thread_ts = thread;
   // In a thread with a session, the message handler runs the bang; answer once.
   if (prompt.startsWith('!')) { if (!cur) await bang(null, prompt, { user: event.user, channel: event.channel, thread_ts, ts: event.ts }, client); return; }
@@ -76,6 +86,7 @@ app.event('app_mention', async ({ event, client }) => {
   }
   // Reserve the thread before any await: a second tag meanwhile would start a second session.
   if ([...pending.values()].some((p) => p.channel === event.channel && p.thread_ts === thread)) return;
+  seen(event.channel, event.ts);
   const key = sessions.newKey();
   // The last session here stopped (a pause, Stop, or the runner limit): continue
   // its conversation and changes instead of starting from scratch.
@@ -93,7 +104,7 @@ app.event('app_mention', async ({ event, client }) => {
   if (event.thread_ts) prompt += await threadContext(client, event);
   if (!pending.has(key)) return;
   // Spread the current entry: a Switch click while the thread was read changed its runtime.
-  pending.set(key, { ...pending.get(key), prompt, card_ts: ts, ack_ts: event.ts,
+  pending.set(key, { ...pending.get(key), prompt, card_ts: ts, acks: [event.ts],
     timer: setTimeout(() => begin(key, client).catch((e) => console.error('begin', key, e.message)), START_DELAY_S * 1000) });
 });
 
@@ -119,9 +130,10 @@ async function launch(key, client, since = Date.now()) {
   const s = fresh(key);
   if (!s || s.state !== 'queued') return; // stopped or restarted while waiting
   // The dashboard links each session to its thread; a lookup failure only drops the link.
-  const link = await app.client.chat.getPermalink({ channel: s.channel, message_ts: s.thread_ts }).then((r) => r.permalink, () => undefined);
+  const linkP = app.client.chat.getPermalink({ channel: s.channel, message_ts: s.thread_ts }).then((r) => r.permalink, () => undefined);
   try {
-    const who = await whoIs(app.client, s.owner);
+    // Together, not one after the other: both are on the path to the first status.
+    const [link, who] = await Promise.all([linkP, whoIs(app.client, s.owner)]);
     await ctl.task({ key, owner: s.owner, prompt: s.prompt, resumeFrom: s.resume_from, runtime: s.resume_from ? undefined : s.runtime, link, who });
   } catch (e) {
     if (!/cap \d+ \(FXA_SESSION_MAX\)/.test(e.stderr ?? '')) { sessions.patch(key, { state: 'failed' }); await fail(client, s, e); return; }
@@ -147,6 +159,12 @@ async function launch(key, client, since = Date.now()) {
   }
   // Stopped while ctl.task ran: take the runner back down.
   if (fresh(key)?.state !== 'queued') { await ctl.stop(key).catch((e) => console.error('stop', key, e.message)); return; }
+  // Replies added to the prompt while ctl.task ran missed its copy: send them as
+  // the next message; ctl queues it until the boot ends.
+  const cur = fresh(key), extra = (cur.prompt ?? '').slice((s.prompt ?? '').length).trim();
+  if (extra) await ctl.steer(key, extra).catch((e) => console.error('steer', key, e.stderr || e.message));
+  sessions.patch(key, extra ? { next_acks: [...(cur.next_acks ?? []), ...(cur.late_acks ?? [])], late_acks: [] }
+    : { acks: [...ackList(cur), ...(cur.late_acks ?? [])], late_acks: [] });
   // The runner is booting from here on: a Slack hiccup is logged, not fatal.
   sessions.patch(key, { state: 'starting', started_at: Date.now() });
   if (fresh(key).queue_ts) await app.client.chat.update({ channel: s.channel, ts: fresh(key).queue_ts, text: 'A session freed up; starting now.' }).catch(() => {});
@@ -242,16 +260,17 @@ app.message(async ({ message, client }) => {
   const steers = allowed(message.channel, message.user) && (message.user === s.owner || STEER_ANYONE);
   if (steers && (LIVE.includes(s.state) || s.state === 'paused')) seen(message.channel, message.ts);
   if (s.state === 'paused' && steers) {
-    sessions.patch(s.key, { ack_ts: message.ts });
+    addAck(s.key, message.ts);
     await resumePaused(s, message.user === s.owner ? text : `(From someone else in the thread, not the person who started this session.)\n${text}`, client);
     return;
   }
   if (!LIVE.includes(s.state)) return;
   if (s.state === 'queued' && steers) {
     const who = message.user === s.owner ? 'the person who started this session' : 'someone else in the thread, not the person who started this session';
-    sessions.patch(s.key, { prompt: `${fresh(s.key).prompt}\n\nA later message in the thread, from ${who}:\n${text}` });
+    const cur = fresh(s.key);
+    sessions.patch(s.key, { prompt: `${cur.prompt}\n\nA later message in the thread, from ${who}:\n${text}`, late_acks: [...(cur.late_acks ?? []), message.ts] });
     await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: message.user,
-      text: "Got it. I'm still waiting for capacity; I'll include that when I start." }).catch(() => {});
+      text: cur.queue_ts ? "Got it. I'm still waiting for capacity; I'll include that when I start." : "Got it. I'll include that." }).catch(() => {});
     return;
   }
   if (message.user !== s.owner && !(STEER_ANYONE && allowed(message.channel, message.user))) {
@@ -261,13 +280,12 @@ app.message(async ({ message, client }) => {
       text: `Only <@${s.owner}> can steer this session, so I won't act on your message. They can see it, though.` }).catch(() => {});
     return;
   }
-  sessions.patch(s.key, { ack_ts: message.ts });
   if (message.files?.length) {
     const note = await takeFiles(s, message, client);
     if (note === null) return;
     text = `${text || 'See the attached files.'}${note}`;
   }
-  await steerAndAck(s, message.user === s.owner ? text : `(From someone else in the thread, not the person who started this session.)\n${text}`, client, message.user);
+  await steerAndAck(s, message.user === s.owner ? text : `(From someone else in the thread, not the person who started this session.)\n${text}`, client, message.user, message.ts);
 });
 
 async function steerEdit(message, client) {
@@ -283,9 +301,8 @@ async function steerEdit(message, client) {
   const text = `${from}I edited an earlier message. It now says:\n${after}`;
   if (s.state === 'queued') { sessions.patch(s.key, { prompt: `${fresh(s.key).prompt}\n\n${text}` }); return; }
   seen(message.channel, m.ts);
-  sessions.patch(s.key, { ack_ts: m.ts });
-  if (s.state === 'paused') { await resumePaused(s, text, client); return; }
-  if (LIVE.includes(s.state)) await steerAndAck(s, text, client, m.user);
+  if (s.state === 'paused') { addAck(s.key, m.ts); await resumePaused(s, text, client); return; }
+  if (LIVE.includes(s.state)) await steerAndAck(s, text, client, m.user, m.ts);
 }
 
 // 1: files attached in the thread go to the runner's /workspace/.fxa-inbox/, so
@@ -425,7 +442,7 @@ app.event('reaction_added', async ({ event, client }) => {
 async function resumePaused(s, text, client) {
   if ([...pending.values()].some((p) => p.channel === s.channel && p.thread_ts === s.thread_ts)) return;
   const key = sessions.newKey();
-  pending.set(key, { prompt: text, owner: s.owner, channel: s.channel, thread_ts: s.thread_ts, resume_from: s.key, ack_ts: fresh(s.key)?.ack_ts });
+  pending.set(key, { prompt: text, owner: s.owner, channel: s.channel, thread_ts: s.thread_ts, resume_from: s.key, acks: ackList(fresh(s.key)) });
   const [hist, sm] = await Promise.all([ctl.history(s.key), ctl.summary(s.key)]);
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: resumeNote(hist, sm) }).catch(() => {});
   await begin(key, client);
@@ -456,13 +473,18 @@ setInterval(() => { idleSweep(); }, 60_000);
 // The timeline opens first, so the reply is visible in under a second while
 // steer spends ~2 s over ssh starting the turn. A turn already running keeps
 // its own timeline, and startStatus leaves it alone.
-async function steerAndAck(s, text, client, userId) {
+async function steerAndAck(s, text, client, userId, ts) {
   const busyBefore = Boolean(fresh(s.key)?.status_ts);
   if (!busyBefore) await startStatus(s, 'Working').catch((e) => console.error('status', s.key, e.data?.error ?? e.message));
   try {
     const out = await ctl.steer(s.key, text, userId ? await whoIs(client, userId) : null);
-    if (out.includes('queued')) await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: "Got it. I'll pick that up as soon as I finish this step." });
+    const queued = out.includes('queued');
+    addAck(s.key, ts, queued);
+    if (queued) await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: "Got it. I'll pick that up as soon as I finish this step." });
+    // The turn this started came after the last one's reply closed its status: open one.
+    else if (!fresh(s.key)?.status_ts) await startStatus(fresh(s.key), 'Working').catch((e) => console.error('status', s.key, e.data?.error ?? e.message));
   } catch (e) {
+    addAck(s.key, ts);
     // Close the timeline this message opened; nothing is running behind it.
     if (!busyBefore) await updateStatus(s.key, fresh(s.key)?.state ?? 'active', { busy: false }).catch(() => {});
     await fail(client, s, e);
@@ -623,8 +645,9 @@ const endWord = (s, state) => {
 };
 const turnSummary = (s, word, used) => {
   const n = s.step_n ?? 0, took = secs(Date.now() - (s.busy_since ?? Date.now()));
-  // ack_ts is the Slack time of the message this turn answers.
-  const asked = Number(s.ack_ts) ? ` · reply ${secs(Date.now() - Number(s.ack_ts) * 1000)} after your message` : '';
+  // The Slack time of the first message this turn answers.
+  const first = Number(ackList(s)[0]);
+  const asked = first ? ` · reply ${secs(Date.now() - first * 1000)} after your message` : '';
   return `${word} · ${n ? `${n} step${n === 1 ? '' : 's'} · ` : ''}${took}${asked}${typeof used === 'number' ? ` · ${tokens(used)} so far` : ''}`;
 };
 
@@ -1065,15 +1088,18 @@ async function pollOne(key) {
     // open a watch or a new status line that nothing would close.
     if (DONE.includes(fresh(key).state) && !DONE.includes(state)) { stopWatch(key); return; }
     await mindLifetime(key, state);
-    if (events.some((e) => e.type === 'turn_end' || e.type === 'question')) await deliverMedia(key);
     const last = events.findLast((e) => typeof e.cost === 'number');
     if (last) await mindCost(key, last.cost, last.tokens);
     // 14: a reply can open a turn while this poll was reading "idle". Its
     // stream is newer than what this poll saw, so leave it open.
     const opened = fresh(key)?.status_opened_at ?? 0;
     const stale = !activity?.busy && opened > polledAt;
-    if (activity?.busy && (state === 'active' || state === 'wrapping')) ensureWatch(key); else if (!stale) stopWatch(key);
+    // The watch stays open between turns (tail -F follows the transcript): a new
+    // turn's first steps arrive at once, with no spawn and ssh at its start.
+    if (state === 'active' || state === 'wrapping') ensureWatch(key); else if (!stale) stopWatch(key);
     if (!stale) await updateStatus(key, state, activity).catch((e) => console.error('status', key, e.message));
+    // After the status and watch: a queued turn that just started must not wait on uploads.
+    if (events.some((e) => e.type === 'turn_end' || e.type === 'question')) await deliverMedia(key);
   } catch (e) {
     console.error('events', key, e.stderr || e.message);
   } finally {
@@ -1088,7 +1114,8 @@ const lastPoll = new Map();
 setInterval(() => {
   const now = Date.now();
   for (const s of sessions.all()) {
-    if (s.state !== 'starting' && now - (lastPoll.get(s.key) ?? 0) < 5_000) continue;
+    const fast = s.state === 'starting' && s.status_kind !== 'line';
+    if (!fast && now - (lastPoll.get(s.key) ?? 0) < 5_000) continue;
     lastPoll.set(s.key, now);
     pollOne(s.key);
   }
