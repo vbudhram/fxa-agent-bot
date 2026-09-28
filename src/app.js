@@ -97,8 +97,11 @@ app.event('app_mention', async ({ event, client }) => {
   // The last session here stopped (a pause, Stop, or the runner limit): continue
   // its conversation and changes instead of starting from scratch.
   // After Open PR, a tag continues that PR while it is open.
-  const prOpen = cur?.state === 'pr_open' && !['MERGED', 'CLOSED'].includes(cur.pr_seen?.state);
-  const resume_from = cur && (['stopped', 'failed', 'paused'].includes(cur.state) || prOpen) ? cur.key : undefined;
+  // After its PR merged or closed, a tag starts fresh from main, with the thread
+  // as context: the old changes are in main already, or were turned down.
+  const prDone = ['MERGED', 'CLOSED'].includes(cur?.pr_seen?.state);
+  const prOpen = cur?.state === 'pr_open' && !prDone;
+  const resume_from = cur && !prDone && (['stopped', 'failed', 'paused'].includes(cur.state) || prOpen) ? cur.key : undefined;
   if (resume_from) runtime = cur.runtime || 'claude'; // ctl resumes with the session's own agent
   const deadline = Date.now() + START_DELAY_S * 1000;
   pending.set(key, { prompt, owner: event.user, channel: event.channel, thread_ts, resume_from, runtime, deadline });
@@ -282,7 +285,7 @@ app.message(async ({ message, client }) => {
     await client.reactions.add({ channel: message.channel, timestamp: message.ts, name: 'raised_hands' }).catch(() => {});
     const how = s.pr_seen?.state === 'MERGED' ? 'merged' : 'closed';
     await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: message.user,
-      text: `This PR is ${how}, so this session is done. Tag me here to start something new.` }).catch(() => {});
+      text: `This PR is ${how}, so this session is done. Tag me here with what to do next, and I will start fresh from main with this thread as context.` }).catch(() => {});
     return;
   }
   if (!LIVE.includes(s.state)) return;
@@ -1233,7 +1236,7 @@ async function followPrs() {
       // so stop it and free the sandbox, once no turn is running.
       if (s.pr_ended && s.state === 'active' && !s.status_ts && !busy.has(s.key) && sessions.get(s.channel, s.thread_ts)?.key === s.key) {
         const ok = await stopSession(s.key);
-        if (!s.muted) await say(s, ok ? `The PR ${s.pr_ended === 'MERGED' ? 'merged' : 'closed'}, so I stopped this session and freed its sandbox. The work is kept; tag me here to continue it.`
+        if (!s.muted) await say(s, ok ? `The PR ${s.pr_ended === 'MERGED' ? 'merged' : 'closed'}, so I stopped this session and freed its sandbox. Tag me here with what to do next, and I will start fresh from main with this thread as context.`
           : STOPPED_TEXT(false)).catch(() => {});
         continue;
       }
