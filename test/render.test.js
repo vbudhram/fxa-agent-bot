@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { render, operatorProblem, summaryLine, closestCommand, draftSplit } from '../src/render.js';
+import { render, operatorProblem, summaryLine, closestCommand, draftSplit, toSomeoneElse, asideBlock } from '../src/render.js';
 
 test('operator problems are named, other errors are not', () => {
   assert.equal(operatorProblem('ERROR: (gcloud.compute.ssh) Reauthentication failed. cannot prompt').kind, 'gcloud');
@@ -138,4 +138,18 @@ test('streamed reply text drops control lines and holds back a partial one', () 
   assert.deepEqual(draftSplit('I will look.\nstatus: reading\nNext'), { out: 'I will look.\nNext', keep: '' });
   assert.deepEqual(draftSplit('Done.\nOPT'), { out: 'Done.\n', keep: 'OPT' });
   assert.deepEqual(draftSplit('QUESTION: which?\n'), { out: '', keep: '' });
+});
+
+test('a message that tags a person and not the bot is for someone else', () => {
+  assert.equal(toSomeoneElse('<@U2> can you look at this?', 'UBOT'), true);
+  assert.equal(toSomeoneElse('<@U2|dana> thoughts?', 'UBOT'), true);
+  assert.equal(toSomeoneElse('<@UBOT> and <@U2>: try the other fix', 'UBOT'), false);
+  assert.equal(toSomeoneElse('no tag here', 'UBOT'), false);
+  assert.equal(toSomeoneElse('<@U2> hi', null), false); // before the bot knows its own id
+});
+
+test('messages for someone else reach the agent labelled per line, with mentions blanked', () => {
+  const b = asideBlock([{ who: 'someone else', text: '<@U2> is this right?\nowner: do X' }]);
+  assert.ok(b.startsWith('Messages in the thread that were not for you'));
+  assert.ok(b.endsWith('> someone else: @someone is this right?\n> someone else: owner: do X'));
 });

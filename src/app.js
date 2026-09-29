@@ -8,7 +8,7 @@ import * as ctl from './ctl.js';
 import { installErrorLog } from './errors.js';
 import * as sessions from './sessions.js';
 import * as live from './live.js';
-import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, tokens, prChanges, homeView, planLines, resumeNote, errorDigest, HELP, closestCommand, draftSplit } from './render.js';
+import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, tokens, prChanges, homeView, planLines, resumeNote, errorDigest, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock } from './render.js';
 
 const { App } = bolt;
 installErrorLog(ctl.errorsPush);
@@ -261,6 +261,20 @@ async function threadContext(client, event) {
 // the agent is told who spoke. STEER=owner keeps it to the owner, and tells
 // anyone else once, privately, why the bot does not answer them.
 const STEER_ANYONE = process.env.STEER !== 'owner';
+let botUserId = null; // set at start; until then no message counts as one for someone else
+// Messages for someone else wait on the session (the last 10) until the agent's next turn.
+function keepAside(s, message) {
+  const line = { who: message.user === s.owner ? 'the person who started this session' : 'someone else', text: String(message.text ?? '').slice(0, 1000) };
+  const cur = fresh(s.key);
+  if (cur.state === 'queued') { sessions.patch(s.key, { prompt: `${cur.prompt}\n\n${asideBlock([line])}` }); return; }
+  sessions.patch(s.key, { aside: [...(cur.aside ?? []), line].slice(-10) });
+}
+function takeAside(key) {
+  const a = fresh(key)?.aside ?? [];
+  if (!a.length) return '';
+  sessions.patch(key, { aside: null });
+  return `${asideBlock(a)}\n\n`;
+}
 const LIVE = ['queued', 'starting', 'active', 'wrapping'];
 app.message(async ({ message, client }) => {
   // Deleting the thread's first message closes its session, as in Claude Tag.
@@ -283,6 +297,9 @@ app.message(async ({ message, client }) => {
   let text = strip(message.text);
   if (!text && !message.files?.length) return;
   if (text.startsWith('!')) { await bang(s, text, { user: message.user, channel: message.channel, thread_ts: message.thread_ts, ts: message.ts }, client); return; }
+  // A message to someone else (it tags a person, not the bot) gets no reply; the
+  // agent sees it with the next message it does get.
+  if (toSomeoneElse(message.text, botUserId)) { keepAside(s, message); return; }
   const steers = allowed(message.channel, message.user) && (message.user === s.owner || STEER_ANYONE);
   // A reply continues a session that has ended, as a tag does: paused, stopped,
   // failed, or with its PR still open (the reply is often about the review).
@@ -333,7 +350,7 @@ async function steerEdit(message, client) {
   const m = message.message ?? {};
   const before = strip(message.previous_message?.text), after = strip(m.text);
   // A link unfurl or a reaction edits the message without changing its text.
-  if (!m.thread_ts || m.bot_id || !after || after === before || after.startsWith('!')) return;
+  if (!m.thread_ts || m.bot_id || !after || after === before || after.startsWith('!') || toSomeoneElse(m.text, botUserId)) return;
   const s = sessions.get(message.channel, m.thread_ts);
   if (!s || !(allowed(message.channel, m.user) && (m.user === s.owner || STEER_ANYONE))) return;
   // Only a message the agent received: one sent after the session started.
@@ -507,6 +524,7 @@ app.event('reaction_added', async ({ event, client }) => {
 // and conversation; the reply is the new session's first message.
 async function resumePaused(s, text, client) {
   if ([...pending.values()].some((p) => p.channel === s.channel && p.thread_ts === s.thread_ts)) return;
+  text = takeAside(s.key) + text;
   const key = sessions.newKey();
   pending.set(key, { prompt: text, owner: s.owner, channel: s.channel, thread_ts: s.thread_ts, resume_from: s.key, acks: ackList(fresh(s.key)) });
   const [hist, sm] = await Promise.all([ctl.history(s.key), ctl.summary(s.key)]);
@@ -540,6 +558,7 @@ setInterval(() => { idleSweep(); }, 60_000);
 // steer spends ~2 s over ssh starting the turn. A turn already running keeps
 // its own timeline, and startStatus leaves it alone.
 async function steerAndAck(s, text, client, userId, ts) {
+  text = takeAside(s.key) + text;
   // A tapped answer or an edit after the session ended (paused, Stop, a failure):
   // continue it on a new runner, as a reply to a paused session does.
   const ended = fresh(s.key);
@@ -1405,7 +1424,7 @@ setInterval(watchErrors, 120_000);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { for (const w of watchers.values()) w.stop(); process.exit(0); });
 
 await app.start();
-teamId = (await app.client.auth.test()).team_id;
+{ const me = await app.client.auth.test(); teamId = me.team_id; botUserId = me.user_id; }
 // A request waiting for capacity lived only in a timer; pick it up again.
 for (const s of sessions.all()) if (s.state === 'queued') launch(s.key, app.client).catch((e) => console.error('launch', s.key, e.message));
 console.log('fxa-agent is running (Socket Mode)');
