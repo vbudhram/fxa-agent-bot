@@ -242,7 +242,7 @@ export const HELP = [
   '`!pause` save the work and free the sandbox; a reply picks it up again',
   '`!stop` end the session; the work is kept',
   '`!new` start over from main, rereading this thread (`!restart` works too)',
-  '`!usage` time, turns and changes so far',
+  '`!usage` the tokens used so far',
   '`!mute` / `!unmute` stop or resume my replies here (👎 on my message mutes too)',
   '`!help` this list',
   '',
