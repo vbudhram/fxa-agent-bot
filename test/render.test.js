@@ -21,7 +21,7 @@ test('the PR message carries its notes and the session summary', () => {
     summary: { minutes: 34, turns: 5, cost: 2.1, tokens: 2100000, diff: '3 files changed, 10 insertions(+)' } });
   assert.match(msg.text, /pull\/1/);
   assert.match(msg.text, /⚠️ 6 screenshot/);
-  assert.match(msg.text, /Session: 34 min · 5 turns · 2.1M tokens · 3 files changed/);
+  assert.match(msg.text, /Session: 34 min · 5 turns · 3 files changed/);
 });
 
 test('a summary with nothing known is empty', () => {
@@ -110,7 +110,7 @@ test('a resumed session says where it left off', async () => {
     { minutes: 12, turns: 3, cost: 1.5, tokens: 45000, diff: '' });
   assert.match(out, /^Picking up where we left off\./);
   assert.match(out, /Last time: _Fixed the footer test\._/);
-  assert.match(out, /_Session: 12 min · 3 turns · 45k tokens_/);
+  assert.match(out, /_Session: 12 min · 3 turns_/);
   assert.doesNotMatch(resumeNote([], null), /Last time/);
 });
 
@@ -123,9 +123,9 @@ test('new errors make one short DM', async () => {
   assert.equal(errorDigest([]), '');
 });
 
-test('summaryLine shows tokens, never dollars', () => {
+test('summaryLine shows how long, never tokens or dollars', () => {
   const line = summaryLine({ minutes: 5, turns: 2, cost: 3.5, tokens: 1234567, diff: '' });
-  assert.equal(line, 'Session: 5 min · 2 turns · 1.2M tokens');
+  assert.equal(line, 'Session: 5 min · 2 turns');
 });
 
 test('a mistyped command suggests the closest one', () => {

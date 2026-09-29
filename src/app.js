@@ -8,7 +8,7 @@ import * as ctl from './ctl.js';
 import { installErrorLog } from './errors.js';
 import * as sessions from './sessions.js';
 import * as live from './live.js';
-import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, tokens, prChanges, homeView, planLines, resumeNote, errorDigest, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock } from './render.js';
+import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, homeView, planLines, resumeNote, errorDigest, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock } from './render.js';
 
 const { App } = bolt;
 installErrorLog(ctl.errorsPush);
@@ -790,12 +790,12 @@ const endWord = (s, state) => {
   if (state === 'paused') return 'Paused';
   return s.interrupted ? 'Interrupted' : 'Done';
 };
-const turnSummary = (s, word, used) => {
+const turnSummary = (s, word) => {
   const n = s.step_n ?? 0, took = secs(Date.now() - (s.busy_since ?? Date.now()));
   // The Slack time of the first message this turn answers.
   const first = Number(ackList(s)[0]);
   const asked = first ? ` · reply ${secs(Date.now() - first * 1000)} after your message` : '';
-  return `${word} · ${n ? `${n} step${n === 1 ? '' : 's'} · ` : ''}${took}${asked}${typeof used === 'number' ? ` · ${tokens(used)} so far` : ''}`;
+  return `${word} · ${n ? `${n} step${n === 1 ? '' : 's'} · ` : ''}${took}${asked}`;
 };
 
 // 1: the turn's reply closes its own stream, so a turn is one message: what the
@@ -809,7 +809,7 @@ const finishTurn = (key, msg, ev) => serial(key, async function finishTurn() {
   // The buttons and their hint line go together; they are what retireButtons removes.
   const actions = (msg.blocks ?? []).filter((b) => b.type === 'actions' || b.block_id === 'answer_hint');
   if (s.status_kind === 'stream' && s.status_ts) {
-    const summary = withLive(key, turnSummary(s, 'Done', ev?.tokens));
+    const summary = withLive(key, turnSummary(s, 'Done'));
     // The rendered answer and, for a question, its options lists; the buttons follow.
     const body = (msg.blocks ?? []).filter((b) => b.type !== 'actions' && b.block_id !== 'answer_hint');
     if (!body.length) body.push(md(ev.text || 'Over to you.'));
@@ -1255,11 +1255,11 @@ async function mindLifetime(key, state) {
 }
 
 // 3: a session warns at SESSION_COST_WARN and pauses at SESSION_COST_CAP (model
-// cost of its transcript). Slack shows tokens only; the dollar limits stay here. A reply resumes it on a new runner, whose cost starts
+// cost of its transcript). Slack shows how long it ran, not tokens or dollars. A reply resumes it on a new runner, whose cost starts
 // again from zero, so each resumed part gets its own cap.
 const COST_WARN = Number(process.env.SESSION_COST_WARN || 5), COST_CAP = Number(process.env.SESSION_COST_CAP || 15);
 const capOf = (s) => Number(s?.cost_cap || COST_CAP);
-async function mindCost(key, spent, used) {
+async function mindCost(key, spent) {
   const s = fresh(key);
   if (!s) return;
   sessions.patch(key, { cost: spent });
@@ -1270,12 +1270,13 @@ async function mindCost(key, spent, used) {
     stopWatch(key);
     await updateStatus(key, 'paused', { busy: false }).catch(() => {});
     sessions.patch(key, { state: 'paused' });
-    await say(s, `I paused: this session reached its usage limit${used != null ? ` (${tokens(used)})` : ''}. Everything is saved. Reply here to continue; the next part starts a new limit.`).catch(() => {});
+    await say(s, `I paused: this session reached its usage limit after ${ranFor(s)}. Everything is saved. Reply here to continue; the next part starts a new limit.`).catch(() => {});
   } else if (spent >= COST_WARN && !s.cost_warned) {
     sessions.patch(key, { cost_warned: true });
-    await say(s, `Heads-up: this session has used ${tokens(used) || 'a lot of tokens'} so far. It pauses when it reaches its usage limit.`).catch(() => {});
+    await say(s, `Heads-up: this session has run for ${ranFor(s)}. It pauses when it reaches its usage limit.`).catch(() => {});
   }
 }
+const ranFor = (s) => { const m = Math.max(1, Math.round((Date.now() - (s.started_at ?? Date.now())) / 60_000)); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
 
 // 11: one way to end a session, so no path leaves the live stream, the watch,
 // or the runner behind. False when the runner could not be stopped.
@@ -1336,7 +1337,7 @@ async function pollOne(key) {
     if (DONE.includes(fresh(key).state) && !DONE.includes(state)) { stopWatch(key); return; }
     await mindLifetime(key, state);
     const last = events.findLast((e) => typeof e.cost === 'number');
-    if (last) await mindCost(key, last.cost, last.tokens);
+    if (last) await mindCost(key, last.cost);
     // 14: a reply can open a turn while this poll was reading "idle". Its
     // stream is newer than what this poll saw, so leave it open.
     const opened = fresh(key)?.status_opened_at ?? 0;

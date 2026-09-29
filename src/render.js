@@ -86,13 +86,12 @@ export function prChanges(prev, cur) {
 }
 
 // Token counts for people; the dollar cost stays with the operator.
-export const tokens = (n) => (typeof n !== 'number' ? '' : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M tokens` : n >= 1e3 ? `${Math.round(n / 1e3)}k tokens` : `${n} tokens`);
 
-// One line about the whole session: time, turns, tokens and the size of the change.
+// One line about the whole session: how long, turns and the size of the change.
 export function summaryLine(sm) {
   if (!sm) return '';
   const parts = [sm.minutes != null && `${sm.minutes} min`, sm.turns && `${sm.turns} turn${sm.turns === 1 ? '' : 's'}`,
-    tokens(sm.tokens), sm.diff && esc(sm.diff)].filter(Boolean);
+    sm.diff && esc(sm.diff)].filter(Boolean);
   return parts.length ? `Session: ${parts.join(' · ')}` : '';
 }
 
@@ -242,7 +241,7 @@ export const HELP = [
   '`!pause` save the work and free the sandbox; a reply picks it up again',
   '`!stop` end the session; the work is kept',
   '`!new` start over from main, rereading this thread (`!restart` works too)',
-  '`!usage` the tokens used so far',
+  '`!usage` how long this session has run, its turns and changes',
   '`!mute` / `!unmute` stop or resume my replies here (👎 on my message mutes too)',
   '`!help` this list',
   '',
