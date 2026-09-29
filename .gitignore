@@ -1,3 +1,5 @@
 node_modules/
 .env
 *.log
+# Any .env copy, such as .env.retired from the move to the manager VM: they hold tokens.
+.env.*
