@@ -475,7 +475,8 @@ async function bang(s, text, m, client) {
     await begin(key, client);
   } else if (cmd === 'usage') {
     const sm = await ctl.cost(s.key);
-    await note(`${summaryLine(sm) || 'No usage recorded yet.'}\nI pause this session when it reaches its usage limit.`);
+    // Time, turns and the change; no tokens or dollars.
+    await note(`${summaryLine(sm && { ...sm, tokens: null }) || 'No usage recorded yet.'}\nI pause this session when it reaches its usage limit.`);
   } else if (cmd === 'desktop') {
     if (ownerOnly()) return;
     const what = 'Firefox against the running stack, and the repo read-only';
