@@ -25,6 +25,22 @@ const app = new App({
 // as an error; the slow and timing lines below only go to the log.
 app.client.on('rate_limited', (sec, info) => console.error(`slack rate limited: ${info?.method ?? 'a call'} waits ${sec}s`));
 const SLOW_MS = 3000;
+
+// Watchdog: the socket client drops a connection whose pings go unanswered and
+// is meant to reconnect. A reconnect that never lands leaves the process up but
+// deaf to Slack, so a tag is lost without a trace. Down for 3 minutes: exit,
+// and systemd starts a fresh bot (Restart=on-failure).
+const WATCHDOG_MS = 180_000;
+let socketDownSince = Date.now();
+const socket = app.receiver?.client;
+socket?.on('connected', () => { if (socketDownSince !== null) console.log('slack socket connected'); socketDownSince = null; });
+for (const ev of ['disconnected', 'reconnecting']) socket?.on(ev, () => { socketDownSince ??= Date.now(); });
+setInterval(() => {
+  if (socketDownSince === null || Date.now() - socketDownSince < WATCHDOG_MS) return;
+  console.error(`watchdog: no Slack connection for ${Math.round((Date.now() - socketDownSince) / 1000)}s; restarting`);
+  for (const w of watchers.values()) w.stop();
+  process.exit(1);
+}, 30_000).unref();
 const resultAt = new Map(); // key → when the watch saw the turn's result
 
 const pending = new Map(); // key → { prompt, owner, channel, thread_ts } until Start
