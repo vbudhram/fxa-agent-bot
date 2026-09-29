@@ -13,8 +13,8 @@ features:
     messages_tab_read_only_enabled: true
   slash_commands:
     - command: /fxa-agent
-      description: List the agent sessions that are running
-      usage_hint: status
+      description: The agent sessions in this channel, or the commands
+      usage_hint: "[status | help]"
       should_escape: false
 oauth_config:
   scopes:

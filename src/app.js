@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import * as ctl from './ctl.js';
 import { installErrorLog } from './errors.js';
 import * as sessions from './sessions.js';
-import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, tokens, prChanges, homeView, planLines, resumeNote, errorDigest } from './render.js';
+import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, tokens, prChanges, homeView, planLines, resumeNote, errorDigest, HELP, closestCommand } from './render.js';
 
 const { App } = bolt;
 installErrorLog(ctl.errorsPush);
@@ -144,7 +144,7 @@ async function begin(key, client) {
   const pr = from?.pr_seen || from?.pr_url ? { pr_seen: from.pr_seen, pr_follow_since: from.pr_follow_since, pr_url: from.pr_url } : {};
   sessions.put({ key, ...rest, ...pr, cursor: 0, state: 'queued', started_at: Date.now() });
   pending.delete(key);
-  if (card_ts) await client.chat.update({ channel: p.channel, ts: card_ts, text: 'On it! Setting up a sandbox; the status below shows each step and how long it took.', blocks: [] }).catch(() => {});
+  if (card_ts) await client.chat.update({ channel: p.channel, ts: card_ts, text: 'On it! Setting up a sandbox; the status below shows each step and how long it took. Type `!help` any time for commands.', blocks: [] }).catch(() => {});
   await launch(key, client);
 }
 
@@ -386,17 +386,6 @@ async function takeFiles(s, message, client) {
 
 // Bang commands, as in Claude Tag: @fxa-agent !status, !help, and so on. The
 // ones that change the session are for its owner.
-const HELP = [
-  '`!status` where this session is, just for you',
-  '`!interrupt` stop the current step, keep the session',
-  '`!stop` end the session and keep the work',
-  '`!restart` end it and start fresh, rereading the thread',
-  '`!mute` / `!unmute` stop or resume my replies here (👎 on my message also mutes)',
-  '`!usage` the tokens this session has used so far',
-  '`!plan` the test plan: how each change will be verified',
-  '`!desktop` a Linux desktop with Firefox on this session\'s sandbox, just for you',
-  '`!help` this list',
-].join('\n');
 async function bang(s, text, m, client) {
   const cmd = text.slice(1).split(/\s+/)[0].toLowerCase();
   const note = (t) => client.chat.postEphemeral({ channel: m.channel, thread_ts: m.thread_ts, user: m.user, text: t }).catch(() => {});
@@ -410,10 +399,44 @@ async function bang(s, text, m, client) {
     await note(`${s ? '' : 'There is no session in this thread. Tag me with a task to start one.\n\n'}${HELP}`);
     return;
   }
+  // Only while the session runs and no turn is open: Open PR and Push branch
+  // wrap up the agent's finished work.
+  const readyToShip = () => {
+    const cur = fresh(s.key);
+    if (cur.state !== 'active') { note(`I can do that only while the session runs.${['paused', 'stopped'].includes(cur.state) ? ' Reply here to pick it up first.' : ''}`); return false; }
+    if (cur.status_ts) { note('I am in the middle of a turn. Wait for my reply, or `!interrupt` first.'); return false; }
+    return true;
+  };
   if (cmd === 'status') {
-    const mins = s.started_at ? Math.round((Date.now() - s.started_at) / 60_000) : 0;
-    await note([`*${STATE_WORD[s.state] ?? s.state}* · ${mins} min · started by <@${s.owner}>`,
-      s.last_act ? `Now: ${s.last_act}` : null, s.muted ? 'Replies are muted here. `!unmute` to hear from me.' : null].filter(Boolean).join('\n'));
+    // In the thread, not just for the asker: whoever follows it may want to know.
+    const cur = fresh(s.key), mins = cur.started_at ? Math.round((Date.now() - cur.started_at) / 60_000) : 0;
+    await say(s, [`*${STATE_WORD[cur.state] ?? cur.state}* · ${mins} min · started by <@${cur.owner}>`,
+      cur.last_act ? `Now: ${cur.last_act}` : null,
+      cur.pr_url ? `PR: ${cur.pr_url}` : null,
+      cur.boot_s ? `Setup took ${cur.boot_s}s.` : null,
+      cur.state === 'active' && !cur.status_ts ? 'Waiting for you. I pause after 30 minutes without a message; a reply picks it up again.' : null,
+      cur.muted ? 'Replies are muted here. `!unmute` to hear from me.' : null].filter(Boolean).join('\n'));
+  } else if (cmd === 'pr' || cmd === 'push') {
+    if (ownerOnly() || !readyToShip()) return;
+    const what = cmd === 'push' ? 'Push branch' : fresh(s.key).pr_url ? 'Update PR' : 'Open PR';
+    const busy = await startWrap(s, client, what, m.user);
+    if (busy) { await note(busy); return; }
+    await (cmd === 'push' ? pushBranch(s, client) : openPr(s, client)).catch((e) => fail(client, s, e));
+  } else if (cmd === 'diff') {
+    if (ownerOnly()) return;
+    await note('Getting the diff…');
+    await postDiff(s, client).catch((e) => fail(client, s, e));
+  } else if (cmd === 'pause') {
+    if (ownerOnly()) return;
+    const cur = fresh(s.key);
+    if (cur.state !== 'active') { await note(cur.state === 'paused' ? 'Already paused. Reply here to pick it up again.' : `There is nothing to pause: this session is ${STATE_WORD[cur.state] ?? cur.state}.`); return; }
+    if (cur.status_ts) { await note('I am in the middle of a turn. `!interrupt` first, then `!pause`.'); return; }
+    const ok = await ctl.pause(s.key).then(() => true, (e) => { console.error('pause', s.key, e.stderr || e.message); return false; });
+    if (!ok) { await note('The pause failed. The error is in the bot log.'); return; }
+    stopWatch(s.key);
+    await updateStatus(s.key, 'paused', { busy: false }).catch(() => {});
+    sessions.patch(s.key, { state: 'paused' });
+    await say(s, 'Paused. Everything is saved and the sandbox is freed. Reply here to pick it up again.');
   } else if (cmd === 'interrupt') {
     if (steerOnly()) return;
     const out = await ctl.interrupt(s.key).catch(() => '');
@@ -423,7 +446,7 @@ async function bang(s, text, m, client) {
   } else if (cmd === 'stop') {
     if (ownerOnly()) return;
     await say(s, await stoppedText(s.key));
-  } else if (cmd === 'restart') {
+  } else if (cmd === 'new' || cmd === 'restart') {
     if (ownerOnly()) return;
     if (LIVE.includes(s.state) && !(await stopSession(s.key))) { await say(s, STOPPED_TEXT(false)); return; }
     const request = (s.prompt ?? '').split('\n\nEarlier messages')[0];
@@ -452,14 +475,16 @@ async function bang(s, text, m, client) {
     const base = process.env.DASHBOARD_URL || 'http://localhost:8787';
     await note(`<${base}/desktop/${s.key}|Open the desktop> for this session: ${what}. It works on the Mac that runs the dashboard. The first open takes about a minute.`);
   } else if (cmd === 'plan') {
+    // In the thread: the plan is how the change will be checked, which all its readers care about.
     const p = await ctl.plan(s.key);
-    await note(planLines(p) || 'There is no test plan yet. The first turn writes it.');
+    await say(s, planLines(p) || 'There is no test plan yet. The first turn writes it.');
   } else if (cmd === 'mute' || cmd === 'unmute') {
     if (steerOnly()) return;
     sessions.patch(s.key, { muted: cmd === 'mute' });
     await note(cmd === 'mute' ? 'Muted. I keep working but stop posting here. `!unmute` to hear from me again.' : 'Unmuted.');
   } else {
-    await note(`I don't know \`!${cmd}\`.\n${HELP}`);
+    const guess = closestCommand(cmd);
+    await note(guess ? `I don't know \`!${cmd}\`. Did you mean \`!${guess}\`? \`!help\` lists them all.` : `I don't know \`!${cmd}\`.\n\n${HELP}`);
   }
 }
 
@@ -619,7 +644,7 @@ async function updateStreamNow(s, state, activity) {
     label = `Sandbox ready in ${activity.boot.total}s`;
     await app.client.apiCall('chat.appendStream', { ...at, chunks: [row(t, label, 'in_progress', details)] });
     s = { ...s, boot_n, boot_shown: true, cur_label: label, last_act: label };
-    sessions.patch(s.key, { boot_n, boot_shown: true, cur_label: label, last_act: label });
+    sessions.patch(s.key, { boot_n, boot_shown: true, cur_label: label, last_act: label, boot_s: activity.boot.total });
   }
   if (activity?.busy) {
     const news = unsent.get(s.key) ?? [];
@@ -893,13 +918,16 @@ const ownerAction = (id, fn) => app.action(id, async ({ ack, body, action, clien
 const working = (s, body, text) => app.client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: body.user.id, text }).catch(() => {});
 ownerAction('diff', async (s, client, action, body) => {
   working(s, body, 'Getting the diff…');
+  await postDiff(s, client);
+});
+async function postDiff(s, client) {
   const d = await ctl.diff(s.key);
   if (!d.trim()) { await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'No changes yet.' }); return; }
   const files = (d.match(/^diff --git /gm) ?? []).length;
   const add = (d.match(/^\+(?!\+\+ )/gm) ?? []).length, del = (d.match(/^-(?!-- )/gm) ?? []).length;
   await client.files.uploadV2({ channel_id: s.channel, thread_ts: s.thread_ts, filename: `${s.key}.diff`, content: d,
     snippet_type: 'diff', initial_comment: `${files} file${files === 1 ? '' : 's'} changed, +${add} −${del}` });
-});
+}
 
 // 7: stop the running turn but keep the session and everything done so far.
 app.action('interrupt', async ({ ack, body, action, client }) => {
@@ -921,30 +949,42 @@ async function interrupt(s, client, body) {
 const wrapping = new Set();
 // A tap must show at once: swap the clicked buttons for a line that says what started.
 async function wrapTap(s, client, body, what) {
-  if (wrapping.has(s.key) || fresh(s.key)?.state === 'wrapping') {
-    working(s, body, 'Already wrapping up. I will post here when it is done.');
-    return false;
-  }
-  wrapping.add(s.key); setTimeout(() => wrapping.delete(s.key), 30_000);
-  await client.chat.update({ channel: s.channel, ts: body.message.ts, text: body.message.text,
-    blocks: [...(body.message.blocks ?? []).filter((x) => x.type !== 'actions'),
-      { type: 'context', elements: [{ type: 'mrkdwn', text: `${what} · started by <@${body.user.id}>` }] }] }).catch(() => {});
-  if (fresh(s.key)?.buttons_msg?.ts === body.message.ts) sessions.patch(s.key, { buttons_msg: null });
-  return true;
+  const busy = await startWrap(s, client, what, body.user.id, body.message);
+  if (busy) working(s, body, busy);
+  return !busy;
 }
-ownerAction('open_pr', async (s, client, action, body) => {
-  if (!await wrapTap(s, client, body, 'Open PR')) return;
+// Open PR and Push branch start the same way from a button or a command: the
+// tapped message, or else the newest button row, loses its buttons and says
+// who started it. Returns why it cannot start, or null.
+async function startWrap(s, client, what, user, msg) {
+  if (wrapping.has(s.key) || fresh(s.key)?.state === 'wrapping') return 'Already wrapping up. I will post here when it is done.';
+  wrapping.add(s.key); setTimeout(() => wrapping.delete(s.key), 30_000);
+  const target = msg ?? fresh(s.key)?.buttons_msg;
+  if (target?.ts) {
+    await client.chat.update({ channel: s.channel, ts: target.ts, text: target.text,
+      blocks: [...(target.blocks ?? []).filter((x) => x.type !== 'actions'),
+        { type: 'context', elements: [{ type: 'mrkdwn', text: `${what} · started by <@${user}>` }] }] }).catch(() => {});
+    if (fresh(s.key)?.buttons_msg?.ts === target.ts) sessions.patch(s.key, { buttons_msg: null });
+  }
+  return null;
+}
+async function openPr(s, client) {
   // The note goes first; finish then returns at once and the poll posts the PR link.
   // The session stays open after its PR, so a second Open PR updates that PR.
   const text = fresh(s.key)?.pr_url ? 'Updating the PR: review, the safety checks, then a push to it. The session stays open.'
     : 'Wrapping up: review, PR description, then a draft PR. I will post the link here, and the session stays open.';
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text });
   await ctl.finish(s.key);
-});
-ownerAction('push_branch', async (s, client, action, body) => {
-  if (!await wrapTap(s, client, body, 'Push branch')) return;
+}
+async function pushBranch(s, client) {
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Pushing the branch: a commit title, the safety checks, then the push. No PR, and the session stays open. The review runs when you open the PR.' });
   await ctl.finish(s.key, true);
+}
+ownerAction('open_pr', async (s, client, action, body) => {
+  if (await wrapTap(s, client, body, fresh(s.key)?.pr_url ? 'Update PR' : 'Open PR')) await openPr(s, client);
+});
+ownerAction('push_branch', async (s, client, action, body) => {
+  if (await wrapTap(s, client, body, 'Push branch')) await pushBranch(s, client);
 });
 const stopping = new Set();
 ownerAction('stop', async (s, client, action, body) => {
@@ -1101,7 +1141,11 @@ app.command('/fxa-agent', async ({ ack, command, respond, client }) => {
     await respond({ response_type: 'ephemeral', text: 'Run this in a channel where the agent works.' });
     return;
   }
-  await respond({ response_type: 'ephemeral', text: await statusList(client, command.channel_id) });
+  // Slack does not say which thread a slash command came from, so it cannot act
+  // on a session: help and the session list only.
+  const sub = (command.text ?? '').trim().toLowerCase();
+  if (sub === 'help') { await respond({ response_type: 'ephemeral', text: `Tag @fxa-agent in a thread with a task to start a session. In its thread:\n\n${HELP}` }); return; }
+  await respond({ response_type: 'ephemeral', text: `${await statusList(client, command.channel_id)}\n\n\`/fxa-agent help\` lists the commands.` });
 });
 
 // 5: GCE deletes a runner 90 minutes after it boots, with no warning. Warn the

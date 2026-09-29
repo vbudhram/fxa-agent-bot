@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { render, operatorProblem, summaryLine } from '../src/render.js';
+import { render, operatorProblem, summaryLine, closestCommand } from '../src/render.js';
 
 test('operator problems are named, other errors are not', () => {
   assert.equal(operatorProblem('ERROR: (gcloud.compute.ssh) Reauthentication failed. cannot prompt').kind, 'gcloud');
@@ -71,7 +71,9 @@ test('the Home tab lists your sessions, newest first, with thread and PR links',
   assert.equal(rows[0].accessory.url, 'https://slack.example.com/t/1');
   assert.match(rows[1].text.text, /Paused: reply in the thread to resume · 3h ago/);
   assert.equal(rows[1].accessory, undefined);
-  assert.match(homeView([], {}, now).blocks.at(-1).text.text, /No sessions yet/);
+  const empty = homeView([], {}, now).blocks.map((b) => b.text?.text ?? '').join('\n');
+  assert.match(empty, /No sessions yet/);
+  assert.match(empty, /`!pr` open the PR/); // the commands are on the Home tab
 });
 
 test('bot errors become records that group like the controller\'s', async () => {
@@ -124,4 +126,10 @@ test('new errors make one short DM', async () => {
 test('summaryLine shows tokens, never dollars', () => {
   const line = summaryLine({ minutes: 5, turns: 2, cost: 3.5, tokens: 1234567, diff: '' });
   assert.equal(line, 'Session: 5 min · 2 turns · 1.2M tokens');
+});
+
+test('a mistyped command suggests the closest one', () => {
+  assert.equal(closestCommand('stauts'), 'status');
+  assert.equal(closestCommand('pau'), 'pause');
+  assert.equal(closestCommand('xyzzy'), null);
 });

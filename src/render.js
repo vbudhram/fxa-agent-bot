@@ -225,6 +225,43 @@ export function stage(step) {
 const HOME_STATE = { queued: ['⏳', 'Waiting for capacity'], starting: ['🔧', 'Setting up'], active: ['🟢', 'Working'],
   wrapping: ['📦', 'Wrapping up'], paused: ['⏸️', 'Paused: reply in the thread to resume'], pr_open: ['🔀', 'PR open'],
   stopped: ['⏹️', 'Stopped'], failed: ['⚠️', 'Failed'] };
+// Every command, grouped by when you'd use it; each button has one too, since
+// buttons scroll away or go with the next turn. !help and the Home tab show it.
+export const COMMANDS = ['status', 'plan', 'interrupt', 'desktop', 'diff', 'pr', 'push', 'pause', 'stop', 'new', 'restart', 'usage', 'mute', 'unmute', 'help'];
+export const HELP = [
+  '*While I work*',
+  '`!status` what I am doing, the PR, and how long setup took',
+  '`!plan` the test plan: how each change will be checked',
+  '`!interrupt` stop the current step; the session stays',
+  '`!desktop` a Linux desktop with Firefox on this sandbox, just for you',
+  '*When it is ready*',
+  '`!diff` the changes so far',
+  '`!pr` open the PR, or update it once there is one',
+  '`!push` push the branch, with no PR',
+  '*The session*',
+  '`!pause` save the work and free the sandbox; a reply picks it up again',
+  '`!stop` end the session; the work is kept',
+  '`!new` start over from main, rereading this thread (`!restart` works too)',
+  '`!usage` the tokens used so far',
+  '`!mute` / `!unmute` stop or resume my replies here (👎 on my message mutes too)',
+  '`!help` this list',
+  '',
+  'A reply in the thread steers me. After a pause or a stop, a reply or a tag picks the work up again. Once the PR merges or closes, a tag starts something new.',
+].join('\n');
+
+// "Did you mean": the closest command, when it is close.
+export function closestCommand(cmd) {
+  const dist = (a, b) => {
+    const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+    for (let j = 1; j <= b.length; j++) d[0][j] = j;
+    for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    return d[a.length][b.length];
+  };
+  const best = COMMANDS.map((c) => [c, c.startsWith(cmd) && cmd.length >= 2 ? 0 : dist(cmd, c)]).sort((x, y) => x[1] - y[1])[0];
+  return best && best[1] <= 2 ? best[0] : null;
+}
+
 export function homeView(list, links = {}, now = Date.now()) {
   const mine = [...list].sort((a, b) => (b.started_at ?? 0) - (a.started_at ?? 0)).slice(0, 15);
   const age = (t) => { const m = Math.round((now - (t ?? now)) / 60_000); return m < 60 ? `${m}m ago` : m < 2880 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`; };
@@ -241,6 +278,9 @@ export function homeView(list, links = {}, now = Date.now()) {
     blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `${icon} *${title}*\n${word} · ${age(x.started_at)} · \`${x.key}\`${pr}` },
       ...(links[x.key] ? { accessory: { type: 'button', text: { type: 'plain_text', text: 'Open thread' }, url: links[x.key], action_id: `home_open_${x.key}` } } : {}) });
   }
+  // The commands, always one click away in Slack.
+  blocks.push({ type: 'divider' }, { type: 'header', text: { type: 'plain_text', text: 'Commands' } },
+    { type: 'section', text: { type: 'mrkdwn', text: 'Type these in a session\'s thread.\n\n' + HELP } });
   return { type: 'home', blocks };
 }
 
