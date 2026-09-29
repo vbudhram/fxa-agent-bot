@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import * as ctl from './ctl.js';
 import { installErrorLog } from './errors.js';
 import * as sessions from './sessions.js';
-import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, tokens, prChanges, homeView, planLines, resumeNote, errorDigest, HELP, closestCommand } from './render.js';
+import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, tokens, prChanges, homeView, planLines, resumeNote, errorDigest, HELP, closestCommand, draftSplit } from './render.js';
 
 const { App } = bolt;
 installErrorLog(ctl.errorsPush);
@@ -647,6 +647,19 @@ async function updateStreamNow(s, state, activity) {
     sessions.patch(s.key, { boot_n, boot_shown: true, cur_label: label, last_act: label, boot_s: activity.boot.total });
   }
   if (activity?.busy) {
+    // The reply text written since the last send rides in the same call as the rows.
+    const say = takeText(s.key);
+    const send = async (chunks) => {
+      const all = say ? [{ type: 'markdown_text', text: say }, ...chunks] : chunks;
+      if (!all.length) return;
+      try { await app.client.apiCall('chat.appendStream', { ...at, chunks: all }); }
+      catch (e) {
+        // Slack refused text chunks: keep the task timeline and stop sending text.
+        if (!say || !/invalid|unknown|chunk/i.test(e.data?.error ?? '')) throw e;
+        streamText = false; console.error(`reply streaming off (${e.data?.error})`);
+        if (chunks.length) await app.client.apiCall('chat.appendStream', { ...at, chunks });
+      }
+    };
     const news = unsent.get(s.key) ?? [];
     unsent.delete(s.key);
     // Boot steps and the no-stream fallback come from the poll, not the watch.
@@ -656,8 +669,8 @@ async function updateStreamNow(s, state, activity) {
     if (!news.length && state === 'starting' && s.last_step) news.push(s.last_step);
     // Nothing new: refresh the running row's clock once a minute, no more.
     if (!news.length) {
-      if (state === 'starting' || !kind || Date.now() - (s.title_at ?? 0) < 60_000) return {};
-      await app.client.apiCall('chat.appendStream', { ...at, chunks: [row(t, rowTitle(true), 'in_progress')] });
+      if (state === 'starting' || !kind || Date.now() - (s.title_at ?? 0) < 60_000) { await send([]); return {}; }
+      await send([row(t, rowTitle(true), 'in_progress')]);
       return { title_at: Date.now() };
     }
     if (state === 'starting') {
@@ -665,7 +678,7 @@ async function updateStreamNow(s, state, activity) {
       const up = Math.round(b?.elapsed ?? (Date.now() - (s.busy_since ?? Date.now())) / 1000);
       label = `Setting up the sandbox: ${news.at(-1)} · ${up}s of about ${b?.expect ?? SETUP_EXPECT_S}s`;
       const { details, boot_n } = bootDetails(s, b, false);
-      await app.client.apiCall('chat.appendStream', { ...at, chunks: [row(t, label, 'in_progress', details)] });
+      await send([row(t, label, 'in_progress', details)]);
       return { last_act: label, cur_label: label, last_step: news.at(-1), boot_n };
     }
     const chunks = [], done = [...(s.rows_done ?? [])];
@@ -691,7 +704,7 @@ async function updateStreamNow(s, state, activity) {
         chunks.push(row(t, rowTitle(true), 'in_progress', more));
       }
     }
-    await app.client.apiCall('chat.appendStream', { ...at, chunks });
+    await send(chunks);
     return { step_n: n, task_n: t, cur_kind: kind, cur_count: count, cur_label: label, cur_lines: lines, title_at: Date.now(),
       last_act: rowTitle(), last_step: news.at(-1)?.host ?? news.at(-1), rows_done: done };
   }
@@ -804,15 +817,12 @@ function ensureWatch(key) {
 }
 function stopWatch(key) { watchers.get(key)?.stop(); watchers.delete(key); }
 
-// The reply streams into the turn's message as Claude writes it, at most once a
-// second. Control lines (status:, OPTION:, QUESTION:) are dropped, and a line
-// that may become one waits until it is whole. finishTurn then rewrites the
-// message with the formatted answer and its buttons.
+// The reply streams into the turn's message as Claude writes it, with the
+// checklist rows, in one Slack call per 1.2 s (liveEdit). Control lines are
+// dropped (draftSplit). finishTurn then rewrites the message with the formatted
+// answer and its buttons.
 let streamText = process.env.STREAM_TEXT !== '0';
 const drafts = new Map(); // key → { buf, timer, sent }
-const CONTROL = ['status:', 'OPTION:', 'QUESTION:'];
-const isControl = (l) => CONTROL.some((c) => l.startsWith(c));
-const mayBeControl = (l) => CONTROL.some((c) => c.startsWith(l) || l.startsWith(c));
 function draftText(key, text) {
   if (!streamText) return;
   const d = drafts.get(key) ?? { buf: '', timer: null, sent: false };
@@ -820,7 +830,17 @@ function draftText(key, text) {
   // A new block of text after some was shown: a paragraph break.
   if (text === null) { if (d.sent || d.buf) d.buf += '\n\n'; return; }
   d.buf += text;
-  if (!d.timer) d.timer = setTimeout(() => flushDraft(key), 1000);
+  liveEdit(key);
+}
+// The reply text not yet sent, and marks it sent.
+function takeText(key) {
+  const d = drafts.get(key);
+  if (!d || !streamText) return '';
+  clearTimeout(d.timer); d.timer = null;
+  const { out, keep } = draftSplit(d.buf);
+  d.buf = keep;
+  if (out) d.sent = true;
+  return out;
 }
 const flushDraft = (key) => serial(key, async function flushDraft() {
   const d = drafts.get(key);
@@ -830,10 +850,7 @@ const flushDraft = (key) => serial(key, async function flushDraft() {
   if (!s || DONE.includes(s.state)) { drafts.delete(key); return; }
   // The turn's status is not open yet (a queued turn): try again shortly.
   if (s.status_kind !== 'stream' || !s.status_ts) { if (s.status_kind !== 'line') d.timer = setTimeout(() => flushDraft(key), 1000); else drafts.delete(key); return; }
-  const lines = d.buf.split('\n'), tail = lines.pop();
-  const keep = mayBeControl(tail) ? tail : '';
-  const out = lines.filter((l) => !isControl(l)).map((l) => `${l}\n`).join('') + (keep ? '' : tail);
-  d.buf = keep;
+  const out = takeText(key);
   if (!out) return;
   try {
     await app.client.apiCall('chat.appendStream', { channel: s.channel, ts: s.status_ts, chunks: [{ type: 'markdown_text', text: out }] });
@@ -850,7 +867,7 @@ function pushStep(key, text) {
   list.push(text);
   steps.set(key, list.slice(-5));
 }
-// At most one edit per 1.2 s per session; Slack rate-limits chat.update.
+// At most one Slack call per 1.2 s per session, rows and reply text together.
 function liveEdit(key) {
   if (editTimers.has(key)) return;
   const wait = Math.max(0, 1200 - (Date.now() - (lastEdit.get(key) ?? 0)));
@@ -858,6 +875,7 @@ function liveEdit(key) {
     editTimers.delete(key); lastEdit.set(key, Date.now());
     const s = fresh(key);
     if (s?.status_ts) updateStatus(key, s.state, { busy: true, text: null, live: true }).catch((e) => console.error('status', key, e.message));
+    else if (drafts.get(key)?.buf) flushDraft(key);
   }, wait));
 }
 

@@ -308,3 +308,13 @@ export function errorDigest(rows) {
   return `${rows.length === 1 ? 'A new error' : `${rows.length} new errors`} in the agent pipeline:\n${lines.join('\n')}`
     + `${rows.length > 5 ? `\n…and ${rows.length - 5} more.` : ''}\nDetails: \`fxa-sandbox-ctl errors show <sig>\`, or the dashboard's Errors page.`;
 }
+
+// Reply text ready to stream: whole lines without control lines (status:,
+// OPTION:, QUESTION:), and a last line held back while it may become one.
+const CONTROL = ['status:', 'OPTION:', 'QUESTION:'];
+export function draftSplit(buf) {
+  const lines = buf.split('\n'), tail = lines.pop();
+  const keep = CONTROL.some((c) => c.startsWith(tail) || tail.startsWith(c)) ? tail : '';
+  const out = lines.filter((l) => !CONTROL.some((c) => l.startsWith(c))).map((l) => `${l}\n`).join('') + (keep ? '' : tail);
+  return { out, keep };
+}

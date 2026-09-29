@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { render, operatorProblem, summaryLine, closestCommand } from '../src/render.js';
+import { render, operatorProblem, summaryLine, closestCommand, draftSplit } from '../src/render.js';
 
 test('operator problems are named, other errors are not', () => {
   assert.equal(operatorProblem('ERROR: (gcloud.compute.ssh) Reauthentication failed. cannot prompt').kind, 'gcloud');
@@ -132,4 +132,10 @@ test('a mistyped command suggests the closest one', () => {
   assert.equal(closestCommand('stauts'), 'status');
   assert.equal(closestCommand('pau'), 'pause');
   assert.equal(closestCommand('xyzzy'), null);
+});
+
+test('streamed reply text drops control lines and holds back a partial one', () => {
+  assert.deepEqual(draftSplit('I will look.\nstatus: reading\nNext'), { out: 'I will look.\nNext', keep: '' });
+  assert.deepEqual(draftSplit('Done.\nOPT'), { out: 'Done.\n', keep: 'OPT' });
+  assert.deepEqual(draftSplit('QUESTION: which?\n'), { out: '', keep: '' });
 });
