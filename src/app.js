@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import * as ctl from './ctl.js';
 import { installErrorLog } from './errors.js';
 import * as sessions from './sessions.js';
+import * as live from './live.js';
 import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, tokens, prChanges, homeView, planLines, resumeNote, errorDigest, HELP, closestCommand, draftSplit } from './render.js';
 
 const { App } = bolt;
@@ -591,6 +592,7 @@ async function startStatusNow(s, verb) {
   if (!cur || cur.status_ts || cur.muted) return;
   steps.delete(s.key); unsent.delete(s.key);
   const first = verb === 'Setting up' ? 'Setting up a sandbox' : `${verb} on it`;
+  liveTurn.set(s.key, newLive(first));
   if (streamOk) {
     try {
       const { ts } = await app.client.apiCall('chat.startStream', {
@@ -667,10 +669,41 @@ async function updateStreamNow(s, state, activity) {
       news.push(activity.host ? { host: activity.text } : activity.text);
     // Setup refreshes every poll, so its clock keeps moving between steps.
     if (!news.length && state === 'starting' && s.last_step) news.push(s.last_step);
+    const L = LIVE_ON && state !== 'starting' ? liveOf(s.key) : null;
+    // The facts (files, tests, lint) ride on the first row's title, at most every 10 s.
+    const header = [];
+    if (L) {
+      const f = live.facts(L.st);
+      if (f !== L.header && (!L.header || Date.now() - L.headerAt >= 10_000)) {
+        L.header = f; L.headerAt = Date.now();
+        header.push({ type: 'task_update', id: 't0', title: `${L.title0}${f ? ` · ${f}` : ''}`.slice(0, 250), status: t > 0 || L.todo ? 'complete' : 'in_progress' });
+      }
+    }
+    // Once the agent keeps a todo list, its todos are the rows and each step is
+    // a detail line under the todo in progress.
+    if (L?.st.todos?.length) {
+      const chunks = [...header], rows = live.todoRows(L.st);
+      // The todos take over: the open stage row, or the first row if none opened yet, ticks.
+      if (!L.todo) {
+        L.todo = true;
+        chunks.push(t > 0 ? row(t, rowTitle(), 'complete') : { type: 'task_update', id: 't0', title: `${L.title0}${L.header ? ` · ${L.header}` : ''}`.slice(0, 250), status: 'complete' });
+      }
+      const ch = live.changedRows(L.sent, rows); L.sent = ch.sent;
+      for (const r of ch.rows) chunks.push({ type: 'task_update', id: r.id, title: r.title, status: r.status });
+      const curId = live.currentRow(rows), cur = rows.find((r) => r.id === curId);
+      for (const item of news) {
+        const line = String(item?.host ?? item).slice(0, 200), k = (L.lines[curId] ?? 0) + 1;
+        L.lines[curId] = k;
+        const more = k <= DETAIL_LINES ? `${k > 1 ? '\n' : ''}${line}` : k === DETAIL_LINES + 1 ? '\n… more steps' : '';
+        if (cur && more) chunks.push({ type: 'task_update', id: curId, title: cur.title, status: cur.status, details: more.slice(0, 250) });
+      }
+      await send(chunks);
+      return news.length ? { step_n: n + news.length, last_step: news.at(-1)?.host ?? news.at(-1), last_act: cur?.title ?? s.last_act, title_at: Date.now() } : {};
+    }
     // Nothing new: refresh the running row's clock once a minute, no more.
     if (!news.length) {
-      if (state === 'starting' || !kind || Date.now() - (s.title_at ?? 0) < 60_000) { await send([]); return {}; }
-      await send([row(t, rowTitle(true), 'in_progress')]);
+      if (state === 'starting' || !kind || Date.now() - (s.title_at ?? 0) < 60_000) { await send(header); return {}; }
+      await send([...header, row(t, rowTitle(true), 'in_progress')]);
       return { title_at: Date.now() };
     }
     if (state === 'starting') {
@@ -681,7 +714,7 @@ async function updateStreamNow(s, state, activity) {
       await send([row(t, label, 'in_progress', details)]);
       return { last_act: label, cur_label: label, last_step: news.at(-1), boot_n };
     }
-    const chunks = [], done = [...(s.rows_done ?? [])];
+    const chunks = [...header], done = [...(s.rows_done ?? [])];
     for (const item of news) {
       // A host step of Open PR or Push branch is a row of its own, with no details.
       const step = item?.host ?? item;
@@ -708,7 +741,8 @@ async function updateStreamNow(s, state, activity) {
     return { step_n: n, task_n: t, cur_kind: kind, cur_count: count, cur_label: label, cur_lines: lines, title_at: Date.now(),
       last_act: rowTitle(), last_step: news.at(-1)?.host ?? news.at(-1), rows_done: done };
   }
-  const summary = turnSummary(s, endWord(s, state));
+  const summary = withLive(s.key, turnSummary(s, endWord(s, state)));
+  liveTurn.delete(s.key);
   await app.client.apiCall('chat.stopStream', { ...at, chunks: [row(t, rowTitle(), 'complete')] });
   await app.client.chat.update({ ...at, text: summary, blocks: [{ type: 'context', elements: [{ type: 'mrkdwn', text: summary }] }] }).catch(() => {});
   return { ...STATUS_CLEAR, interrupted: null };
@@ -756,7 +790,7 @@ const finishTurn = (key, msg, ev) => serial(key, async function finishTurn() {
   // The buttons and their hint line go together; they are what retireButtons removes.
   const actions = (msg.blocks ?? []).filter((b) => b.type === 'actions' || b.block_id === 'answer_hint');
   if (s.status_kind === 'stream' && s.status_ts) {
-    const summary = turnSummary(s, 'Done', ev?.tokens);
+    const summary = withLive(key, turnSummary(s, 'Done', ev?.tokens));
     // The rendered answer and, for a question, its options lists; the buttons follow.
     const body = (msg.blocks ?? []).filter((b) => b.type !== 'actions' && b.block_id !== 'answer_hint');
     if (!body.length) body.push(md(ev.text || 'Over to you.'));
@@ -765,7 +799,9 @@ const finishTurn = (key, msg, ev) => serial(key, async function finishTurn() {
         chunks: [{ type: 'task_update', id: 't0', title: summary, status: 'complete' }] });
       // Rewrite the finished stream: summary, answer, and this turn's buttons.
       // It also drops the Interrupt button, which a stream cannot remove.
-      const steps = checklistLine(s);
+      const lt = liveTurn.get(key);
+      const steps = (lt && live.todoLine(lt.st)) || checklistLine(s);
+      liveTurn.delete(key);
       const kept = [{ type: 'context', elements: [{ type: 'mrkdwn', text: summary }, ...(steps ? [{ type: 'mrkdwn', text: steps.slice(0, 2900) }] : [])] }, ...body];
       // The answer's own order: with several questions, each row of buttons sits
       // under its question, not all together at the end.
@@ -804,6 +840,15 @@ async function retireButtons(key, current) {
 // While a turn runs, a watch stream feeds the status line within a second, and
 // the turn's result triggers an immediate poll so the reply posts at once.
 const watchers = new Map(), steps = new Map(), editTimers = new Map(), lastEdit = new Map();
+// The live status per turn: todos as rows, and files, tests and lint in the
+// header (src/live.js). In memory only; after a restart it fills in again from
+// the next events. LIVE_STATUS=0 turns it off.
+const LIVE_ON = process.env.LIVE_STATUS !== '0';
+const LIVE_EVENTS = new Set(['todos', 'edit', 'subagent_start', 'tool_done', 'tests', 'lint', 'types']);
+const liveTurn = new Map();
+const newLive = (title0 = 'Working on it') => ({ st: live.start(), sent: {}, lines: {}, header: '', headerAt: 0, todo: false, title0 });
+const liveOf = (key) => { if (!liveTurn.has(key)) liveTurn.set(key, newLive()); return liveTurn.get(key); };
+const withLive = (key, summary) => { const lt = liveTurn.get(key), x = lt ? live.summary(lt.st) : ''; return x ? `${summary} · ${x}` : summary; };
 function ensureWatch(key) {
   if (watchers.has(key)) return;
   const w = ctl.watch(key, (ev) => {
@@ -811,6 +856,11 @@ function ensureWatch(key) {
     if (ev.type === 'result') { resultAt.set(key, Date.now()); setTimeout(() => pollOne(key), 300); }
     if (ev.type === 'text_start') draftText(key, null);
     if (ev.type === 'text') draftText(key, ev.text);
+    if (LIVE_ON && LIVE_EVENTS.has(ev.type)) {
+      const L = liveOf(key);
+      L.st = live.reduce(L.st, ev);
+      if (ev.type !== 'tool_done' || L.st.subagents[ev.id]) liveEdit(key);
+    }
   });
   w.child.on('exit', () => { if (watchers.get(key) === w) watchers.delete(key); });
   watchers.set(key, w);

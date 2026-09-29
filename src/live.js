@@ -1,0 +1,82 @@
+// The live status of one turn, built from the watch's events: the agent's todo
+// list, the files it edited, its subagents, and test, lint and type-check
+// counts. Pure functions; app.js sends what they return. Nothing here is saved.
+import { defuse } from './render.js';
+
+export const MAX_ROWS = 40; // Slack keeps 50 rows per message and drops the rest silently
+
+export const start = () => ({ todos: null, files: {}, subagents: {}, tests: null, lint: null, types: null });
+
+export function reduce(st, ev) {
+  switch (ev?.type) {
+    case 'todos':
+      return { ...st, todos: (ev.items ?? []).map((t) => ({ content: String(t.content ?? ''), status: String(t.status ?? 'pending'), active: String(t.active ?? '') })) };
+    case 'edit': {
+      if (!ev.file) return st;
+      const f = st.files[ev.file] ?? { added: 0, removed: 0 };
+      return { ...st, files: { ...st.files, [ev.file]: { added: f.added + (Number(ev.added) || 0), removed: f.removed + (Number(ev.removed) || 0) } } };
+    }
+    case 'subagent_start':
+      return { ...st, subagents: { ...st.subagents, [ev.id]: { description: String(ev.description ?? ''), done: false } } };
+    case 'tool_done':
+      return st.subagents[ev.id] ? { ...st, subagents: { ...st.subagents, [ev.id]: { ...st.subagents[ev.id], done: true } } } : st;
+    case 'tests': case 'lint': case 'types':
+      return { ...st, [ev.type]: ev };
+    default:
+      return st;
+  }
+}
+
+const STATUS = { completed: 'complete', in_progress: 'in_progress' };
+const clip = (t) => defuse(t).replace(/\s+/g, ' ').trim().slice(0, 250);
+
+// The todo list as checklist rows, ids d0, d1, ...; a long list ends in one "more" row.
+export function todoRows(st) {
+  const todos = st.todos ?? [];
+  const rows = todos.map((t, i) => ({ id: `d${i}`, title: clip(t.status === 'in_progress' && t.active ? t.active : t.content), status: STATUS[t.status] ?? 'pending' }));
+  if (rows.length <= MAX_ROWS) return rows;
+  const rest = rows.slice(MAX_ROWS - 1);
+  return [...rows.slice(0, MAX_ROWS - 1), { id: `d${MAX_ROWS - 1}`, title: `… ${rest.length} more`, status: rest.every((r) => r.status === 'complete') ? 'complete' : 'pending' }];
+}
+
+// The row a step's detail line belongs under: the todo in progress, else the last open one.
+export function currentRow(rows) {
+  return (rows.find((r) => r.status === 'in_progress') ?? rows.find((r) => r.status !== 'complete') ?? rows.at(-1))?.id ?? null;
+}
+
+// The rows whose title or status changed since `sent` ({id: "title|status"}).
+export function changedRows(sent, rows) {
+  const next = { ...sent }, out = [];
+  for (const r of rows) {
+    const k = `${r.title}|${r.status}`;
+    if (next[r.id] !== k) { out.push(r); next[r.id] = k; }
+  }
+  return { rows: out, sent: next };
+}
+
+// One line of facts: files, tests, lint and type errors. Empty when there are none.
+export function facts(st) {
+  const bits = [], files = Object.values(st.files);
+  if (files.length) {
+    const a = files.reduce((n, f) => n + f.added, 0), r = files.reduce((n, f) => n + f.removed, 0);
+    bits.push(`${files.length} file${files.length === 1 ? '' : 's'} (+${a} −${r})`);
+  }
+  if (st.tests) bits.push(st.tests.failed ? `tests ${st.tests.passed} passed, ${st.tests.failed} failed` : `tests ${st.tests.passed} passed`);
+  if (st.lint?.errors) bits.push(`lint ${st.lint.errors} error${st.lint.errors === 1 ? '' : 's'}`);
+  if (st.types?.errors) bits.push(`types ${st.types.errors} error${st.types.errors === 1 ? '' : 's'}`);
+  const running = Object.values(st.subagents).filter((s) => !s.done).length;
+  if (running) bits.push(`${running} subagent${running === 1 ? '' : 's'} working`);
+  return bits.join(' · ');
+}
+
+// The finished turn, for its summary line: "3/4 todos · 2 files (+52 −11) · tests 44 passed".
+export function summary(st) {
+  const todos = st.todos ?? [];
+  const done = todos.filter((t) => t.status === 'completed').length;
+  const bits = [...(todos.length ? [`${done}/${todos.length} todos`] : []), facts({ ...st, subagents: {} })].filter(Boolean);
+  return bits.join(' · ');
+}
+
+// The finished turn's checklist, compact: every todo with its mark.
+export const todoLine = (st) => (st.todos ?? []).length
+  ? todoRows(st).map((r) => `${r.status === 'complete' ? '✓' : '○'} ${r.title}`).join('  ·  ') : null;

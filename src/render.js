@@ -43,7 +43,7 @@ export function startCard(key, prompt, seconds, resuming = false, runtime = 'cla
     resuming || !switchable ? buttons(key, ['Cancel', 'cancel']) : buttons(key, ['Cancel', 'cancel'], [`Switch to ${RUNTIMES[other].name}`, 'switch_runtime']),
   ];
 }
-export { md, buttons };
+export { md, buttons, defuse };
 
 // Problems only the operator can fix, told plainly: a raw gcloud or auth error in
 // every thread helps nobody. Each has a kind, so a thread hears it once.
