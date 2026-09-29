@@ -87,12 +87,13 @@ test('bot errors become records that group like the controller\'s', async () => 
   assert.equal(signature('x.sh:10 f', 'agent-aaaa11 failed at /tmp/a/b line 7'), signature('x.sh:99 f', 'agent-bbbb22 failed at /var/c line 8'));
 });
 
-test('a ready turn with no changed file offers only Stop', () => {
-  const ids = (m) => m.blocks.find((b) => b.type === 'actions').elements.map((e) => e.action_id);
-  assert.deepEqual(ids(render('agent-x', { type: 'turn_end', status: 'ready', text: 'Done.', changes: 0 })), ['stop']);
-  assert.deepEqual(ids(render('agent-x', { type: 'turn_end', status: 'ready', text: 'Done.', changes: 3 })), ['diff', 'push_branch', 'open_pr', 'stop']);
-  // Unknown count (the runner did not answer): keep every button.
-  assert.deepEqual(ids(render('agent-x', { type: 'turn_end', status: 'ready', text: 'Done.' })), ['diff', 'push_branch', 'open_pr', 'stop']);
+test('a ready turn offers Diff and PR only when files changed', () => {
+  const ids = (m) => m.blocks.find((b) => b.type === 'actions')?.elements.map((e) => e.action_id) ?? [];
+  assert.deepEqual(ids(render('agent-x', { type: 'turn_end', status: 'ready', text: 'Done.', changes: 0 })), []);
+  assert.deepEqual(ids(render('agent-x', { type: 'turn_end', status: 'ready', text: 'Done.', changes: 3 })), ['diff', 'open_pr']);
+  assert.deepEqual(ids(render('agent-x', { type: 'turn_end', status: 'ready', text: 'Done.', changes: 3, pr: 'u' })), ['diff', 'open_pr']);
+  // Unknown count (the runner did not answer): keep the buttons.
+  assert.deepEqual(ids(render('agent-x', { type: 'turn_end', status: 'ready', text: 'Done.' })), ['diff', 'open_pr']);
 });
 
 test('a test plan renders as one short line per item', async () => {

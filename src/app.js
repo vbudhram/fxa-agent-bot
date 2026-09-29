@@ -21,6 +21,11 @@ const app = new App({
   appToken: process.env.SLACK_APP_TOKEN,
   socketMode: true,
 });
+// Which buttons people use, for deciding which to keep.
+app.use(async ({ body, next }) => {
+  if (body?.type === 'block_actions') console.log('click', body.actions?.[0]?.action_id);
+  await next();
+});
 // Timing: Slack's client waits out a rate limit silently, and anything queued
 // behind that call for the same session waits with it. A rate limit is recorded
 // as an error; the slow and timing lines below only go to the log.
