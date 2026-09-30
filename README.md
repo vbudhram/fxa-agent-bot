@@ -19,7 +19,7 @@ The bot calls every command with `--backend gce` first. It depends only on these
 
 | Command | Returns |
 |---|---|
-| `task --source slack --id <key> --owner <slack-user> --prompt-file <f>` | exit 0 when the runner is booting |
+| `task --source slack --id <key> --owner <slack-user> --prompt-file <f> [--mcp <connectors>]` | exit 0 when the runner is booting |
 | `steer <key> --message-file <f>` | exit 0 when the turn runs or is queued |
 | `events <key> --since <cursor>` | JSON `{cursor, state, events: [{type, text, status?, options?}]}` |
 | `diff <key>` | the working diff as text |
