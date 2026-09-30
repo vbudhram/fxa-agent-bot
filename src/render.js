@@ -293,7 +293,7 @@ export function resumeNote(history, summary) {
   const last = [...(history ?? [])].reverse().find((h) => h.role === 'agent' && h.text);
   const gist = last ? esc(String(last.text).split('\n').find((l) => l.trim()) ?? '').replace(/[*_`]/g, '').slice(0, 220) : '';
   const sm = summaryLine(summary);
-  return ['Picking up where we left off. A new sandbox takes about a minute to set up; the status below shows where I am.',
+  return ['Picking up where we left off. I am setting up a new sandbox; the status below shows where I am.',
     gist ? `Last time: _${gist}_` : null, sm ? `_${sm}_` : null].filter(Boolean).join('\n');
 }
 
