@@ -411,7 +411,7 @@ async function takeFiles(s, message, client) {
 // ones that change the session are for its owner.
 async function bang(s, text, m, client) {
   const cmd = text.slice(1).split(/\s+/)[0].toLowerCase();
-  const note = (t) => client.chat.postEphemeral({ channel: m.channel, thread_ts: m.thread_ts, user: m.user, text: t }).catch(() => {});
+  const note = (t) => client.chat.postEphemeral({ channel: m.channel, thread_ts: m.thread_ts, user: m.user, text: t }).catch((e) => console.error('note', e.data?.error ?? e.message));
   if (!allowed(m.channel, m.user)) { await note("Sorry, you're not on the list of people who can use the agent here."); return; }
   // Interrupt and mute go as far as steering does: anyone allowed, or only the
   // owner under STEER=owner.
@@ -491,7 +491,9 @@ async function bang(s, text, m, client) {
       const email = DESKTOP_EMAILS.get(s.owner) ?? await client.users.info({ user: s.owner }).then((r) => r.user?.profile?.email, () => null);
       if (!email) { await note('I could not read your email from Slack (the app needs the users:read.email scope), so I cannot open the desktop for you.'); return; }
       const url = await ctl.desktop(s.key, email).catch((e) => { console.error('desktop', s.key, e.stderr || e.message); return null; });
-      await note(url ? `<${url}|Open the desktop> for this session: ${what}. Sign in with ${email}.` : 'The desktop did not start. The error is in the bot log.');
+      // In the thread, not ephemeral: an ephemeral note is lost on reload and on a phone. The gateway admits only the owner.
+      await say(s, url ? `<${url}|Open the desktop> for this session: ${what}. Only <@${s.owner}> can open it.` : 'The desktop did not start. The error is in the bot log.')
+        .catch((e) => console.error('desktop post', s.key, e.data?.error ?? e.message));
       return;
     }
     // The dashboard opens the tunnel, so the link works only where it runs.
