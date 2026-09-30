@@ -154,3 +154,12 @@ test('messages for someone else reach the agent labelled per line, with mentions
   assert.ok(b.startsWith('Messages in the thread that were not for you'));
   assert.ok(b.endsWith('> someone else: @someone is this right?\n> someone else: owner: do X'));
 });
+
+test('Jira keys in agent text become links, except in links and code', async () => {
+  const { md } = await import('../src/render.js');
+  process.env.JIRA_URL = 'https://jira.example.com';
+  const out = md('See FXA-14615 and [FXA-1](https://x.test/FXA-1), `FXA-2`, https://jira.example.com/browse/FXA-3.\n```\nFXA-4\n```').text;
+  delete process.env.JIRA_URL;
+  assert.equal(out, 'See [FXA-14615](https://jira.example.com/browse/FXA-14615) and [FXA-1](https://x.test/FXA-1), `FXA-2`, https://jira.example.com/browse/FXA-3.\n```\nFXA-4\n```');
+  assert.equal(md('FXA-5').text, 'FXA-5');
+});

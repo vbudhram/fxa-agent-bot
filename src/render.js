@@ -17,8 +17,16 @@ const defuse = (t) => String(t ?? '').replace(/<!(here|channel|everyone)[^>]*>/g
   .replace(/<@[A-Z0-9]+>/g, '@someone');
 const esc = (t) => defuse(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const gh = (u) => (/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(pull\/\d+|compare\/[\w./%?=&-]+)$/.test(String(u ?? '')) ? u : '');
+// A bare FXA key links to its ticket; code blocks, code, links and URLs are left as written.
+const jiraLinks = (t) => {
+  const base = process.env.JIRA_URL;
+  if (!base) return t;
+  return t.split(/(```[\s\S]*?```)/).map((part, i) => (i % 2 ? part : part.replace(
+    /(\[[^\]]*\]\([^)]*\)|`[^`]*`|https?:\/\/\S+)|(?<![\w-])(FXA-\d+)\b/g,
+    (m, keep, key) => keep ?? `[${key}](${base}/browse/${key})`))).join('');
+};
 const md = (raw) => {
-  const text = defuse(raw);
+  const text = jiraLinks(defuse(raw));
   return { type: 'markdown', text: text.length > MD_MAX ? `${text.slice(0, MD_MAX)}\n\n_(cut at ${MD_MAX} characters; ask for the rest)_` : text };
 };
 // Notification and screen-reader fallback: the first line, plain.
