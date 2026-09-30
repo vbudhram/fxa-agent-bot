@@ -8,6 +8,7 @@ import * as ctl from './ctl.js';
 import { installErrorLog } from './errors.js';
 import * as sessions from './sessions.js';
 import * as live from './live.js';
+import { pollEvery } from './poll.js';
 import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, homeView, planLines, resumeNote, errorDigest, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock } from './render.js';
 
 const { App } = bolt;
@@ -1313,6 +1314,7 @@ async function stoppedText(key) {
 // stream only makes the status line live between polls.
 const DONE = ['stopped', 'failed', 'pr_open', 'queued', 'paused'];
 const again = new Set(); // keys asked to poll while a poll was in flight
+const lastWork = new Map(); // key → when a poll last saw events, a busy runner, or a non-idle state
 async function pollOne(key) {
   const s = fresh(key);
   if (!s || DONE.includes(s.state)) return;
@@ -1324,6 +1326,7 @@ async function pollOne(key) {
     const { cursor, state, events, activity: act, boot } = await ctl.events(s.key, s.cursor);
     ctlMs = Date.now() - polledAt;
     const activity = { ...act, boot };
+    if (events.length || act?.busy || state !== 'active') lastWork.set(key, Date.now());
     const endAt = events.findLastIndex((e) => e.type === 'turn_end' || e.type === 'question');
     // Each event posts on its own: ctl has already moved the cursor past this
     // batch, so a failed post is logged and skipped, never re-sent every 5 s.
@@ -1365,14 +1368,15 @@ async function pollOne(key) {
   }
 }
 // Each poll starts the controller once per session. A boot takes 15-80 s and
-// every step shows in Slack, so a starting session polls each second; the rest
-// every 5 s (a running turn streams through its watch, not the poll).
+// every step shows in Slack, so a starting session polls each second; one with
+// work every 5 s (a running turn streams through its watch, not the poll); one
+// waiting for its person every minute (src/poll.js).
 const lastPoll = new Map();
 setInterval(() => {
   const now = Date.now();
   for (const s of sessions.all()) {
     const fast = s.state === 'starting' && s.status_kind !== 'line';
-    if (!fast && now - (lastPoll.get(s.key) ?? 0) < 5_000) continue;
+    if (!fast && now - (lastPoll.get(s.key) ?? 0) < pollEvery(s, now, lastWork.get(s.key) ?? 0)) continue;
     lastPoll.set(s.key, now);
     pollOne(s.key);
   }
