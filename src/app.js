@@ -1188,7 +1188,7 @@ async function deliverMedia(key) {
       // ctl's printed list (a newline in a name could point outside dir): read
       // dir here, and take only plain media files of a sane size.
       const files = readdirSync(dir, { withFileTypes: true })
-        .filter((d) => d.isFile() && /^[A-Za-z0-9._-]{1,120}\.(png|jpe?g|gif|webp|mp4|webm)$/.test(d.name))
+        .filter((d) => d.isFile() && /^[A-Za-z0-9._-]{1,120}\.(png|jpe?g|gif|webp|mp4|webm|patch|diff)$/.test(d.name))
         .map((d) => join(dir, d.name))
         .filter((p) => { const st = lstatSync(p); return st.isFile() && st.size <= 50 * 1024 * 1024; });
       for (const path of files) {
