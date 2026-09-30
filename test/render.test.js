@@ -163,3 +163,13 @@ test('Jira keys in agent text become links, except in links and code', async () 
   assert.equal(out, 'See [FXA-14615](https://jira.example.com/browse/FXA-14615) and [FXA-1](https://x.test/FXA-1), `FXA-2`, https://jira.example.com/browse/FXA-3.\n```\nFXA-4\n```');
   assert.equal(md('FXA-5').text, 'FXA-5');
 });
+
+test('someone other than the owner steers only when they tag the bot', async () => {
+  const { forBotFromOthers } = await import('../src/render.js');
+  const s = { owner: 'UOWNER' };
+  assert.equal(forBotFromOthers({ user: 'UOWNER', text: 'booo' }, s, 'UBOT', 'mention'), true); // the owner needs no tag
+  assert.equal(forBotFromOthers({ user: 'UOTHER', text: 'booo' }, s, 'UBOT', 'mention'), false);
+  assert.equal(forBotFromOthers({ user: 'UOTHER', text: '<@UBOT> why did this fail?' }, s, 'UBOT', 'mention'), true);
+  assert.equal(forBotFromOthers({ user: 'UOTHER', text: 'booo' }, s, 'UBOT', 'anyone'), true); // STEER=anyone keeps the old way
+  assert.equal(forBotFromOthers({ user: 'UOTHER', text: 'booo' }, s, null, 'mention'), true); // bot id not known yet: do not drop messages
+});

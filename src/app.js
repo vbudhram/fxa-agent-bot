@@ -9,6 +9,7 @@ import { installErrorLog } from './errors.js';
 import * as sessions from './sessions.js';
 import * as live from './live.js';
 import { pollEvery } from './poll.js';
+import { forBotFromOthers } from './render.js';
 import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, homeView, planLines, resumeNote, errorDigest, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock } from './render.js';
 
 const { App } = bolt;
@@ -263,10 +264,12 @@ async function threadContext(client, event) {
   } catch (e) { console.error('thread', e.data?.error ?? e.message); return ''; }
 }
 
-// Thread replies. As in Claude Tag, anyone allowed in the channel steers, and
-// the agent is told who spoke. STEER=owner keeps it to the owner, and tells
-// anyone else once, privately, why the bot does not answer them.
-const STEER_ANYONE = process.env.STEER !== 'owner';
+// Thread replies. Anyone allowed in the channel steers, and the agent is told
+// who spoke; anyone but the owner must tag the bot (STEER=mention, the default).
+// STEER=anyone lets untagged replies steer too; STEER=owner keeps it to the
+// owner, and tells anyone else once, privately, why the bot does not answer them.
+const STEER_MODE = process.env.STEER || 'mention';
+const STEER_ANYONE = STEER_MODE !== 'owner';
 let botUserId = null; // set at start; until then no message counts as one for someone else
 // Messages for someone else wait on the session (the last 10) until the agent's next turn.
 function keepAside(s, message) {
@@ -306,6 +309,16 @@ app.message(async ({ message, client }) => {
   // A message to someone else (it tags a person, not the bot) gets no reply; the
   // agent sees it with the next message it does get.
   if (toSomeoneElse(message.text, botUserId)) { keepAside(s, message); return; }
+  // Someone else talking without tagging the bot: context for its next turn, not a turn.
+  if (STEER_ANYONE && !forBotFromOthers(message, s, botUserId, STEER_MODE)) {
+    keepAside(s, message);
+    if (!(s.tipped ?? []).includes(message.user)) {
+      sessions.patch(s.key, { tipped: [...(fresh(s.key).tipped ?? []), message.user] });
+      await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: message.user,
+        text: `This is <@${s.owner}>'s session. I answer others here when they tag me, so I kept your message as context. Tag <@${botUserId}> to ask me something.` }).catch(() => {});
+    }
+    return;
+  }
   const steers = allowed(message.channel, message.user) && (message.user === s.owner || STEER_ANYONE);
   // A reply continues a session that has ended, as a tag does: paused, stopped,
   // failed, or with its PR still open (the reply is often about the review).
@@ -359,10 +372,11 @@ async function steerEdit(message, client) {
   if (!m.thread_ts || m.bot_id || !after || after === before || after.startsWith('!') || toSomeoneElse(m.text, botUserId)) return;
   const s = sessions.get(message.channel, m.thread_ts);
   if (!s || !(allowed(message.channel, m.user) && (m.user === s.owner || STEER_ANYONE))) return;
+  if (!forBotFromOthers(m, s, botUserId, STEER_MODE)) return; // someone else's untagged edit: not for the agent
   // Only a message the agent received: one sent after the session started.
   if (Number(m.ts) * 1000 < (s.started_at ?? Infinity) - 60_000) return;
   const from = m.user === s.owner ? '' : '(From someone else in the thread, not the person who started this session.)\n';
-  const text = `${from}I edited an earlier message. It now says:\n${after}`;
+  const text = `${from}I edited an earlier message. It now says:\n${after}\n\n(If that changes nothing important in your last answer, reply in one line.)`;
   if (s.state === 'queued') { sessions.patch(s.key, { prompt: `${fresh(s.key).prompt}\n\n${text}` }); return; }
   seen(message.channel, m.ts);
   if (s.state === 'paused') { addAck(s.key, m.ts); await resumePaused(s, text, client); return; }

@@ -31,7 +31,7 @@ Event types: `question` (with `options`), `turn_end` (with `status`: `needs-inpu
 ## Who can do what
 
 - Anyone in `ALLOWED_USERS` (`*` for everyone) in an `ALLOWED_CHANNELS` channel can start a session and steer any session in that channel, as in Claude Tag. The agent is told when a message is not from the person who started the session.
-- `STEER=owner` limits steering, Interrupt, `!interrupt`, `!mute`, and 👎 to the person who started the session.
+- `STEER` sets who steers a session. `mention` (the default): the person who started it, and anyone else allowed who tags the bot; an untagged reply from someone else is kept as context for the next turn. `anyone`: untagged replies steer too. `owner` also limits Interrupt, `!interrupt`, `!mute`, and 👎 to the person who started the session.
 - Open PR, Stop, `!stop`, and `!restart` are always owner-only.
 
 ## Not in v0
