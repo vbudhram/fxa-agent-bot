@@ -156,7 +156,7 @@ async function begin(key, client) {
   // takes over following the PR from what the old one saw.
   const from = rest.resume_from && fresh(rest.resume_from);
   const pr = from?.pr_seen || from?.pr_url ? { pr_seen: from.pr_seen, pr_follow_since: from.pr_follow_since, pr_url: from.pr_url,
-    auto_rounds: from.auto_rounds, copilot_seen_at: from.copilot_seen_at, pr_pushed_at: from.pr_pushed_at, ci_seen: from.ci_seen, last_person_at: from.last_person_at } : {};
+    auto_rounds: from.auto_rounds, copilot_seen_at: from.copilot_seen_at, pr_pushed_at: from.pr_pushed_at, ci_seen: from.ci_seen, last_person_at: from.last_person_at, edited_at: from.edited_at } : {};
   sessions.put({ key, ...rest, ...pr, cursor: 0, state: 'queued', started_at: Date.now() });
   pending.delete(key);
   if (card_ts) await client.chat.update({ channel: p.channel, ts: card_ts, text: 'On it! Setting up a sandbox; the status below shows each step and how long it took. Type `!help` any time for commands.', blocks: [] }).catch(() => {});
@@ -495,7 +495,7 @@ async function bang(s, text, m, client) {
     if (steerOnly()) return;
     const out = await ctl.interrupt(s.key).catch(() => '');
     if (!out.includes('interrupted')) { await note('Nothing is running right now.'); return; }
-    sessions.patch(s.key, { interrupted: true });
+    sessions.patch(s.key, { interrupted: true, then_wrap: null });
     await say(s, 'Interrupted. The work so far is kept. Tell me what to do instead.');
   } else if (cmd === 'stop') {
     if (ownerOnly()) return;
@@ -601,7 +601,7 @@ setInterval(() => { idleSweep(); }, 60_000);
 // its own timeline, and startStatus leaves it alone.
 async function steerAndAck(s, text, client, userId, ts) {
   text = takeAside(s.key) + text;
-  if (userId) sessions.patch(s.key, { last_person_at: Date.now() });
+  if (userId && userId === s.owner) sessions.patch(s.key, { last_person_at: Date.now() }); // the owner wrote: a queued ship waits (shipAfterResume)
   // A tapped answer or an edit after the session ended (paused, Stop, a failure):
   // continue it on a new runner, as a reply to a paused session does.
   const ended = fresh(s.key);
@@ -621,7 +621,7 @@ async function steerAndAck(s, text, client, userId, ts) {
     else if (!fresh(s.key)?.status_ts) await startStatus(fresh(s.key), 'Working').catch((e) => console.error('status', s.key, e.data?.error ?? e.message));
   } catch (e) {
     addAck(s.key, ts);
-    sessions.patch(s.key, { then_wrap: null }); // no turn started, so nothing to ship after
+    if (!userId) sessions.patch(s.key, { then_wrap: null }); // the bot's own round did not start: nothing to ship after
     // Close the timeline this message opened; nothing is running behind it.
     if (!busyBefore) await updateStatus(s.key, fresh(s.key)?.state ?? 'active', { busy: false }).catch(() => {});
     await fail(client, s, e);
@@ -929,6 +929,7 @@ function ensureWatch(key) {
     if (ev.type === 'result') { resultAt.set(key, Date.now()); setTimeout(() => pollOne(key), 300); }
     if (ev.type === 'text_start') draftText(key, null);
     if (ev.type === 'text') draftText(key, ev.text);
+    if (ev.type === 'edit') sessions.patch(key, { edited_at: Date.now() }); // work not yet pushed (autoRound)
     if (LIVE_ON && LIVE_EVENTS.has(ev.type)) {
       const L = liveOf(key);
       L.st = live.reduce(L.st, ev);
@@ -1150,8 +1151,10 @@ ownerAction('push_branch', async (s, client, action, body) => {
 // ship once its first turn says the work carried over (shipAfterResume).
 const ENDED = ['paused', 'stopped', 'failed'];
 async function resumeToShip(s, client, what) {
-  if (['MERGED', 'CLOSED'].includes(s.pr_seen?.state)) {
-    await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: `This PR is ${s.pr_seen.state === 'MERGED' ? 'merged' : 'closed'}. Tag me with what to do next, and I will start fresh from main.` });
+  // The PR's state now, not the follower's last look, which can be minutes or days old.
+  const st = s.pr_url ? (await ctl.prStatus(s.key))?.state ?? s.pr_seen?.state : null;
+  if (['MERGED', 'CLOSED'].includes(st)) {
+    await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: `This PR is ${st === 'MERGED' ? 'merged' : 'closed'}. Tag me with what to do next, and I will start fresh from main.` });
     return;
   }
   if (sessions.get(s.channel, s.thread_ts)?.key !== s.key || s.stop_failed) {
@@ -1159,7 +1162,7 @@ async function resumeToShip(s, client, what) {
     return;
   }
   await resumePaused(s, `The engineer tapped ${what === 'push' ? 'Push branch' : 'Open PR'}. Run git status and check that your work carried over. Say so in one line, and end with 'status: ready' if it did. The host then ships it.`,
-    client, { then_wrap: what });
+    client, { then_wrap: what, then_wrap_at: Date.now() });
 }
 async function shipAfterResume(key, what, ev) {
   const s = fresh(key);
@@ -1169,8 +1172,8 @@ async function shipAfterResume(key, what, ev) {
     if (ev.type !== 'turn_end' || ev.status !== 'ready' || !(ev.fixed > 0)) return;
     what = 'pr';
   }
-  // The owner wrote while it booted or answered: that turn is theirs, so do not ship under it.
-  if (s.status_ts) { await postMsg(key, { text: `I did not ${what === 'push' ? 'push' : 'update the PR'}: you sent more. Tap the button when it is ready.` }); return; }
+  // The owner wrote after the ship was queued (while it booted or answered): do not ship under their turn.
+  if ((s.last_person_at ?? 0) > (s.then_wrap_at ?? Infinity)) { await postMsg(key, { text: `I did not ${what === 'push' ? 'push' : 'update the PR'}: you sent more. Tap the button when it is ready.` }); return; }
   if (ev.type !== 'turn_end' || ev.status !== 'ready') {
     await postMsg(key, { text: `I did not ${what === 'push' ? 'push' : 'open the PR'}: my reply above says why. Tap the button again when it is ready.` });
     return;
@@ -1428,20 +1431,26 @@ async function pollOne(key) {
     const activity = { ...act, boot };
     if (events.length || act?.busy || state !== 'active') lastWork.set(key, Date.now());
     const endAt = events.findLastIndex((e) => e.type === 'turn_end' || e.type === 'question');
+    // A turn that died ends with an error and no turn end: its pending ship must not fire on a later turn.
+    if (endAt < 0 && events.some((e) => e.type === 'error') && fresh(key)?.then_wrap) sessions.patch(key, { then_wrap: null });
     // Each event posts on its own: ctl has already moved the cursor past this
     // batch, so a failed post is logged and skipped, never re-sent every 5 s.
     for (const [i, ev] of events.entries()) {
       // The PR outlives the session's state: the thread follows it from here.
       if (ev.type === 'pr' && ev.url) sessions.patch(key, { pr_url: ev.url, pr_follow_since: fresh(key)?.pr_follow_since ?? Date.now(), pr_pushed_at: Date.now() });
       const msg = render(s.key, ev);
+      // A session resumed by Open PR or Push, or an automatic round, ships after the turn closes.
+      const ship = () => {
+        const tw = i === endAt && fresh(key)?.then_wrap;
+        if (tw) { sessions.patch(key, { then_wrap: null }); setTimeout(() => shipAfterResume(key, tw, ev).catch((e) => console.error('ship', key, e.message)), 1000); }
+      };
       // A Show-nothing turn end (No response requested) still ends the turn: acks, drafts, and a pending ship.
-      const tw = i === endAt && fresh(key)?.then_wrap;
-      if (tw) { sessions.patch(key, { then_wrap: null }); setTimeout(() => shipAfterResume(key, tw, ev).catch((e) => console.error('ship', key, e.message)), 1000); }
-      if (!msg) { if (i === endAt) { clearTimeout(drafts.get(key)?.timer); drafts.delete(key); await settle(fresh(key)); } continue; }
+      if (!msg) { if (i === endAt) { clearTimeout(drafts.get(key)?.timer); drafts.delete(key); await settle(fresh(key)); ship(); } continue; }
       if (msg.operator) { const kind = msg.operator; delete msg.operator; if (!firstOperatorNote(key, kind)) continue; }
       if (msg.more !== undefined) { sessions.patch(key, { more_text: msg.more }); delete msg.more; }
       await (i === endAt ? finishTurn(key, msg, ev) : postMsg(key, msg))
         .catch((e) => console.error('post', key, ev.type, e.data?.error ?? e.message));
+      ship();
     }
     if (!fresh(key)) return; // restarted or replaced while this poll ran
     // A stop made while this poll ran wins over the state the poll read.
@@ -1539,7 +1548,8 @@ async function autoRound(s, prev, cur) {
   if ([...pending.values()].some((p) => p.channel === s.channel && p.thread_ts === s.thread_ts)) return;
   const cp = (cur.reviews ?? []).find((r) => isCopilot(r.login));
   // A failure is known by its failing links, not by the CI state: an infra failure first must not hide it.
-  const ciKey = cur.ci === 'fail' && cur.links?.length ? [...cur.links].sort().join(' ') : '';
+  // Only once every check is done, so one CI run starts one round.
+  const ciKey = cur.ci === 'fail' && !cur.running && cur.links?.length ? [...cur.links].sort().join(' ') : '';
   let job = null, seen;
   if (cp?.at && cp.at !== s.copilot_seen_at) {
     seen = { copilot_seen_at: cp.at };
@@ -1553,11 +1563,11 @@ async function autoRound(s, prev, cur) {
   if (!job) { if (seen) sessions.patch(s.key, seen); return; }
   // Ask, and count nothing, when an automatic round could mix with work the owner has in hand.
   const why = (s.auto_rounds ?? 0) >= AUTO_MAX ? `I already ran ${AUTO_MAX} automatic rounds on this PR.`
-    : (s.last_person_at ?? 0) > s.pr_pushed_at ? 'You have changes in hand since the last push, so I will not mix them in.'
+    : (s.edited_at ?? 0) > s.pr_pushed_at ? 'Files changed since the last push, so I will fix it without pushing; you push with Update PR.'
     : ['stopped', 'failed'].includes(s.state) ? 'This session was stopped.' : '';
   sessions.patch(s.key, seen);
   if (why) {
-    sessions.patch(s.key, { round_text: job.text });
+    sessions.patch(s.key, { round_text: job.text, round_ship: !((s.edited_at ?? 0) > s.pr_pushed_at) });
     await postMsg(s.key, { text: job.note(why), blocks: [md(job.note(why)), buttons(s.key, ['Run a round', 'auto_round'])] });
     return;
   }
@@ -1565,24 +1575,26 @@ async function autoRound(s, prev, cur) {
   await postMsg(s.key, { text: job.note('') });
   await startRound(s, job.text);
 }
-async function startRound(s, text) {
+// ship false: the owner has unpushed edits, so the round fixes and the owner pushes with Update PR.
+async function startRound(s, text, ship = true) {
   const cur = fresh(s.key);
   if (['paused', 'stopped', 'failed', 'pr_open'].includes(cur.state)) {
     if (sessions.get(cur.channel, cur.thread_ts)?.key !== cur.key || cur.stop_failed) return;
-    await resumePaused(cur, text, app.client, { then_wrap: 'pr_auto' });
+    await resumePaused(cur, text, app.client, ship ? { then_wrap: 'pr_auto', then_wrap_at: Date.now() } : {});
     return;
   }
-  sessions.patch(cur.key, { then_wrap: 'pr_auto' });
+  if (ship) sessions.patch(cur.key, { then_wrap: 'pr_auto', then_wrap_at: Date.now() });
   await steerAndAck(cur, text, app.client, null, null);
 }
 ownerAction('auto_round', async (s, client, action, body) => {
   const text = fresh(s.key)?.round_text;
   if (!text) return;
-  sessions.patch(s.key, { round_text: null });
+  const ship = fresh(s.key)?.round_ship !== false;
+  sessions.patch(s.key, { round_text: null, round_ship: null });
   // Not wrapTap: its 30 s lock would refuse the PR update after a short round.
   await client.chat.update({ channel: s.channel, ts: body.message.ts, text: body.message.text,
     blocks: [...(body.message.blocks ?? []).filter((b) => b.type !== 'actions'), { type: 'context', elements: [{ type: 'mrkdwn', text: `Round started by <@${body.user.id}>` }] }] }).catch(() => {});
-  await startRound(fresh(s.key), text);
+  await startRound(fresh(s.key), text, ship);
 });
 
 // 6: DM the operator once for each new or reopened error signature. The first
