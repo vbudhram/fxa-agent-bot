@@ -90,7 +90,7 @@ async function settle(s, ok = true) {
 const strip = (t) => (t ?? '').replace(/<@[A-Z0-9]+>/g, '').trim();
 
 // A mention starts at once, after a short window to cancel a mistaken tag.
-app.event('app_mention', async ({ event, client }) => {
+app.event('app_mention', async ({ event, body, client }) => {
   if (!allowed(event.channel, event.user)) {
     if (CHANNELS.includes(event.channel)) await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts,
       text: "Sorry, you're not on the list of people who can start agent sessions here." }).catch(() => {});
@@ -129,7 +129,8 @@ app.event('app_mention', async ({ event, client }) => {
   const resume_from = cur && !prDone && (['stopped', 'failed', 'paused'].includes(cur.state) || prOpen) ? cur.key : undefined;
   if (resume_from) runtime = cur.runtime || 'claude'; // ctl resumes with the session's own agent
   const deadline = Date.now() + START_DELAY_S * 1000;
-  pending.set(key, { prompt, request: resume_from ? requestOf(cur) : prompt, owner: event.user, channel: event.channel, thread_ts, resume_from, runtime, deadline });
+  // team: the workspace the person wrote from. In an org-wide install the bot's own team (auth.test) is not it.
+  pending.set(key, { prompt, request: resume_from ? requestOf(cur) : prompt, owner: event.user, team: event.team ?? body?.team_id ?? cur?.team, channel: event.channel, thread_ts, resume_from, runtime, deadline });
   // The card goes up first; reading a long thread for context can take seconds.
   // A failed post must release the thread, or it stays reserved until a restart.
   const { ts } = await client.chat.postMessage({ channel: event.channel, thread_ts,
@@ -504,7 +505,7 @@ async function bang(s, text, m, client) {
     const cur = fresh(s.key), pr = cmd === 'restart' && cur.pr_url && !['MERGED', 'CLOSED'].includes(cur.pr_seen?.state) ? cur.pr_url : null;
     await say(s, pr ? `Starting a new conversation on ${pr}, at its head, with the thread so far as context. \`!new\` starts from main instead.`
       : 'Starting fresh from main, with the thread so far as context.');
-    pending.set(key, { prompt, request, owner: s.owner, channel: s.channel, thread_ts: s.thread_ts, ...(pr ? { resume_from: s.key, fresh: true } : { is_new: true }) });
+    pending.set(key, { prompt, request, owner: s.owner, team: s.team, channel: s.channel, thread_ts: s.thread_ts, ...(pr ? { resume_from: s.key, fresh: true } : { is_new: true }) });
     await begin(key, client);
   } else if (cmd === 'usage') {
     const sm = await ctl.cost(s.key);
@@ -561,7 +562,7 @@ async function resumePaused(s, text, client, extra = {}) {
   if ([...pending.values()].some((p) => p.channel === s.channel && p.thread_ts === s.thread_ts)) return;
   text = takeAside(s.key) + text;
   const key = sessions.newKey();
-  pending.set(key, { prompt: text, request: requestOf(s), owner: s.owner, channel: s.channel, thread_ts: s.thread_ts, resume_from: s.key, acks: ackList(fresh(s.key)), ...extra });
+  pending.set(key, { prompt: text, request: requestOf(s), owner: s.owner, team: s.team, channel: s.channel, thread_ts: s.thread_ts, resume_from: s.key, acks: ackList(fresh(s.key)), ...extra });
   const [hist, sm] = await Promise.all([ctl.history(s.key), ctl.summary(s.key)]);
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: resumeNote(hist, sm) }).catch(() => {});
   await begin(key, client);
@@ -662,7 +663,7 @@ async function startStatusNow(s, verb) {
   if (streamOk) {
     try {
       const { ts } = await app.client.apiCall('chat.startStream', {
-        channel: s.channel, thread_ts: s.thread_ts, recipient_user_id: cur.owner, recipient_team_id: teamId,
+        channel: s.channel, thread_ts: s.thread_ts, recipient_user_id: cur.owner, recipient_team_id: cur.team ?? teamId,
         chunks: [{ type: 'task_update', id: 't0', title: first, status: 'in_progress' },
           { type: 'blocks', blocks: [buttons(s.key, ['Interrupt', 'interrupt'])] }],
       });

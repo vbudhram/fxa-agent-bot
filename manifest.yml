@@ -41,3 +41,5 @@ settings:
   interactivity:
     is_enabled: true
   socket_mode_enabled: true
+  # Mozilla Slack is an Enterprise org: lets an admin deploy the app org-wide.
+  org_deploy_enabled: true
