@@ -69,3 +69,19 @@ test('unknown events and an edit without a file change nothing', () => {
   assert.equal(reduce(st, { type: 'step', text: 'x' }), st);
   assert.equal(reduce(st, { type: 'edit', file: '' }), st);
 });
+
+test('status questions are recognized, other questions are not', async () => {
+  const { isStatusAsk } = await import('../src/live.js');
+  for (const t of ["What's the status?", 'what is the status here?', "What's up? Where we at?", 'status', 'any update?', 'how is it going?', 'where are we?', 'ok, status?'])
+    assert.equal(isStatusAsk(t), true, t);
+  for (const t of ['what happened?', 'does this work for sync logins and 123done sessions?', 'Can you see why?', 'update the README too', 'status of the PR checks in CI and what failed in the functional tests?'])
+    assert.equal(isStatusAsk(t), false, t);
+});
+
+test('a status reply names the time, the todo in progress, the last step and the last note', async () => {
+  const { statusReply } = await import('../src/live.js');
+  const st = feed([todos(['Find it', 'completed'], ['Run verify', 'in_progress', 'Running verify'], ['Ship', 'pending']), { type: 'edit', file: 'a.ts', added: 3, removed: 1 }]);
+  const out = statusReply(st, { elapsedMs: 12 * 60_000, lastStep: 'Running yarn `verify`', stepAgoMs: 4 * 60_000, said: 'Lint passes. The verification takes about 10 minutes.' });
+  assert.equal(out, '⏳ Still working · 12m · 1/3 todos · 1 file (+3 −1)\n› Now: Running verify\n› Last step, 4m ago: `Running yarn \'verify\'`\n› Last note: _The verification takes about 10 minutes._');
+  assert.equal(statusReply(start(), { elapsedMs: 30_000 }), '⏳ Still working · 1m');
+});

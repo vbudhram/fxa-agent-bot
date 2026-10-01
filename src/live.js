@@ -80,3 +80,25 @@ export function summary(st) {
 // The finished turn's checklist, compact: every todo with its mark.
 export const todoLine = (st) => (st.todos ?? []).length
   ? todoRows(st).map((r) => `${r.status === 'complete' ? '✓' : '○'} ${r.title}`).join('  ·  ') : null;
+
+// A short "how is it going" message. While a turn runs the bot answers it from
+// this state at once; queued for the agent it waited until the turn ended.
+export const isStatusAsk = (text) => {
+  const t = String(text ?? '').trim().replace(/^(hey|hi|so|ok|okay)[,!]?\s+/i, '');
+  return t.length <= 60 && [/^what'?s(\s+is)?\s+(the\s+)?(status|progress|eta|up|happening|going on)\b/i, /^what is (the\s+)?(status|progress|eta)\b/i,
+    /^(status|progress|eta|updates?|any updates?)\W*$/i, /^how'?s it going\b/i, /^how is it going\b/i, /^where (are )?we( at)?\b/i].some((r) => r.test(t));
+};
+
+// The status reply: time, todo progress, the current todo, the last step and when it started.
+export function statusReply(st, { elapsedMs = 0, lastStep = '', stepAgoMs = 0, said = '' } = {}) {
+  const m = (ms) => `${Math.max(0, Math.round(ms / 60_000))}m`;
+  const rows = todoRows(st), cur = rows.find((r) => r.id === currentRow(rows));
+  const done = rows.filter((r) => r.status === 'complete').length;
+  const head = [`⏳ Still working · ${m(elapsedMs)}`, ...(rows.length ? [`${done}/${rows.length} todos`] : []), facts(st)].filter(Boolean).join(' · ');
+  const note = clip(said).split(/(?<=[.!?])\s+/).filter(Boolean).at(-1) ?? '';
+  return [head,
+    ...(cur && cur.status !== 'complete' ? [`› Now: ${cur.title}`] : []),
+    ...(lastStep ? [`› Last step, ${m(stepAgoMs)} ago: \`${clip(lastStep).replace(/`/g, "'").slice(0, 120)}\``] : []),
+    ...(note ? [`› Last note: _${note.replace(/_/g, ' ')}_`] : []),
+  ].join('\n');
+}

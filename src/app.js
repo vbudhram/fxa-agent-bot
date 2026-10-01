@@ -357,6 +357,11 @@ app.message(async ({ message, client }) => {
       text: `Only <@${s.owner}> can steer this session, so I won't act on your message. They can see it, though.` }).catch(() => {});
     return;
   }
+  // A status question during a turn: answered now from the live state, not queued behind the turn.
+  if (fresh(s.key)?.status_ts && s.state === 'active' && !message.files?.length && live.isStatusAsk(text)) {
+    await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: statusNow(s.key) }).catch((e) => console.error('status ask', s.key, e.data?.error ?? e.message));
+    return;
+  }
   if (message.files?.length) {
     const note = await takeFiles(s, message, client);
     if (note === null) return;
@@ -631,7 +636,7 @@ const startStatus = (s, verb) => serial(s.key, () => startStatusNow(s, verb));
 async function startStatusNow(s, verb) {
   const cur = fresh(s.key);
   if (!cur || cur.status_ts || cur.muted) return;
-  steps.delete(s.key); unsent.delete(s.key);
+  steps.delete(s.key); unsent.delete(s.key); stepAt.delete(s.key); said.delete(s.key);
   const first = verb === 'Setting up' ? 'Setting up a sandbox' : `${verb} on it`;
   liveTurn.set(s.key, newLive(first));
   if (streamOk) {
@@ -732,6 +737,14 @@ async function updateStreamNow(s, state, activity) {
       const ch = live.changedRows(L.sent, rows); L.sent = ch.sent;
       for (const r of ch.rows) chunks.push({ type: 'task_update', id: r.id, title: r.title, status: r.status });
       const curId = live.currentRow(rows), cur = rows.find((r) => r.id === curId);
+      // A long quiet step (a build, a test run): once a minute, the todo shows how long, so the thread visibly moves.
+      const quiet = Date.now() - (stepAt.get(s.key) ?? Date.now());
+      if (!news.length && cur && quiet >= 60_000 && Date.now() - (s.title_at ?? 0) >= 60_000) {
+        const title = `${cur.title} · this step ${Math.floor(quiet / 60_000)}m`.slice(0, 250);
+        L.sent[curId] = `${title}|${cur.status}`; // the next real change sends the plain title again
+        await send([...chunks, { type: 'task_update', id: curId, title, status: cur.status }]);
+        return { title_at: Date.now() };
+      }
       for (const item of news) {
         const line = String(item?.host ?? item).slice(0, 200), k = (L.lines[curId] ?? 0) + 1;
         L.lines[curId] = k;
@@ -914,13 +927,21 @@ function stopWatch(key) { watchers.get(key)?.stop(); watchers.delete(key); }
 // answer and its buttons.
 let streamText = process.env.STREAM_TEXT !== '0';
 const drafts = new Map(); // key → { buf, timer, sent }
+const said = new Map(), stepAt = new Map(); // key → the latest text block; when the last step started
+// The answer to a status question while a turn runs.
+function statusNow(key) {
+  const s = fresh(key), log = steps.get(key) ?? [];
+  return live.statusReply(liveTurn.get(key)?.st ?? live.start(), { elapsedMs: Date.now() - (s?.busy_since ?? Date.now()),
+    lastStep: log.at(-1) ?? '', stepAgoMs: Date.now() - (stepAt.get(key) ?? Date.now()), said: said.get(key) ?? '' });
+}
 function draftText(key, text) {
   if (!streamText) return;
   const d = drafts.get(key) ?? { buf: '', timer: null, sent: false };
   drafts.set(key, d);
   // A new block of text after some was shown: a paragraph break.
-  if (text === null) { if (d.sent || d.buf) d.buf += '\n\n'; return; }
+  if (text === null) { if (d.sent || d.buf) d.buf += '\n\n'; said.set(key, ''); return; }
   d.buf += text;
+  said.set(key, ((said.get(key) ?? '') + text).slice(-600));
   liveEdit(key);
 }
 // The reply text not yet sent, and marks it sent.
@@ -955,7 +976,7 @@ const flushDraft = (key) => serial(key, async function flushDraft() {
 function pushStep(key, text) {
   if (!text) return;
   const list = steps.get(key) ?? [];
-  list.push(text);
+  list.push(text); stepAt.set(key, Date.now());
   steps.set(key, list.slice(-5));
 }
 // At most one Slack call per 1.2 s per session, rows and reply text together.
@@ -1037,6 +1058,15 @@ async function postDiff(s, client) {
   await client.files.uploadV2({ channel_id: s.channel, thread_ts: s.thread_ts, filename: `${s.key}.diff`, content: d,
     snippet_type: 'diff', initial_comment: `${files} file${files === 1 ? '' : 's'} changed, +${add} −${del}` });
 }
+
+// The rest of a long reply. Anyone who may use the bot here can open it.
+app.action('more', async ({ ack, body, action, client }) => {
+  await ack();
+  const s = fresh(action.value);
+  if (!s?.more_text || !allowed(s.channel, body.user.id)) return;
+  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: s.more_text.split('\n')[0].slice(0, 150), blocks: [md(s.more_text)] })
+    .catch((e) => console.error('more', s.key, e.data?.error ?? e.message));
+});
 
 // 7: stop the running turn but keep the session and everything done so far.
 app.action('interrupt', async ({ ack, body, action, client }) => {
@@ -1350,6 +1380,7 @@ async function pollOne(key) {
       const msg = render(s.key, ev);
       if (!msg) continue;
       if (msg.operator) { const kind = msg.operator; delete msg.operator; if (!firstOperatorNote(key, kind)) continue; }
+      if (msg.more !== undefined) { sessions.patch(key, { more_text: msg.more }); delete msg.more; }
       await (i === endAt ? finishTurn(key, msg, ev) : postMsg(key, msg))
         .catch((e) => console.error('post', key, ev.type, e.data?.error ?? e.message));
     }

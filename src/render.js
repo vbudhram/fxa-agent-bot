@@ -29,6 +29,16 @@ const md = (raw) => {
   const text = jiraLinks(defuse(raw));
   return { type: 'markdown', text: text.length > MD_MAX ? `${text.slice(0, MD_MAX)}\n\n_(cut at ${MD_MAX} characters; ask for the rest)_` : text };
 };
+// A turn's text that says nothing to the engineer, e.g. after a late task notice.
+const NOISE = /^\s*no response (is )?(requested|needed)\.?\s*$/i;
+// A long reply → [the first paragraphs, about 8 lines, and the rest or ''], never inside a code block.
+export function splitReply(text, keep = 8, min = 4) {
+  const paras = String(text).split(/\n{2,}/), lines = (t) => t.split('\n').filter((l) => l.trim()).length;
+  let n = 0, i = 0;
+  while (i < paras.length && (n < keep || (paras.slice(0, i).join('\n\n').match(/```/g) ?? []).length % 2)) n += lines(paras[i++]);
+  const rest = paras.slice(i).join('\n\n');
+  return lines(rest) < min ? [String(text), ''] : [paras.slice(0, i).join('\n\n'), rest];
+}
 // Notification and screen-reader fallback: the first line, plain.
 const plain = (text) => text.split('\n')[0].replace(/[*_`#>|]/g, '').slice(0, 150) || 'Reply';
 
@@ -154,17 +164,16 @@ export function render(key, ev) {
         ],
       };
     }
-    case 'turn_end':
-      if (ev.status === 'needs-input') return { text: plain(ev.text || 'Over to you.'), blocks: [md(ev.text || 'Over to you.')] };
-      if (ev.status === 'ready') return {
-        text: plain(ev.text || 'All set.'),
-        blocks: [
-          md(ev.text || 'All set.'),
-          // No changed file: nothing to diff or open a PR for. Stop and push stay as !stop and !push.
-          ...(ev.changes === 0 ? [] : [buttons(key, ['Diff', 'diff'], [ev.pr ? 'Update PR' : 'Open PR', 'open_pr'])]),
-        ],
-      };
-      return null; // working: stay quiet
+    case 'turn_end': {
+      if (NOISE.test(ev.text ?? '') && ev.text) return null;
+      if (ev.status !== 'needs-input' && ev.status !== 'ready') return null; // working: stay quiet
+      const full = ev.text || (ev.status === 'ready' ? 'All set.' : 'Over to you.');
+      const [head, more] = splitReply(full);
+      const row = [...(more ? [['Show more', 'more']] : []),
+        // No changed file: nothing to diff or open a PR for. Stop and push stay as !stop and !push.
+        ...(ev.status === 'ready' && ev.changes !== 0 ? [['Diff', 'diff'], [ev.pr ? 'Update PR' : 'Open PR', 'open_pr']] : [])];
+      return { text: plain(full), blocks: [md(head), ...(row.length ? [buttons(key, ...row)] : [])], ...(more ? { more } : {}) };
+    }
     case 'pr': {
       const head = !gh(ev.url) ? 'The PR is up; its link did not look like a GitHub PR, so check the repo.'
         : ev.updated ? `Updated the PR: ${gh(ev.url)}` : `Draft PR is up: ${gh(ev.url)}. I am still here: reply to change it or to ask about the review.`;

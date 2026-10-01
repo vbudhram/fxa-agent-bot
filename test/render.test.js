@@ -173,3 +173,26 @@ test('someone other than the owner steers only when they tag the bot', async () 
   assert.equal(forBotFromOthers({ user: 'UOTHER', text: 'booo' }, s, 'UBOT', 'anyone'), true); // STEER=anyone keeps the old way
   assert.equal(forBotFromOthers({ user: 'UOTHER', text: 'booo' }, s, null, 'mention'), true); // bot id not known yet: do not drop messages
 });
+
+test('a long reply shows its first paragraphs, and Show more holds the rest', async () => {
+  const { splitReply } = await import('../src/render.js');
+  const para = (k) => Array.from({ length: 3 }, (_, i) => `p${k} line ${i}`).join('\n');
+  const long = [1, 2, 3, 4, 5].map(para).join('\n\n');
+  const [head, more] = splitReply(long);
+  assert.equal(head, [1, 2, 3].map(para).join('\n\n'));
+  assert.equal(more, [4, 5].map(para).join('\n\n'));
+  // A short tail is not worth a tap.
+  assert.deepEqual(splitReply([1, 2, 3].map(para).join('\n\n') + '\n\none more'), [[1, 2, 3].map(para).join('\n\n') + '\n\none more', '']);
+  // Never cut inside a code block, even one with blank lines.
+  const code = 'Lead.\n\n```\na\n\nb\nc\nd\ne\nf\ng\nh\n```\n\nAfter.\n\n' + [4, 5].map(para).join('\n\n');
+  assert.equal((splitReply(code)[0].match(/```/g) ?? []).length % 2, 0);
+  const m = render('agent-x', { type: 'turn_end', status: 'ready', text: long, changes: 2 });
+  assert.equal(m.more, more);
+  assert.deepEqual(m.blocks.at(-1).elements.map((e) => e.action_id), ['more', 'diff', 'open_pr']);
+  assert.equal(render('agent-x', { type: 'turn_end', status: 'needs-input', text: 'Short.' }).more, undefined);
+});
+
+test('a turn that only says no response is requested posts nothing', () => {
+  assert.equal(render('agent-x', { type: 'turn_end', status: 'needs-input', text: 'No response requested.' }), null);
+  assert.equal(render('agent-x', { type: 'turn_end', status: 'needs-input', text: '' }).blocks[0].text, 'Over to you.');
+});
