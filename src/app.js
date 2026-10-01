@@ -167,7 +167,7 @@ async function launch(key, client, since = Date.now()) {
   try {
     // Together, not one after the other: both are on the path to the first status.
     const [link, who] = await Promise.all([linkP, whoIs(app.client, s.owner)]);
-    await ctl.task({ key, owner: s.owner, prompt: s.prompt, resumeFrom: s.resume_from, fresh: s.fresh, runtime: s.resume_from ? undefined : s.runtime, link, who });
+    await ctl.task({ key, owner: s.owner, prompt: s.prompt, resumeFrom: s.resume_from, fresh: s.fresh, thread: `${s.channel}:${s.thread_ts}`, isNew: s.is_new, runtime: s.resume_from ? undefined : s.runtime, link, who });
   } catch (e) {
     if (!/cap \d+ \(FXA_SESSION_MAX\)/.test(e.stderr ?? '')) { sessions.patch(key, { state: 'failed' }); await fail(client, s, e); return; }
     if (Date.now() - since > QUEUE_GIVE_UP_MS) {
@@ -502,7 +502,7 @@ async function bang(s, text, m, client) {
     const cur = fresh(s.key), pr = cmd === 'restart' && cur.pr_url && !['MERGED', 'CLOSED'].includes(cur.pr_seen?.state) ? cur.pr_url : null;
     await say(s, pr ? `Starting a new conversation on ${pr}, at its head, with the thread so far as context. \`!new\` starts from main instead.`
       : 'Starting fresh from main, with the thread so far as context.');
-    pending.set(key, { prompt, request, owner: s.owner, channel: s.channel, thread_ts: s.thread_ts, ...(pr ? { resume_from: s.key, fresh: true } : {}) });
+    pending.set(key, { prompt, request, owner: s.owner, channel: s.channel, thread_ts: s.thread_ts, ...(pr ? { resume_from: s.key, fresh: true } : {}), ...(cmd === 'new' ? { is_new: true } : {}) });
     await begin(key, client);
   } else if (cmd === 'usage') {
     const sm = await ctl.cost(s.key);
