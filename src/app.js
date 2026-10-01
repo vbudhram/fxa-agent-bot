@@ -9,7 +9,7 @@ import { installErrorLog } from './errors.js';
 import * as sessions from './sessions.js';
 import * as live from './live.js';
 import { pollEvery } from './poll.js';
-import { forBotFromOthers, isCopilot, copilotNote, copilotRound, ciRound } from './render.js';
+import { forBotFromOthers, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, homeView, planLines, resumeNote, errorDigest, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT } from './render.js';
 
@@ -1065,7 +1065,8 @@ async function updateStatusNow(s, state, activity) {
 
 const ownerAction = (id, fn) => app.action(id, async ({ ack, body, action, client }) => {
   await ack();
-  const s = sessions.all().find((x) => x.key === action.value);
+  // A value can carry more after the key: "<key>|<login>".
+  const s = sessions.all().find((x) => x.key === action.value.split('|')[0]);
   if (!s || body.user.id !== s.owner || !allowed(s.channel, body.user.id)) return;
   await fn(s, client, action, body).catch((e) => fail(client, s, e));
 });
@@ -1529,17 +1530,58 @@ async function followPrs() {
       lastFollow.set(s.key, Date.now());
       const cur = await ctl.prStatus(s.key);
       if (!cur) continue;
-      for (const text of prChanges(s.pr_seen, cur)) {
-        if (!s.muted) await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text }).catch((e) => console.error('follow', s.key, e.data?.error ?? e.message));
+      const ciPassAt = cur.ci !== 'pass' ? null : s.pr_seen?.ci === 'pass' ? s.ci_pass_at ?? Date.now() : Date.now();
+      const nudge = reviewNudge(cur, ciPassAt, s.nudged_at, Date.now());
+      for (const item of [...prChanges(s.pr_seen, cur), ...(nudge ? [nudge] : [])]) {
+        if (!s.muted) await postPrNote(s, item).catch((e) => console.error('follow', s.key, e.data?.error ?? e.message));
       }
       const prev = s.pr_seen;
-      sessions.patch(s.key, { pr_seen: cur, pr_follow_since: since, ...(['MERGED', 'CLOSED'].includes(cur.state) ? { pr_follow_done: true, pr_ended: cur.state } : {}) });
+      sessions.patch(s.key, { pr_seen: cur, pr_follow_since: since, ci_pass_at: ciPassAt, ...(nudge ? { nudged_at: ciPassAt } : {}),
+        ...(['MERGED', 'CLOSED'].includes(cur.state) ? { pr_follow_done: true, pr_ended: cur.state } : {}) });
       if (cur.state === 'OPEN') await autoRound(fresh(s.key), prev, cur).catch((e) => console.error('auto round', s.key, e.message));
     }
   } finally { following = false; }
 }
 const lastFollow = new Map();
 setInterval(followPrs, 30_000);
+// A PR note: plain text, or text with the owner's buttons. Their value carries the reviewer for Fix these.
+function postPrNote(s, item) {
+  if (typeof item === 'string') return app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: item });
+  const row = buttons(s.key, ...item.buttons);
+  if (item.login) row.elements.forEach((b) => { b.value = `${s.key}|${item.login}`; });
+  return app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: item.text,
+    blocks: [{ type: 'section', text: { type: 'mrkdwn', text: item.text } }, row] });
+}
+// A tapped PR button: the row becomes who tapped it and what started.
+const tapped = (client, s, body, what) => client.chat.update({ channel: s.channel, ts: body.message.ts, text: body.message.text,
+  blocks: [...(body.message.blocks ?? []).filter((b) => b.type !== 'actions'), { type: 'context', elements: [{ type: 'mrkdwn', text: `${what} · <@${body.user.id}>` }] }] }).catch(() => {});
+ownerAction('pr_ready', async (s, client, action, body) => {
+  await tapped(client, s, body, 'Marking the PR ready');
+  const ok = await ctl.prReady(s.key).then(() => true, (e) => { console.error('pr-ready', s.key, e.stderr || e.message); return false; });
+  await say(s, ok ? 'The PR is ready for review. GitHub asks the code owners for review.' : 'I could not mark the PR ready. Do it on GitHub: *Ready for review* at the bottom of the PR.');
+});
+// Fix these and Rebase start work: not on an ended PR, and not while a launch or a wrap-up runs (the button stays).
+function prBusy(s, body) {
+  const cur = fresh(s.key);
+  if (cur.pr_ended) { working(s, body, `The PR is ${cur.pr_ended === 'MERGED' ? 'merged' : 'closed'}. Tag me with what to do next.`); return true; }
+  if (['starting', 'wrapping', 'queued'].includes(cur.state) || wrapping.has(s.key)) { working(s, body, 'I am busy with a launch or a wrap-up. Tap again when it is done.'); return true; }
+  return false;
+}
+// Fix these, Rebase: a round like Copilot's. It updates the PR only when there are no unpushed edits of the owner's.
+const shipRound = (s) => !((s.edited_at ?? 0) > (s.pr_pushed_at ?? 0));
+ownerAction('fix_review', async (s, client, action, body) => {
+  const login = action.value.split('|')[1] ?? '';
+  if (prBusy(s, body)) return;
+  await tapped(client, s, body, 'Fixing the review');
+  const comments = await ctl.reviewComments(s.key, login);
+  if (!comments.length) { await say(s, `I found no comments from ${login} on the current code.`); return; }
+  await startRound(fresh(s.key), reviewRound(login, comments, randomBytes(6).toString('hex')), shipRound(fresh(s.key)));
+});
+ownerAction('rebase_pr', async (s, client, action, body) => {
+  if (prBusy(s, body)) return;
+  await tapped(client, s, body, 'Rebasing onto main');
+  await startRound(fresh(s.key), REBASE_PROMPT, false);
+});
 
 // A new Copilot review with comments, or CI failing for the change, starts a round
 // by itself: the agent fixes what is simple and valid and asks about the rest, and

@@ -68,6 +68,8 @@ export const errorsList = async () => { try { return JSON.parse((await run(['err
 export const attach = (key, paths) => run(['session', 'attach', key, ...paths], { timeout: 5 * 60_000 });
 export const errorsPush = () => run(['errors', 'push', '--now'], { timeout: 120_000 });
 export const copilotComments = async (key) => { try { return JSON.parse((await run(['session', 'copilot-comments', key], { timeout: 60_000 })).trim() || '[]'); } catch { return []; } };
+export const reviewComments = async (key, login) => { try { return JSON.parse((await run(['session', 'review-comments', key, login], { timeout: 60_000 })).trim() || '[]'); } catch { return []; } };
+export const prReady = (key) => run(['session', 'pr-ready', key], { timeout: 60_000 });
 export const prStatus = async (key) => { try { return JSON.parse((await run(['session', 'pr-status', key], { timeout: 60_000 })).trim() || 'null'); } catch { return null; } };
 // The desktop's gateway link when the ctl has one (FXA_DESKTOP_GATEWAY), else null.
 export const desktop = async (key, email) => {
