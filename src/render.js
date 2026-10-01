@@ -269,6 +269,13 @@ const HOME_STATE = { queued: ['⏳', 'Waiting for capacity'], starting: ['🔧',
   stopped: ['⏹️', 'Stopped'], failed: ['⚠️', 'Failed'] };
 // Every command, grouped by when you'd use it; each button has one too, since
 // buttons scroll away or go with the next turn. !help and the Home tab show it.
+// What !rebase asks of the agent.
+export const REBASE_PROMPT = `The engineer typed !rebase. Rebase your work onto the latest origin/main:
+commit what you have, then 'git fetch origin main' and 'git rebase origin/main'. Resolve each
+conflict so that BOTH sides survive: keep main's change and yours, never one side whole. If the
+two cannot coexist, stop with 'git rebase --abort' and say why. If yarn.lock changed, run
+'yarn install'. Then run the verify again. Reply in a few lines: how far main moved, what
+conflicted and how you resolved it, and what you checked. '!pr' then updates the PR.`;
 export const COMMANDS = ['status', 'plan', 'interrupt', 'desktop', 'diff', 'pr', 'push', 'rebase', 'pause', 'stop', 'new', 'restart', 'usage', 'mute', 'unmute', 'help'];
 export const HELP = [
   '*While I work*',
