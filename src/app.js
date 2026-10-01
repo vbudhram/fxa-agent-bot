@@ -17,6 +17,9 @@ installErrorLog(ctl.errorsPush);
 const list = (v) => (v || '').split(',').map((s) => s.trim()).filter(Boolean);
 const CHANNELS = list(process.env.ALLOWED_CHANNELS);
 const USERS = list(process.env.ALLOWED_USERS); // ponytail: static allowlist, Google group check later
+// DMs skip the channel gate, so they take their own explicit list; empty, DMs are off.
+const DM_USERS = list(process.env.DM_USERS);
+const isDm = (channel) => /^D[A-Z0-9]+$/.test(channel ?? '');
 
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
@@ -55,7 +58,7 @@ const pending = new Map(); // key → { prompt, owner, channel, thread_ts } unti
 const busy = new Set();    // sessions with a poll in flight
 
 // ALLOWED_USERS=* lets anyone in an allowed channel start a session; empty lets nobody.
-const allowed = (channel, user) => CHANNELS.includes(channel) && (USERS.includes('*') || USERS.includes(user));
+const allowed = (channel, user) => (CHANNELS.includes(channel) && (USERS.includes('*') || USERS.includes(user))) || (isDm(channel) && DM_USERS.includes(user));
 
 // A pause to switch runtime or cancel. With Codex off there is nothing to switch, so start at once.
 const START_DELAY_S = process.env.CODEX_ENABLED === '1' ? 10 : 0;
@@ -89,9 +92,11 @@ async function settle(s, ok = true) {
 const strip = (t) => (t ?? '').replace(/<@[A-Z0-9]+>/g, '').trim();
 
 // A mention starts at once, after a short window to cancel a mistaken tag.
-app.event('app_mention', async ({ event, client }) => {
+// A tag in a channel, or a new top-level DM: both start (or continue) the thread's session.
+app.event('app_mention', ({ event, client }) => startOrContinue(event, client));
+async function startOrContinue(event, client) {
   if (!allowed(event.channel, event.user)) {
-    if (CHANNELS.includes(event.channel)) await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts,
+    if (CHANNELS.includes(event.channel) || isDm(event.channel)) await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts,
       text: "Sorry, you're not on the list of people who can start agent sessions here." }).catch(() => {});
     return;
   }
@@ -139,7 +144,7 @@ app.event('app_mention', async ({ event, client }) => {
   // Spread the current entry: a Switch click while the thread was read changed its runtime.
   pending.set(key, { ...pending.get(key), prompt, card_ts: ts, acks: [event.ts],
     timer: setTimeout(() => begin(key, client).catch((e) => console.error('begin', key, e.message)), START_DELAY_S * 1000) });
-});
+}
 
 async function begin(key, client) {
   const p = pending.get(key);
@@ -299,6 +304,8 @@ app.message(async ({ message, client }) => {
   // 7: an edited reply goes to the agent as a correction; it already has the old text.
   if (message.subtype === 'message_changed') { await steerEdit(message, client); return; }
   // A reply that also goes to the channel, or carries a file, still steers.
+  // A DM has no tag: a new top-level message there is the task, and its thread is the session.
+  if (isDm(message.channel) && !message.thread_ts && !message.bot_id && !message.subtype) { await startOrContinue(message, client); return; }
   if (!message.thread_ts || message.bot_id) return;
   if (message.subtype && !['thread_broadcast', 'file_share'].includes(message.subtype)) return;
   const s = sessions.get(message.channel, message.thread_ts);
