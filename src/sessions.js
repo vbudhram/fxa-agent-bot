@@ -36,6 +36,12 @@ export function patch(key, fields) {
   return cur ? put({ ...cur, ...fields }) : undefined;
 }
 
+// Forget the thread whose current session is this key (retention: the controller deleted it).
+export function remove(key) {
+  const id = Object.keys(sessions).find((k) => sessions[k].key === key);
+  if (id) { delete sessions[id]; save(); }
+}
+
 export function newKey() {
   return `agent-${randomBytes(3).toString('hex')}`;
 }

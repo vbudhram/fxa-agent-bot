@@ -213,3 +213,14 @@ test('Copilot gets one short note, and its comments go to the agent fenced', asy
   assert.match(ciRound({ failing: ['unit', 'extract'], infra: ['extract'], links: ['https://circleci.com/gh/mozilla/fxa/9'] }), /^CI failed on the PR: unit\.\nFailing checks: https:\/\/circleci/);
   assert.deepEqual(prChanges({ reviews: [] }, { reviews: [{ login: 'copilot-pull-request-reviewer', state: 'COMMENTED' }, { login: 'rev1', state: 'COMMENTED' }], ci: 'running' }), ['rev1 left review comments on the PR.']);
 });
+
+test('retention forgets the thread whose current session the controller deleted', async () => {
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  process.env.FXA_AGENT_STATE = `${mkdtempSync(`${tmpdir()}/bot-`)}/s.json`;
+  const sessions = await import(`../src/sessions.js?retention=${Date.now()}`);
+  sessions.put({ key: 'agent-old1', channel: 'C1', thread_ts: '1.1' });
+  sessions.put({ key: 'agent-new1', channel: 'C1', thread_ts: '2.2' });
+  sessions.remove('agent-old1');
+  assert.deepEqual(sessions.all().map((s) => s.key), ['agent-new1']);
+});

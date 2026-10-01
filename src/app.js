@@ -588,6 +588,14 @@ async function sweepOnce() {
 }
 setInterval(() => { idleSweep(); }, 60_000);
 
+// Retention: the controller deletes sessions idle past FXA_SESSION_RETAIN_DAYS, and the bot
+// forgets their threads, so its own file keeps no old thread text either. Every 6 hours.
+async function prune() {
+  try { for (const key of await ctl.prune()) sessions.remove(key); } catch (e) { console.error('prune', e.stderr || e.message); }
+}
+setInterval(prune, 6 * 3600_000);
+setTimeout(prune, 60_000);
+
 // A typed reply and a tapped option take the same path, so both get the live timeline.
 // The timeline opens first, so the reply is visible in under a second while
 // steer spends ~2 s over ssh starting the turn. A turn already running keeps

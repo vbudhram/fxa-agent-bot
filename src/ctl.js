@@ -77,6 +77,8 @@ export const desktop = async (key, email) => {
 export const summary = async (key) => { try { return JSON.parse((await run(['session', 'summary', key])).trim() || 'null'); } catch { return null; } };
 export const interrupt = (key) => run(['interrupt', key], { timeout: 60_000 });
 // Pauses sessions idle past the ctl's threshold; returns the keys it paused.
+// The keys the controller deleted under its retention rule (session prune).
+export const prune = async () => (await run(['session', 'prune'], { timeout: 10 * 60_000 })).split('\n').filter((k) => /^agent-[a-z0-9]+$/.test(k));
 export const idleSweep = async () => (await run(['session', 'idle-sweep'], { timeout: 10 * 60_000 }))
   .split('\n').filter((l) => l.startsWith('paused ')).map((l) => l.slice(7).trim());
 
