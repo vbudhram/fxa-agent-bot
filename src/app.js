@@ -128,7 +128,7 @@ app.event('app_mention', async ({ event, client }) => {
   const resume_from = cur && !prDone && (['stopped', 'failed', 'paused'].includes(cur.state) || prOpen) ? cur.key : undefined;
   if (resume_from) runtime = cur.runtime || 'claude'; // ctl resumes with the session's own agent
   const deadline = Date.now() + START_DELAY_S * 1000;
-  pending.set(key, { prompt, owner: event.user, channel: event.channel, thread_ts, resume_from, runtime, deadline });
+  pending.set(key, { prompt, request: resume_from ? requestOf(cur) : prompt, owner: event.user, channel: event.channel, thread_ts, resume_from, runtime, deadline });
   // The card goes up first; reading a long thread for context can take seconds.
   // A failed post must release the thread, or it stays reserved until a restart.
   const { ts } = await client.chat.postMessage({ channel: event.channel, thread_ts,
@@ -167,7 +167,7 @@ async function launch(key, client, since = Date.now()) {
   try {
     // Together, not one after the other: both are on the path to the first status.
     const [link, who] = await Promise.all([linkP, whoIs(app.client, s.owner)]);
-    await ctl.task({ key, owner: s.owner, prompt: s.prompt, resumeFrom: s.resume_from, runtime: s.resume_from ? undefined : s.runtime, link, who });
+    await ctl.task({ key, owner: s.owner, prompt: s.prompt, resumeFrom: s.resume_from, fresh: s.fresh, runtime: s.resume_from ? undefined : s.runtime, link, who });
   } catch (e) {
     if (!/cap \d+ \(FXA_SESSION_MAX\)/.test(e.stderr ?? '')) { sessions.patch(key, { state: 'failed' }); await fail(client, s, e); return; }
     if (Date.now() - since > QUEUE_GIVE_UP_MS) {
@@ -460,7 +460,9 @@ async function bang(s, text, m, client) {
       cur.state === 'active' && !cur.status_ts ? 'Waiting for you. I pause after 30 minutes without a message; a reply picks it up again.' : null,
       cur.muted ? 'Replies are muted here. `!unmute` to hear from me.' : null].filter(Boolean).join('\n'));
   } else if (cmd === 'pr' || cmd === 'push') {
-    if (ownerOnly() || !readyToShip()) return;
+    if (ownerOnly()) return;
+    if (ENDED.includes(fresh(s.key).state)) { await resumeToShip(fresh(s.key), client, cmd === 'push' ? 'push' : 'pr'); return; }
+    if (!readyToShip()) return;
     const what = cmd === 'push' ? 'Push branch' : fresh(s.key).pr_url ? 'Update PR' : 'Open PR';
     const busy = await startWrap(s, client, what, m.user);
     if (busy) { await note(busy); return; }
@@ -492,11 +494,15 @@ async function bang(s, text, m, client) {
   } else if (cmd === 'new' || cmd === 'restart') {
     if (ownerOnly()) return;
     if (LIVE.includes(s.state) && !(await stopSession(s.key))) { await say(s, STOPPED_TEXT(false)); return; }
-    const request = (s.prompt ?? '').split('\n\nEarlier messages')[0];
+    // The thread's first request, not this session's: a resumed session's prompt is only its last message.
+    const request = requestOf(s);
     const key = sessions.newKey();
     const prompt = request + await threadContext(client, { channel: s.channel, thread_ts: s.thread_ts, ts: m.ts, user: s.owner });
-    await say(s, 'Starting fresh, with the thread so far as context.');
-    pending.set(key, { prompt, owner: s.owner, channel: s.channel, thread_ts: s.thread_ts });
+    // !restart keeps an open PR: a new conversation at the PR's head, and Open PR updates it. !new starts from main.
+    const cur = fresh(s.key), pr = cmd === 'restart' && cur.pr_url && !['MERGED', 'CLOSED'].includes(cur.pr_seen?.state) ? cur.pr_url : null;
+    await say(s, pr ? `Starting a new conversation on ${pr}, at its head, with the thread so far as context. \`!new\` starts from main instead.`
+      : 'Starting fresh from main, with the thread so far as context.');
+    pending.set(key, { prompt, request, owner: s.owner, channel: s.channel, thread_ts: s.thread_ts, ...(pr ? { resume_from: s.key, fresh: true } : {}) });
     await begin(key, client);
   } else if (cmd === 'usage') {
     const sm = await ctl.cost(s.key);
@@ -549,11 +555,11 @@ app.event('reaction_added', async ({ event, client }) => {
 
 // A reply to a paused session continues it on a fresh runner, with its changes
 // and conversation; the reply is the new session's first message.
-async function resumePaused(s, text, client) {
+async function resumePaused(s, text, client, extra = {}) {
   if ([...pending.values()].some((p) => p.channel === s.channel && p.thread_ts === s.thread_ts)) return;
   text = takeAside(s.key) + text;
   const key = sessions.newKey();
-  pending.set(key, { prompt: text, owner: s.owner, channel: s.channel, thread_ts: s.thread_ts, resume_from: s.key, acks: ackList(fresh(s.key)) });
+  pending.set(key, { prompt: text, request: requestOf(s), owner: s.owner, channel: s.channel, thread_ts: s.thread_ts, resume_from: s.key, acks: ackList(fresh(s.key)), ...extra });
   const [hist, sm] = await Promise.all([ctl.history(s.key), ctl.summary(s.key)]);
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: resumeNote(hist, sm) }).catch(() => {});
   await begin(key, client);
@@ -631,6 +637,8 @@ function serial(key, fn) {
   return next;
 }
 const fresh = (key) => sessions.all().find((x) => x.key === key);
+// The thread's request: kept from the first session on, since a resumed session's prompt is only its last message.
+const requestOf = (s) => s?.request ?? (s?.prompt ?? '').split('\n\nEarlier messages')[0];
 
 const startStatus = (s, verb) => serial(s.key, () => startStatusNow(s, verb));
 async function startStatusNow(s, verb) {
@@ -1120,11 +1128,34 @@ async function pushBranch(s, client) {
   await ctl.finish(s.key, true);
 }
 ownerAction('open_pr', async (s, client, action, body) => {
-  if (await wrapTap(s, client, body, fresh(s.key)?.pr_url ? 'Update PR' : 'Open PR')) await openPr(s, client);
+  if (!(await wrapTap(s, client, body, fresh(s.key)?.pr_url ? 'Update PR' : 'Open PR'))) return;
+  await (ENDED.includes(fresh(s.key)?.state) ? resumeToShip(fresh(s.key), client, 'pr') : openPr(s, client));
 });
 ownerAction('push_branch', async (s, client, action, body) => {
-  if (await wrapTap(s, client, body, 'Push branch')) await pushBranch(s, client);
+  if (!(await wrapTap(s, client, body, 'Push branch'))) return;
+  await (ENDED.includes(fresh(s.key)?.state) ? resumeToShip(fresh(s.key), client, 'push') : pushBranch(s, client));
 });
+// Open PR or Push on a paused or stopped session: resume it on a new runner, and
+// ship once its first turn says the work carried over (shipAfterResume).
+const ENDED = ['paused', 'stopped', 'failed'];
+async function resumeToShip(s, client, what) {
+  if (sessions.get(s.channel, s.thread_ts)?.key !== s.key || s.stop_failed) {
+    await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'That button is from an earlier session in this thread. Use the newest one, or `!pr`.' });
+    return;
+  }
+  await resumePaused(s, `The engineer tapped ${what === 'push' ? 'Push branch' : 'Open PR'}. Run git status and check that your work carried over. Say so in one line, and end with 'status: ready' if it did. The host then ships it.`,
+    client, { then_wrap: what });
+}
+async function shipAfterResume(key, what, ev) {
+  const s = fresh(key);
+  if (!s) return;
+  if (ev.type !== 'turn_end' || ev.status !== 'ready') {
+    await postMsg(key, { text: `I did not ${what === 'push' ? 'push' : 'open the PR'}: my reply above says why. Tap the button again when it is ready.` });
+    return;
+  }
+  if (await startWrap(s, app.client, what === 'push' ? 'Push branch' : s.pr_url ? 'Update PR' : 'Open PR', s.owner)) return;
+  await (what === 'push' ? pushBranch(s, app.client) : openPr(s, app.client)).catch((e) => fail(app.client, s, e));
+}
 const stopping = new Set();
 ownerAction('stop', async (s, client, action, body) => {
   // Checked before any await: two fast taps both passed a later check.
@@ -1383,6 +1414,9 @@ async function pollOne(key) {
       if (msg.more !== undefined) { sessions.patch(key, { more_text: msg.more }); delete msg.more; }
       await (i === endAt ? finishTurn(key, msg, ev) : postMsg(key, msg))
         .catch((e) => console.error('post', key, ev.type, e.data?.error ?? e.message));
+      // A session resumed by Open PR or Push ships after its first turn, once this poll has saved its state.
+      const tw = i === endAt && fresh(key)?.then_wrap;
+      if (tw) { sessions.patch(key, { then_wrap: null }); setTimeout(() => shipAfterResume(key, tw, ev).catch((e) => console.error('ship', key, e.message)), 1000); }
     }
     if (!fresh(key)) return; // restarted or replaced while this poll ran
     // A stop made while this poll ran wins over the state the poll read.
