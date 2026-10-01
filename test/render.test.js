@@ -41,6 +41,8 @@ test('PR follow-up posts only what changed', async () => {
   const reviewed = { ...infraRed, reviews: [{ login: 'rev1', state: 'APPROVED' }] };
   assert.deepEqual(prChanges(infraRed, reviewed), ['rev1 approved the PR.']);
   assert.deepEqual(prChanges(reviewed, { ...reviewed, state: 'MERGED' }), ['The PR merged. 🎉']);
+  assert.deepEqual(prChanges({ ci: 'running', reviews: [] }, { url, ci: 'pass', reviews: [] }), [`CI passed. <${url}|Review and approve the PR>`]);
+  assert.deepEqual(prChanges({ ci: 'running', reviews: [] }, { ci: 'pass', reviews: [] }), ['CI passed.']);
 });
 
 test('several questions get their own options and buttons', () => {

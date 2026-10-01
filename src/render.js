@@ -116,7 +116,7 @@ export function prChanges(prev, cur) {
   if (cur.ci !== was.ci && cur.ci === 'fail') {
     const infraOnly = cur.failing.length && cur.failing.every((n) => cur.infra.includes(n));
     out.push(`CI failed: ${esc(cur.failing.join(', '))}.${infraOnly ? ' That is a known failure in the repo\'s CI setup, not in the change.' : ''}${checks}`);
-  } else if (cur.ci !== was.ci && cur.ci === 'pass') out.push('CI passed.');
+  } else if (cur.ci !== was.ci && cur.ci === 'pass') out.push(`CI passed.${gh(cur.url) ? ` <${cur.url}|Review and approve the PR>` : ''}`);
   const seen = new Map((was.reviews ?? []).map((r) => [r.login, r.state]));
   for (const r of cur.reviews ?? []) {
     if (seen.get(r.login) === r.state || isCopilot(r.login)) continue; // Copilot's reviews get their own note (copilotNote)
