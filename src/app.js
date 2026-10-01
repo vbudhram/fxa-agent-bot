@@ -9,7 +9,8 @@ import { installErrorLog } from './errors.js';
 import * as sessions from './sessions.js';
 import * as live from './live.js';
 import { pollEvery } from './poll.js';
-import { forBotFromOthers } from './render.js';
+import { forBotFromOthers, isCopilot, copilotNote, copilotRound, ciRound } from './render.js';
+import { randomBytes } from 'node:crypto';
 import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, homeView, planLines, resumeNote, errorDigest, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock } from './render.js';
 
 const { App } = bolt;
@@ -154,7 +155,8 @@ async function begin(key, client) {
   // Continuing a PR: the new session replaces the old one in the thread, so it
   // takes over following the PR from what the old one saw.
   const from = rest.resume_from && fresh(rest.resume_from);
-  const pr = from?.pr_seen || from?.pr_url ? { pr_seen: from.pr_seen, pr_follow_since: from.pr_follow_since, pr_url: from.pr_url } : {};
+  const pr = from?.pr_seen || from?.pr_url ? { pr_seen: from.pr_seen, pr_follow_since: from.pr_follow_since, pr_url: from.pr_url,
+    auto_rounds: from.auto_rounds, copilot_seen_at: from.copilot_seen_at, pr_pushed_at: from.pr_pushed_at } : {};
   sessions.put({ key, ...rest, ...pr, cursor: 0, state: 'queued', started_at: Date.now() });
   pending.delete(key);
   if (card_ts) await client.chat.update({ channel: p.channel, ts: card_ts, text: 'On it! Setting up a sandbox; the status below shows each step and how long it took. Type `!help` any time for commands.', blocks: [] }).catch(() => {});
@@ -1126,7 +1128,7 @@ async function openPr(s, client) {
   // The note goes first; finish then returns at once and the poll posts the PR link.
   // The session stays open after its PR, so a second Open PR updates that PR.
   const text = fresh(s.key)?.pr_url ? 'Updating the PR: review, the safety checks, then a push to it. The session stays open.'
-    : 'Wrapping up: review, PR description, then a draft PR. I will post the link here, and the session stays open.';
+    : 'Wrapping up: review, PR description, then a PR. I will post the link here, and the session stays open.';
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text });
   await ctl.finish(s.key);
 }
@@ -1156,6 +1158,11 @@ async function resumeToShip(s, client, what) {
 async function shipAfterResume(key, what, ev) {
   const s = fresh(key);
   if (!s) return;
+  // An automatic round updates the PR only when it changed files and asked nothing; its reply says the rest.
+  if (what === 'pr_auto') {
+    if (ev.type !== 'turn_end' || ev.status !== 'ready' || !(ev.changes > 0)) return;
+    what = 'pr';
+  }
   if (ev.type !== 'turn_end' || ev.status !== 'ready') {
     await postMsg(key, { text: `I did not ${what === 'push' ? 'push' : 'open the PR'}: my reply above says why. Tap the button again when it is ready.` });
     return;
@@ -1414,7 +1421,7 @@ async function pollOne(key) {
     // batch, so a failed post is logged and skipped, never re-sent every 5 s.
     for (const [i, ev] of events.entries()) {
       // The PR outlives the session's state: the thread follows it from here.
-      if (ev.type === 'pr' && ev.url) sessions.patch(key, { pr_url: ev.url, pr_follow_since: fresh(key)?.pr_follow_since ?? Date.now() });
+      if (ev.type === 'pr' && ev.url) sessions.patch(key, { pr_url: ev.url, pr_follow_since: fresh(key)?.pr_follow_since ?? Date.now(), pr_pushed_at: Date.now() });
       const msg = render(s.key, ev);
       if (!msg) continue;
       if (msg.operator) { const kind = msg.operator; delete msg.operator; if (!firstOperatorNote(key, kind)) continue; }
@@ -1490,16 +1497,73 @@ async function followPrs() {
       if (!(s.state === 'pr_open' || s.pr_url) || s.pr_follow_done || sessions.get(s.channel, s.thread_ts)?.key !== s.key) continue;
       const since = s.pr_follow_since ?? Date.now();
       if (Date.now() - since > FOLLOW_MS) { sessions.patch(s.key, { pr_follow_done: true }); continue; }
+      // Every 30 s for 20 min after a push, when Copilot and CI answer; every 2 min after that.
+      const every = Date.now() - (s.pr_pushed_at ?? 0) < 20 * 60_000 ? 30_000 : 120_000;
+      if (Date.now() - (lastFollow.get(s.key) ?? 0) < every) continue;
+      lastFollow.set(s.key, Date.now());
       const cur = await ctl.prStatus(s.key);
       if (!cur) continue;
       for (const text of prChanges(s.pr_seen, cur)) {
         if (!s.muted) await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text }).catch((e) => console.error('follow', s.key, e.data?.error ?? e.message));
       }
+      const prev = s.pr_seen;
       sessions.patch(s.key, { pr_seen: cur, pr_follow_since: since, ...(['MERGED', 'CLOSED'].includes(cur.state) ? { pr_follow_done: true, pr_ended: cur.state } : {}) });
+      if (cur.state === 'OPEN') await autoRound(fresh(s.key), prev, cur).catch((e) => console.error('auto round', s.key, e.message));
     }
   } finally { following = false; }
 }
-setInterval(followPrs, 120_000);
+const lastFollow = new Map();
+setInterval(followPrs, 30_000);
+
+// A new Copilot review with comments, or CI failing for the change, starts a round
+// by itself: the agent fixes what is simple and valid and asks about the rest, and
+// the host updates the PR when the round changed files and asked nothing
+// (shipAfterResume). After AUTO_MAX rounds on a PR, the owner taps to run another.
+const AUTO_MAX = 2;
+async function autoRound(s, prev, cur) {
+  // pr_pushed_at: a PR this bot pushed since rounds began, so older PRs' old reviews start nothing.
+  if (!s || s.muted || s.pr_ended || !s.pr_pushed_at) return;
+  // Busy (a turn, a wrap-up, a boot): try again on the next look, nothing is marked seen.
+  if (s.status_ts || busy.has(s.key) || ['starting', 'wrapping', 'queued'].includes(s.state)) return;
+  const cp = (cur.reviews ?? []).find((r) => isCopilot(r.login));
+  let job = null;
+  if (cp?.at && cp.at !== s.copilot_seen_at) {
+    sessions.patch(s.key, { copilot_seen_at: cp.at });
+    const comments = await ctl.copilotComments(s.key);
+    if (comments.length) job = { note: (ask) => copilotNote(comments, ask), text: copilotRound(comments, randomBytes(6).toString('hex')) };
+  } else if (cur.ci === 'fail' && prev?.ci !== 'fail' && cur.links?.length) {
+    job = { note: (ask) => ask ? 'CI failed. I already ran 2 automatic rounds on this PR, so tap to run another.' : 'I am fixing it, then I update the PR.', text: ciRound(cur) };
+  }
+  if (!job) return;
+  const ask = (s.auto_rounds ?? 0) >= AUTO_MAX;
+  if (ask) {
+    sessions.patch(s.key, { round_text: job.text });
+    await postMsg(s.key, { text: job.note(true), blocks: [md(job.note(true)), buttons(s.key, ['Run a round', 'auto_round'])] });
+    return;
+  }
+  sessions.patch(s.key, { auto_rounds: (s.auto_rounds ?? 0) + 1 });
+  await postMsg(s.key, { text: job.note(false) });
+  await startRound(s, job.text);
+}
+async function startRound(s, text) {
+  const cur = fresh(s.key);
+  if ([...ENDED, 'pr_open'].includes(cur.state)) {
+    if (sessions.get(cur.channel, cur.thread_ts)?.key !== cur.key || cur.stop_failed) return;
+    await resumePaused(cur, text, app.client, { then_wrap: 'pr_auto' });
+    return;
+  }
+  sessions.patch(cur.key, { then_wrap: 'pr_auto' });
+  await steerAndAck(cur, text, app.client, null, null);
+}
+ownerAction('auto_round', async (s, client, action, body) => {
+  const text = fresh(s.key)?.round_text;
+  if (!text) return;
+  sessions.patch(s.key, { round_text: null });
+  // Not wrapTap: its 30 s lock would refuse the PR update after a short round.
+  await client.chat.update({ channel: s.channel, ts: body.message.ts, text: body.message.text,
+    blocks: [...(body.message.blocks ?? []).filter((b) => b.type !== 'actions'), { type: 'context', elements: [{ type: 'mrkdwn', text: `Round started by <@${body.user.id}>` }] }] }).catch(() => {});
+  await startRound(fresh(s.key), text);
+});
 
 // 6: DM the operator once for each new or reopened error signature. The first
 // look only records what is already there, so a restart sends no flood.
