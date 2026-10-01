@@ -62,6 +62,8 @@ export const finish = (key, noPr = false) => run(['finish', '--session', key, ..
 export const stop = (key) => run(['stop', key]);
 export const cost = async (key) => { try { return JSON.parse((await run(['session', 'cost', key], { timeout: 60_000 })).trim() || 'null'); } catch { return null; } };
 export const pause = (key) => run(['session', 'pause', key], { timeout: 5 * 60_000 });
+// Moves the running session's work onto the latest origin/main: { result, base, files, lock_changed, prompt }.
+export const rebase = async (key) => JSON.parse((await run(['session', 'rebase', key], { timeout: 5 * 60_000 })).trim());
 export const plan = async (key) => { try { return JSON.parse((await run(['session', 'plan', key], { timeout: 60_000 })).trim() || 'null'); } catch { return null; } };
 export const history = async (key) => { try { return JSON.parse((await run(['session', 'history', key], { timeout: 30_000 })).trim() || '[]'); } catch { return []; } };
 export const errorsList = async () => { try { return JSON.parse((await run(['errors', '--json'], { timeout: 60_000 })).trim() || '[]'); } catch { return null; } };

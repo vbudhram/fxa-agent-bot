@@ -269,7 +269,7 @@ const HOME_STATE = { queued: ['⏳', 'Waiting for capacity'], starting: ['🔧',
   stopped: ['⏹️', 'Stopped'], failed: ['⚠️', 'Failed'] };
 // Every command, grouped by when you'd use it; each button has one too, since
 // buttons scroll away or go with the next turn. !help and the Home tab show it.
-export const COMMANDS = ['status', 'plan', 'interrupt', 'desktop', 'diff', 'pr', 'push', 'pause', 'stop', 'new', 'restart', 'usage', 'mute', 'unmute', 'help'];
+export const COMMANDS = ['status', 'plan', 'interrupt', 'desktop', 'diff', 'pr', 'push', 'rebase', 'pause', 'stop', 'new', 'restart', 'usage', 'mute', 'unmute', 'help'];
 export const HELP = [
   '*While I work*',
   '`!status` what I am doing, the PR, and how long setup took',
@@ -280,6 +280,7 @@ export const HELP = [
   '`!diff` the changes so far',
   '`!pr` open the PR, or update it once there is one',
   '`!push` push the branch, with no PR',
+  '`!rebase` move the work onto the latest main and recheck it; `!pr` then updates the PR',
   '*The session*',
   '`!pause` save the work and free the sandbox; a reply picks it up again',
   '`!stop` end the session; the work is kept',

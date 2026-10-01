@@ -470,6 +470,18 @@ async function bang(s, text, m, client) {
     const busy = await startWrap(s, client, what, m.user);
     if (busy) { await note(busy); return; }
     await (cmd === 'push' ? pushBranch(s, client) : openPr(s, client)).catch((e) => fail(client, s, e));
+  } else if (cmd === 'rebase') {
+    if (ownerOnly() || !readyToShip()) return;
+    await note('Moving the work onto the latest main…');
+    let r;
+    try { r = await ctl.rebase(s.key); } catch (e) { console.error('rebase', s.key, e.stderr || e.message); await say(s, explain(e, s.key) ?? 'The rebase failed.'); return; }
+    const at = `\`${r.base.slice(0, 10)}\``;
+    if (r.result === 'uptodate') { await say(s, `Already on the latest main (${at}). Nothing to move.`); return; }
+    const files = r.files.map((f) => `\`${f}\``).join(', ');
+    await say(s, r.result === 'conflict'
+      ? `Moved onto main ${at}. ${r.files.length} file${r.files.length === 1 ? '' : 's'} conflict${r.files.length === 1 ? 's' : ''}: ${files}. I'm resolving ${r.files.length === 1 ? 'it' : 'them'} now. \`!pr\` updates the PR after.`
+      : `Moved onto main ${at} with no conflicts. I'm running the checks again. \`!pr\` updates the PR after.`);
+    await steerAndAck(s, r.prompt, client, null, m.ts);
   } else if (cmd === 'diff') {
     if (ownerOnly()) return;
     await note('Getting the diff…');
