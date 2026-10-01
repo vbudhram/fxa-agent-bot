@@ -8,9 +8,9 @@ features:
     always_online: true
   app_home:
     home_tab_enabled: true
-    # A DM starts a session for the people in DM_USERS; the bot also DMs the operator about errors.
+    # Read-only: the bot DMs the operator about new errors; nobody chats with it there.
     messages_tab_enabled: true
-    messages_tab_read_only_enabled: false
+    messages_tab_read_only_enabled: true
   slash_commands:
     - command: /fxa-agent
       description: The agent sessions in this channel, or the commands
@@ -22,7 +22,6 @@ oauth_config:
       - app_mentions:read
       - channels:history
       - groups:history
-      - im:history
       - chat:write
       - files:write
       - files:read
@@ -38,7 +37,6 @@ settings:
       - app_home_opened
       - message.channels
       - message.groups
-      - message.im
       - reaction_added
   interactivity:
     is_enabled: true
