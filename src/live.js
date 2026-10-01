@@ -83,10 +83,13 @@ export const todoLine = (st) => (st.todos ?? []).length
 
 // A short "how is it going" message. While a turn runs the bot answers it from
 // this state at once; queued for the agent it waited until the turn ended.
+// Every sentence must be a status ask: "what's happening with CI? rerun it" is a real message.
+const STATUS_ASKS = [/^(what'?s|what is)( the)? (status|progress|eta)( here| now)?$/i, /^(what'?s|what is) (up|happening|going on)( here| now)?$/i,
+  /^(status|progress|eta|updates?|any updates?)$/i, /^how'?s it going$/i, /^how is it going$/i, /^where (are )?we( at)?$/i];
 export const isStatusAsk = (text) => {
   const t = String(text ?? '').trim().replace(/^(hey|hi|so|ok|okay)[,!]?\s+/i, '');
-  return t.length <= 60 && [/^what'?s(\s+is)?\s+(the\s+)?(status|progress|eta|up|happening|going on)\b/i, /^what is (the\s+)?(status|progress|eta)\b/i,
-    /^(status|progress|eta|updates?|any updates?)\W*$/i, /^how'?s it going\b/i, /^how is it going\b/i, /^where (are )?we( at)?\b/i].some((r) => r.test(t));
+  const parts = t.split(/[?!.]+\s*/).map((p) => p.trim()).filter(Boolean);
+  return t.length <= 60 && parts.length > 0 && parts.every((p) => STATUS_ASKS.some((r) => r.test(p)));
 };
 
 // The status reply: time, todo progress, the current todo, the last step and when it started.

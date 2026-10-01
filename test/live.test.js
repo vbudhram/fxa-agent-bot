@@ -74,7 +74,8 @@ test('status questions are recognized, other questions are not', async () => {
   const { isStatusAsk } = await import('../src/live.js');
   for (const t of ["What's the status?", 'what is the status here?', "What's up? Where we at?", 'status', 'any update?', 'how is it going?', 'where are we?', 'ok, status?'])
     assert.equal(isStatusAsk(t), true, t);
-  for (const t of ['what happened?', 'does this work for sync logins and 123done sessions?', 'Can you see why?', 'update the README too', 'status of the PR checks in CI and what failed in the functional tests?'])
+  for (const t of ['what happened?', 'does this work for sync logins and 123done sessions?', 'Can you see why?', 'update the README too', 'status of the PR checks in CI and what failed in the functional tests?',
+    "what's happening with CI? can you rerun it", 'where are we storing the session token?', "what's up with the login test failing?", "how's it going with the refactor? also skip the docs"])
     assert.equal(isStatusAsk(t), false, t);
 });
 

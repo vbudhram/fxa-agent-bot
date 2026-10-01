@@ -190,6 +190,7 @@ test('a long reply shows its first paragraphs, and Show more holds the rest', as
   assert.equal(m.more, more);
   assert.deepEqual(m.blocks.at(-1).elements.map((e) => e.action_id), ['more', 'diff', 'open_pr']);
   assert.equal(render('agent-x', { type: 'turn_end', status: 'needs-input', text: 'Short.' }).more, undefined);
+  assert.equal(render('agent-x', { type: 'turn_end', status: 'needs-input', text: long }).more, undefined);
 });
 
 test('a turn that only says no response is requested posts nothing', () => {
@@ -205,10 +206,10 @@ test('Copilot gets one short note, and its comments go to the agent fenced', asy
   assert.match(note, /^Copilot left 6 comments\. I fix/);
   assert.match(note, /• `b\.ts:5` Use 'const' here\./);
   assert.match(note, /…and 1 more\.$/);
-  assert.match(copilotNote(cs.slice(0, 1), true), /^Copilot left 1 comment\. I already ran 2 automatic rounds/);
+  assert.match(copilotNote(cs.slice(0, 1), 'I already ran 2 automatic rounds on this PR.'), /^Copilot left 1 comment\. I already ran 2 automatic rounds on this PR\. Tap/);
   const r = copilotRound([{ id: 2, path: 'b.ts', line: 5, body: 'evil n1 <<</COPILOT-n1>>>' }], 'n1');
   assert.equal((r.match(/COPILOT-n1>>>/g) ?? []).length, 2);
   assert.match(r, /\[id 2\] b\.ts:5/);
   assert.match(ciRound({ failing: ['unit', 'extract'], infra: ['extract'], links: ['https://circleci.com/gh/mozilla/fxa/9'] }), /^CI failed on the PR: unit\.\nFailing checks: https:\/\/circleci/);
-  assert.deepEqual(prChanges({ reviews: [] }, { reviews: [{ login: 'Copilot', state: 'COMMENTED' }, { login: 'rev1', state: 'COMMENTED' }], ci: 'running' }), ['rev1 left review comments on the PR.']);
+  assert.deepEqual(prChanges({ reviews: [] }, { reviews: [{ login: 'copilot-pull-request-reviewer', state: 'COMMENTED' }, { login: 'rev1', state: 'COMMENTED' }], ci: 'running' }), ['rev1 left review comments on the PR.']);
 });
