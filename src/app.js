@@ -460,7 +460,7 @@ async function bang(s, text, m, client) {
       cur.last_act ? `Now: ${cur.last_act}` : null,
       cur.pr_url ? `PR: ${cur.pr_url}` : null,
       cur.boot_s ? `Setup took ${cur.boot_s}s.` : null,
-      cur.state === 'active' && !cur.status_ts ? 'Waiting for you. I pause after 30 minutes without a message; a reply picks it up again.' : null,
+      cur.state === 'active' && !cur.status_ts ? 'Waiting for you. I pause after 10 minutes without a message; a reply picks it up again.' : null,
       cur.muted ? 'Replies are muted here. `!unmute` to hear from me.' : null].filter(Boolean).join('\n'));
   } else if (cmd === 'pr' || cmd === 'push') {
     if (ownerOnly()) return;
@@ -572,7 +572,7 @@ async function resumePaused(s, text, client, extra = {}) {
   await begin(key, client);
 }
 
-// Every minute the ctl pauses sessions idle for 30 minutes (FXA_SESSION_IDLE_SECONDS).
+// Every minute the ctl pauses sessions idle for 10 minutes (FXA_SESSION_IDLE_SECONDS).
 let sweeping = false;
 async function idleSweep() {
   if (sweeping) return;
