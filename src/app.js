@@ -1032,7 +1032,9 @@ const updateStatus = (key, state, activity) => serial(key, async function update
     try { sessions.patch(key, await updateStreamNow(s, state, activity)); }
     catch (e) {
       // The stream ended under us (stopped by the user, or timed out): start fresh next time.
-      console.error('stream', key, e.data?.error ?? e.message);
+      // That one is expected and handled, so it is not an error; anything else is.
+      const why = e.data?.error ?? e.message;
+      (why === 'message_not_in_streaming_state' ? console.log : console.error)('stream', key, why);
       sessions.patch(key, STATUS_CLEAR);
     }
     return;
