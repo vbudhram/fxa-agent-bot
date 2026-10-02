@@ -668,8 +668,8 @@ async function startStatusNow(s, verb) {
     try {
       const { ts } = await app.client.apiCall('chat.startStream', {
         channel: s.channel, thread_ts: s.thread_ts, recipient_user_id: cur.owner, recipient_team_id: cur.team ?? teamId,
-        chunks: [{ type: 'task_update', id: 't0', title: first, status: 'in_progress' },
-          { type: 'blocks', blocks: [buttons(s.key, ['Interrupt', 'interrupt'])] }],
+        // No Interrupt button: nobody tapped it, and it sat above the reply. !interrupt stops a turn.
+        chunks: [{ type: 'task_update', id: 't0', title: first, status: 'in_progress' }],
       });
       sessions.patch(cur.key, { status_ts: ts, status_kind: 'stream', busy_since: Date.now(), status_opened_at: Date.now(), last_act: first, step_n: 0 });
       if (cur.state === 'active') ensureWatch(s.key);
