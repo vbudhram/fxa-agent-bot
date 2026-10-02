@@ -4,6 +4,7 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createHash } from 'node:crypto';
+import { ingest } from './db.js';
 
 const FILE = process.env.FXA_ERRORS_FILE || `${process.env.HOME}/.claude/state/fxa-ai-fixme/errors.jsonl`;
 const KEY = /agent-[a-z0-9]{4,12}/;
@@ -33,7 +34,9 @@ export function installErrorLog(push) {
   try { mkdirSync(dirname(FILE), { recursive: true }); } catch {}
   console.error = (...args) => {
     orig(...args);
-    try { appendFileSync(FILE, `${JSON.stringify(toRecord(args))}\n`); } catch {}
+    const rec = toRecord(args);
+    try { appendFileSync(FILE, `${JSON.stringify(rec)}\n`); } catch {}
+    ingest('errors', rec);   // the store; the file stays while the store proves itself
     // At most one copy to GCS a minute, whatever the burst.
     if (push && !timer) timer = setTimeout(() => { timer = null; push().catch(() => {}); }, 60_000);
   };
