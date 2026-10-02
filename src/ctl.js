@@ -3,7 +3,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 const CTL = process.env.FXA_CTL || `${process.env.HOME}/Desktop/working2/fxa-sandbox-ctl/fxa-sandbox-ctl`;
 
@@ -70,6 +70,17 @@ export const errorsPush = () => run(['errors', 'push', '--now'], { timeout: 120_
 export const copilotComments = async (key) => { try { return JSON.parse((await run(['session', 'copilot-comments', key], { timeout: 60_000 })).trim() || '[]'); } catch { return []; } };
 export const reviewComments = async (key, login) => { try { return JSON.parse((await run(['session', 'review-comments', key, login], { timeout: 60_000 })).trim() || '[]'); } catch { return []; } };
 export const prReady = (key) => run(['session', 'pr-ready', key], { timeout: 60_000 });
+// The STE lint the handoff check runs, on a reply's text: its problem lines, [] on any failure.
+const STE = join(dirname(CTL), 'skills/fxa-vm-handoff/ste.sh');
+export const ste = (text) => new Promise((resolve) => {
+  const c = spawn('bash', [STE], { stdio: ['pipe', 'pipe', 'ignore'] });
+  let out = '';
+  c.stdout.on('data', (d) => { out += d; });
+  c.on('error', () => resolve([]));
+  c.on('close', () => resolve(out.split('\n').filter((l) => l.startsWith('ste: '))));
+  c.stdin.on('error', () => {});
+  c.stdin.end(String(text ?? ''));
+});
 export const prStatus = async (key) => { try { return JSON.parse((await run(['session', 'pr-status', key], { timeout: 60_000 })).trim() || 'null'); } catch { return null; } };
 // The desktop's gateway link when the ctl has one (FXA_DESKTOP_GATEWAY), else null.
 export const desktop = async (key, email) => {

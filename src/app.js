@@ -863,6 +863,8 @@ const turnSummary = (s, word) => {
 const finishTurn = (key, msg, ev) => serial(key, async function finishTurn() {
   clearTimeout(drafts.get(key)?.timer); drafts.delete(key);
   const seenAt = resultAt.get(key); resultAt.delete(key);
+  // Measure only: how often replies break the STE rules the PR text is held to.
+  if (ev?.text) ctl.ste(ev.text).then((p) => { if (p.length) console.log(`ste ${key}: ${p.length} | ${p.slice(0, 3).join(' | ')}`); });
   if (seenAt) console.log(`timing ${key}: reply posting ${Date.now() - seenAt} ms after the turn's result`);
   const s = fresh(key);
   settle(s);
@@ -877,7 +879,6 @@ const finishTurn = (key, msg, ev) => serial(key, async function finishTurn() {
       await app.client.apiCall('chat.stopStream', { channel: s.channel, ts: s.status_ts,
         chunks: [{ type: 'task_update', id: 't0', title: summary, status: 'complete' }] });
       // Rewrite the finished stream: summary, answer, and this turn's buttons.
-      // It also drops the Interrupt button, which a stream cannot remove.
       const lt = liveTurn.get(key);
       const steps = (lt && live.todoLine(lt.st)) || checklistLine(s);
       liveTurn.delete(key);
