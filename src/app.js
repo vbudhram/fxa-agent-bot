@@ -2,7 +2,7 @@ import bolt from '@slack/bolt';
 import { basename } from 'node:path';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { statSync, readFileSync, readdirSync, lstatSync, writeFileSync } from 'node:fs';
+import { statSync, readFileSync, readdirSync, lstatSync, writeFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as ctl from './ctl.js';
 import { quickFirst, askId, answerBlocks, findingsOf, stepRows, lastRow, doneLine, stepCount, ON_IT, FIRST_ROW, seamless } from './answer.js';
@@ -21,6 +21,15 @@ const list = (v) => (v || '').split(',').map((s) => s.trim()).filter(Boolean);
 const CHANNELS = list(process.env.ALLOWED_CHANNELS);
 const USERS = list(process.env.ALLOWED_USERS); // ponytail: static allowlist, Google group check later
 
+// SLACK_CALL_LOG=<file>: each Slack call the bot makes, one JSON line, to test a change
+// (the dev bot). Patched before the App: a client binds its methods when it is made.
+if (process.env.SLACK_CALL_LOG) {
+  const proto = bolt.webApi.WebClient.prototype, call = proto.apiCall;
+  proto.apiCall = function (method, args = {}) {
+    try { appendFileSync(process.env.SLACK_CALL_LOG, `${JSON.stringify({ at: Date.now(), method, args: { ...args, token: undefined } })}\n`, { mode: 0o600 }); } catch {}
+    return call.call(this, method, args);
+  };
+}
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
   appToken: process.env.SLACK_APP_TOKEN,
@@ -58,6 +67,10 @@ const pending = new Map(); // key → { prompt, owner, channel, thread_ts } unti
 const busy = new Set();    // sessions with a poll in flight
 
 // ALLOWED_USERS=* lets anyone in an allowed channel start a session; empty lets nobody.
+// A bot's message, not a person's. DRIVER_APP_ID (the dev bot only): messages that app
+// posts with a person's token are that person's, so a test can talk to the bot.
+// The dev bot is that app too: its own posts carry its bot user, a person's carry the person.
+const fromBot = (m) => Boolean(m?.bot_id) && !(process.env.DRIVER_APP_ID && m.app_id === process.env.DRIVER_APP_ID && botUserId && m.user && m.user !== botUserId);
 const allowed = (channel, user) => CHANNELS.includes(channel) && (USERS.includes('*') || USERS.includes(user));
 
 // A pause to switch runtime or cancel. With Codex off there is nothing to switch, so start at once.
@@ -88,6 +101,7 @@ async function settle(s, ok = true) {
   sessions.patch(s.key, { acks: cur.next_acks ?? [], next_acks: [], ack_ts: null });
   for (const ts of done) {
     await app.client.reactions.remove({ channel: cur.channel, timestamp: ts, name: 'eyes' }).catch(() => {});
+    await app.client.reactions.remove({ channel: cur.channel, timestamp: ts, name: 'hourglass_flowing_sand' }).catch(() => {});
     await app.client.reactions.add({ channel: cur.channel, timestamp: ts, name: ok ? 'white_check_mark' : 'warning' }).catch(() => {});
   }
 }
@@ -137,9 +151,10 @@ app.event('app_mention', async ({ event, body, client }) => {
   pending.set(key, { prompt, request: resume_from ? requestOf(cur) : prompt, owner: event.user, team: event.team ?? body?.team_id ?? cur?.team, channel: event.channel, thread_ts, resume_from, runtime, deadline });
   // The card goes up first; reading a long thread for context can take seconds.
   // A failed post must release the thread, or it stays reserved until a restart.
-  const { ts } = await client.chat.postMessage({ channel: event.channel, thread_ts,
+  // With no delay there is nothing to cancel: 👀 is the acknowledgement, and the status follows.
+  const { ts } = START_DELAY_S ? await client.chat.postMessage({ channel: event.channel, thread_ts,
     text: resume_from ? 'Picking up where we left off.' : 'Starting.',
-    blocks: startCard(key, prompt, START_DELAY_S, Boolean(resume_from), runtime, CODEX) }).catch((e) => { pending.delete(key); throw e; })
+    blocks: startCard(key, prompt, START_DELAY_S, Boolean(resume_from), runtime, CODEX) }).catch((e) => { pending.delete(key); throw e; }) : {};
   if (event.thread_ts) prompt += await threadContext(client, event, { withBot: cur?.state === 'answered' });
   if (!pending.has(key)) return;
   // Spread the current entry: a Switch click while the thread was read changed its runtime.
@@ -212,7 +227,18 @@ function quickStatus(p) {
       st = r.st; n++;
       run(() => kind === 'stream' && app.client.apiCall('chat.appendStream', { ...at(), chunks: r.chunks }));
     },
-    // word: Done for an answer; on the way to a sandbox, a status with no steps goes away.
+    // The answer takes the status's place, as a sandbox turn's reply does: the summary, then the answer.
+    answer: (msg) => {
+      clearInterval(tick);
+      return run(async () => {
+        const summary = doneLine('Done', n, Date.now() - t0, asked ? Date.now() - asked : 0);
+        const blocks = [{ type: 'context', elements: [{ type: 'mrkdwn', text: summary }] }, ...(msg.blocks ?? [md(msg.text)])];
+        if (ts && kind === 'stream') await app.client.apiCall('chat.stopStream', { ...at(), chunks: [lastRow(st)] }).catch(() => {});
+        try { if (!ts) throw new Error('no status'); await app.client.chat.update({ ...at(), text: msg.text, blocks }); }
+        catch { await app.client.chat.postMessage({ channel: p.channel, thread_ts: p.thread_ts, text: msg.text, blocks }); }
+      });
+    },
+    // word: on the way to a sandbox, or stopped; a status with no steps goes away.
     done: (word) => {
       clearInterval(tick);
       return run(async () => {
@@ -246,10 +272,8 @@ async function quick(key, p, client) {
   // Nothing left once the slips are out: the agent declined instead of asking for the work, so do the work.
   const answer = seamless(res.answer);
   if (!answer) { await status.done('Looked into it'); return { findings: findingsOf(res) }; }
-  await status.done('Done');
   const msg = res.question ? render(key, { type: 'question', ...res.question, text: answer }) : { text: defuse(answer).slice(0, 3000), blocks: answerBlocks({ ...res, answer }) };
-  await client.chat.postMessage({ channel: p.channel, thread_ts: p.thread_ts, ...msg })
-    .catch((e) => console.error('quick_answer', key, e.data?.error ?? e.message));
+  await status.answer(msg);
   pending.delete(key);
   const cur = sessions.get(p.channel, p.thread_ts);
   if (!cur || cur.state === 'answered') sessions.put({ key, state: 'answered', channel: p.channel, thread_ts: p.thread_ts,
@@ -370,8 +394,8 @@ async function threadContext(client, event, { withBot = false } = {}) {
       if (!cursor) break;
     }
     const mine = (m) => withBot && m.user === botUserId && !/^(On it!|Starting|Picking up|(Done|Looked into it|Stopped|Interrupted|Paused|Failed) · )/.test(m.text);
-    const lines = msgs.filter((m) => m.ts !== event.ts && m.text && (!m.bot_id || mine(m)))
-      .map((m) => { const who = m.bot_id ? 'you (an earlier answer)' : m.user === event.user ? 'owner' : 'someone else';
+    const lines = msgs.filter((m) => m.ts !== event.ts && m.text && (!fromBot(m) || mine(m)))
+      .map((m) => { const who = fromBot(m) ? 'you (an earlier answer)' : m.user === event.user ? 'owner' : 'someone else';
         // Label every line, so a line cannot pose as another speaker.
         return m.text.replace(/<@[A-Z0-9]+>/g, '@someone').split('\n').map((l) => `${who}: ${l}`).join('\n'); });
     if (!lines.length) return '';
@@ -416,7 +440,7 @@ app.message(async ({ message, client }) => {
   // 7: an edited reply goes to the agent as a correction; it already has the old text.
   if (message.subtype === 'message_changed') { await steerEdit(message, client); return; }
   // A reply that also goes to the channel, or carries a file, still steers.
-  if (!message.thread_ts || message.bot_id) return;
+  if (!message.thread_ts || fromBot(message)) return;
   if (message.subtype && !['thread_broadcast', 'file_share'].includes(message.subtype)) return;
   const s = sessions.get(message.channel, message.thread_ts);
   if (!s) return;
@@ -492,7 +516,7 @@ async function steerEdit(message, client) {
   const m = message.message ?? {};
   const before = strip(message.previous_message?.text), after = strip(m.text);
   // A link unfurl or a reaction edits the message without changing its text.
-  if (!m.thread_ts || m.bot_id || !after || after === before || after.startsWith('!') || toSomeoneElse(m.text, botUserId)) return;
+  if (!m.thread_ts || fromBot(m) || !after || after === before || after.startsWith('!') || toSomeoneElse(m.text, botUserId)) return;
   const s = sessions.get(message.channel, m.thread_ts);
   if (!s || !(allowed(message.channel, m.user) && (m.user === s.owner || STEER_ANYONE))) return;
   if (!forBotFromOthers(m, s, botUserId, STEER_MODE)) return; // someone else's untagged edit: not for the agent
@@ -741,7 +765,8 @@ async function steerAndAck(s, text, client, userId, ts) {
     const out = await ctl.steer(s.key, text, userId ? await whoIs(client, userId) : null);
     const queued = out.includes('queued');
     addAck(s.key, ts, queued);
-    if (queued) await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: "Got it. I'll pick that up as soon as I finish this step." });
+    // 👀 says it was seen, ⏳ that it waits for this step; settle clears both. No message.
+    if (queued && ts) await client.reactions.add({ channel: s.channel, timestamp: ts, name: 'hourglass_flowing_sand' }).catch(() => {});
     // The turn this started came after the last one's reply closed its status: open one.
     else if (!fresh(s.key)?.status_ts) await startStatus(fresh(s.key), 'Working').catch((e) => console.error('status', s.key, e.data?.error ?? e.message));
   } catch (e) {
@@ -958,10 +983,6 @@ function bootDetails(s, b, done) {
 const SETUP_EXPECT_S = 80; // measured boot to a running agent, 75-90 s
 const STATUS_CLEAR = { status_ts: null, status_kind: null, busy_since: null, last_act: null, last_detail: null, last_step: null, step_n: null, task_n: null, cur_kind: null, cur_count: null, cur_label: null, cur_lines: null, title_at: null, rows_done: null, interrupted: null };
 // The finished turn's checklist, compact: every work row, ticked.
-const checklistLine = (s) => {
-  const rows = [...(s.rows_done ?? []), ...(s.cur_count ? [`${s.cur_label} · ${s.cur_count}`] : [])];
-  return rows.length ? rows.map((r) => `✓ ${r}`).join('  ·  ') : null;
-};
 // How a status line reads when it closes: a failure must not say Done.
 const endWord = (s, state) => {
   if (state === 'failed') return s.step_n ? 'Failed' : 'Setup failed';
@@ -999,7 +1020,7 @@ const finishTurn = (key, msg, ev) => serial(key, async function finishTurn() {
         chunks: [{ type: 'task_update', id: 't0', title: summary, status: 'complete' }] });
       // Rewrite the finished stream: summary, answer, and this turn's buttons.
       const lt = liveTurn.get(key);
-      const steps = (lt && live.todoLine(lt.st)) || checklistLine(s);
+      const steps = live.closingLine(lt?.st, [...(s.rows_done ?? []), ...(s.cur_count ? [s.cur_label] : [])]);
       liveTurn.delete(key);
       const kept = [{ type: 'context', elements: [{ type: 'mrkdwn', text: summary }, ...(steps ? [{ type: 'mrkdwn', text: steps.slice(0, 2900) }] : [])] }, ...body];
       // The answer's own order: with several questions, each row of buttons sits
@@ -1486,13 +1507,26 @@ async function mindLifetime(key, state) {
   if (state !== 'active' || !s.started_at) return;
   const min = (Date.now() - s.started_at) / 60_000;
   const say = (text) => app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text });
-  if (min >= PAUSE_AT_MIN) {
-    await stopSession(key);
-    await say(`I paused: my sandbox reached its ${RUNNER_MIN}-minute limit. The work so far is saved as a patch on the host. Tag me again to start a new session.`);
+  if (min >= PAUSE_AT_MIN && !s.life_paused) {
+    // A pause saves the work and the conversation, so a reply continues on a new runner.
+    // If it fails, stop before the runner's hard limit cuts it off.
+    sessions.patch(key, { life_paused: true });
+    if (await pauseNow(key, 'life-pause')) await say(`I paused: my sandbox reached its ${RUNNER_MIN}-minute limit. Everything is saved. Reply here to continue on a new sandbox.`);
+    else { await stopSession(key); await say(`I stopped: my sandbox reached its ${RUNNER_MIN}-minute limit, and saving for a pause failed. The work so far is saved as a patch on the host. Tag me again to start a new session.`); }
   } else if (min >= WARN_AT_MIN && !s.life_warned) {
     sessions.patch(key, { life_warned: true });
     await say(`Heads-up: my sandbox stops at ${RUNNER_MIN} minutes. In about ${Math.round(PAUSE_AT_MIN - min)} minutes I'll pause and save the work so far.`);
   }
+}
+
+// Pause a running session: save its work, close its status, mark it paused. False when the save failed.
+async function pauseNow(key, why) {
+  const ok = await ctl.pause(key).then(() => true, (e) => { console.error(why, key, e.stderr || e.message); return false; });
+  if (!ok) return false;
+  stopWatch(key);
+  await updateStatus(key, 'paused', { busy: false }).catch(() => {});
+  sessions.patch(key, { state: 'paused' });
+  return true;
 }
 
 // 3: a session warns at SESSION_COST_WARN and pauses at SESSION_COST_CAP (model
@@ -1506,11 +1540,7 @@ async function mindCost(key, spent) {
   sessions.patch(key, { cost: spent });
   if (spent >= capOf(s) && s.state === 'active' && !s.cost_paused) {
     sessions.patch(key, { cost_paused: true });
-    const ok = await ctl.pause(key).then(() => true, (e) => { console.error('cost-pause', key, e.stderr || e.message); return false; });
-    if (!ok) return;
-    stopWatch(key);
-    await updateStatus(key, 'paused', { busy: false }).catch(() => {});
-    sessions.patch(key, { state: 'paused' });
+    if (!(await pauseNow(key, 'cost-pause'))) return;
     await say(s, `I paused: this session reached its usage limit after ${ranFor(s)}. Everything is saved. Reply here to continue; the next part starts a new limit.`).catch(() => {});
   } else if (spent >= COST_WARN && !s.cost_warned) {
     sessions.patch(key, { cost_warned: true });

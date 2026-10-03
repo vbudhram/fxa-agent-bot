@@ -33,7 +33,7 @@ export const answerBlocks = (res) => [md(res.answer)];
 export const findingsOf = (res) => [res.upgrade?.findings, res.answer && `Its reply so far:\n${res.answer}`].filter(Boolean).join('\n\n');
 
 // The card and the first status row, the same for both paths.
-export const ON_IT = 'On it! The status below shows each step and how long it took. Type `!help` any time for commands.';
+export const ON_IT = 'On it! The status below shows each step and how long it took.';
 export const FIRST_ROW = 'Working on it';
 
 const row = (t, title, status, details) => ({ type: 'task_update', id: `t${t}`, title: String(title).slice(0, 250),

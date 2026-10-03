@@ -34,3 +34,15 @@ test('stages group reading and searching, and leave misc steps in place', () => 
   assert.equal(k('Using /fxa-review-quick'), 'review');
   assert.equal(k('Running node scripts/x.js'), null);
 });
+
+test("a subagent's own steps stay in its row, and the wrap-up's subagents review", () => {
+  const k = (x) => stage(x)?.kind ?? null;
+  assert.equal(k('↳ Running git diff'), null);
+  assert.equal(k('↳ Editing index.tsx'), null);
+  assert.equal(k('Delegating to fxa-explore: find X'), 'explore');
+  assert.equal(k('Delegating to fxa-reviewer: review'), 'review');
+  assert.equal(k('Delegating to fxa-writer: PR body'), 'review');
+  assert.equal(k('Delegating: find X'), 'explore');
+  assert.equal(phase('Delegating to fxa-explore: find X').detail, 'fxa-explore: find X');
+  assert.equal(phase('Delegating: find X').detail, 'find X');
+});

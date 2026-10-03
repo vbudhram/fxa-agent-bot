@@ -17,7 +17,7 @@ export function reduce(st, ev) {
       return { ...st, files: { ...st.files, [ev.file]: { added: f.added + (Number(ev.added) || 0), removed: f.removed + (Number(ev.removed) || 0) } } };
     }
     case 'subagent_start':
-      return { ...st, subagents: { ...st.subagents, [ev.id]: { description: String(ev.description ?? ''), done: false } } };
+      return { ...st, subagents: { ...st.subagents, [ev.id]: { agent: String(ev.agent ?? ''), description: String(ev.description ?? ''), done: false } } };
     case 'tool_done':
       return st.subagents[ev.id] ? { ...st, subagents: { ...st.subagents, [ev.id]: { ...st.subagents[ev.id], done: true } } } : st;
     case 'tests': case 'lint': case 'types':
@@ -64,8 +64,9 @@ export function facts(st) {
   if (st.tests) bits.push(st.tests.failed ? `tests ${st.tests.passed} passed, ${st.tests.failed} failed` : `tests ${st.tests.passed} passed`);
   if (st.lint?.errors) bits.push(`lint ${st.lint.errors} error${st.lint.errors === 1 ? '' : 's'}`);
   if (st.types?.errors) bits.push(`types ${st.types.errors} error${st.types.errors === 1 ? '' : 's'}`);
-  const running = Object.values(st.subagents).filter((s) => !s.done).length;
-  if (running) bits.push(`${running} subagent${running === 1 ? '' : 's'} working`);
+  const running = Object.values(st.subagents).filter((s) => !s.done);
+  if (running.length === 1) bits.push(`${running[0].agent ? defuse(running[0].agent) : 'a subagent'} working`);
+  else if (running.length) bits.push(`${running.length} subagents working`);
   return bits.join(' · ');
 }
 
@@ -80,6 +81,15 @@ export function summary(st) {
 // The finished turn's checklist, compact: every todo with its mark.
 export const todoLine = (st) => (st.todos ?? []).length
   ? todoRows(st).map((r) => `${r.status === 'complete' ? '✓' : '○'} ${r.title}`).join('  ·  ') : null;
+
+// The finished turn's second line, under the summary (which has the counts): the todos while
+// any is open, else the kinds of work when there were several. stages: row labels, in order.
+export function closingLine(st, stages = []) {
+  const todos = st?.todos ?? [];
+  if (todos.length) return todos.some((t) => t.status !== 'completed') ? todoLine(st) : null;
+  const kinds = [...new Set(stages.map((r) => String(r).replace(/ · \d+( steps?)?$/, '')))];
+  return kinds.length > 1 ? kinds.map((k) => `✓ ${defuse(k)}`).join('  ·  ') : null;
+}
 
 // A short "how is it going" message. While a turn runs the bot answers it from
 // this state at once; queued for the agent it waited until the turn ended.

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { start, reduce, todoRows, currentRow, changedRows, facts, summary, todoLine, MAX_ROWS } from '../src/live.js';
+import { start, reduce, todoRows, currentRow, changedRows, facts, summary, todoLine, closingLine, MAX_ROWS } from '../src/live.js';
 
 const feed = (evs) => evs.reduce(reduce, start());
 const todos = (...s) => ({ type: 'todos', items: s.map(([content, status, active]) => ({ content, status, active })) });
@@ -47,7 +47,15 @@ test('facts: files with line counts, tests, lint and type errors, running subage
     { type: 'edit', file: 'a.ts', added: 3, removed: 2 }, { type: 'edit', file: 'a.ts', added: 1, removed: 0 }, { type: 'edit', file: 'b.ts', added: 2, removed: 0 },
     { type: 'tests', passed: 44, failed: 1 }, { type: 'lint', errors: 2, warnings: 1 }, { type: 'types', errors: 0 },
     { type: 'subagent_start', id: 's1', description: 'find the limiter' }, { type: 'subagent_start', id: 's2', description: 'x' }, { type: 'tool_done', id: 's2' }]);
-  assert.equal(facts(st), '2 files (+6 −2) · tests 44 passed, 1 failed · lint 2 errors · 1 subagent working');
+  assert.equal(facts(st), '2 files (+6 −2) · tests 44 passed, 1 failed · lint 2 errors · a subagent working');
+});
+
+test('facts: one running subagent is named, several are counted', () => {
+  const one = [{ type: 'subagent_start', id: 's1', agent: 'fxa-explore', description: 'find it' }];
+  assert.equal(facts(one.reduce(reduce, start())), 'fxa-explore working');
+  assert.equal(facts([{ type: 'subagent_start', id: 's1', description: 'x' }].reduce(reduce, start())), 'a subagent working');
+  assert.equal(facts([...one, { type: 'subagent_start', id: 's2', agent: 'fxa-reviewer' }].reduce(reduce, start())), '2 subagents working');
+  assert.equal(facts([...one, { type: 'tool_done', id: 's1' }].reduce(reduce, start())), '');
 });
 
 test('the summary counts todos and leaves subagents out', () => {
@@ -85,4 +93,13 @@ test('a status reply names the time, the todo in progress, the last step and the
   const out = statusReply(st, { elapsedMs: 12 * 60_000, lastStep: 'Running yarn `verify`', stepAgoMs: 4 * 60_000, said: 'Lint passes. The verification takes about 10 minutes.' });
   assert.equal(out, '⏳ Still working · 12m · 1/3 todos · 1 file (+3 −1)\n› Now: Running verify\n› Last step, 4m ago: `Running yarn \'verify\'`\n› Last note: _The verification takes about 10 minutes._');
   assert.equal(statusReply(start(), { elapsedMs: 30_000 }), '⏳ Still working · 1m');
+});
+
+test('closing line: open todos, else several kinds of work, never the counts again', () => {
+  const todos = (...ss) => reduce(start(), { type: 'todos', items: ss.map((x, i) => ({ content: `t${i}`, status: x })) });
+  assert.equal(closingLine(todos('completed', 'pending')), '✓ t0  ·  ○ t1');
+  assert.equal(closingLine(todos('completed', 'completed')), null);
+  assert.equal(closingLine(start(), ['Exploring the code · 4 steps']), null);
+  assert.equal(closingLine(start(), ['Exploring the code · 4 steps', 'Making changes · 2 steps', 'Exploring the code · 1 step']), '✓ Exploring the code  ·  ✓ Making changes');
+  assert.equal(closingLine(undefined, []), null);
 });

@@ -175,8 +175,6 @@ export function summaryLine(sm) {
 
 export function render(key, ev) {
   switch (ev.type) {
-    case 'stage': return { text: `_${esc(ev.text)}_` };
-    case 'plan': return { text: `Here's my plan:\n${esc(ev.text)}\nSound right? Reply here to adjust.` };
     case 'question': {
       // Several decisions: each question gets its own options and its own row of
       // number buttons; the bot sends the answers together once each has one.
@@ -242,7 +240,6 @@ export function render(key, ev) {
       return { text: `${head}${noteLines(ev.notes)}${sm ? `\n_${sm}_` : ''}` };
     }
     case 'pushed': return { text: `Pushed \`${esc(ev.branch).replace(/`/g, '')}\`.${gh(ev.url) ? ` <${gh(ev.url)}|Open a PR from it> when you are ready, or keep steering here.` : ' Keep steering here, or open a PR from it on GitHub.'}${noteLines(ev.notes)}` };
-    case 'ci': return { text: `CI: ${esc(ev.text)}` };
     case 'error': {
       const op = operatorProblem(ev.text);
       return op ? { text: op.text, operator: op.kind } : { text: `Something went wrong: ${esc(ev.text)} Try again, or \`!restart\` to start fresh.` };
@@ -260,7 +257,8 @@ export function phase(step) {
     if (t.startsWith('Reading ')) return { kind: 'read', label: 'Reading files', detail: t.slice(8) };
     if (t.startsWith('Editing ')) return { kind: 'edit', label: 'Editing files', detail: t.slice(8) };
     if (/^(Searching|Finding)/.test(t)) return { kind: 'search', label: 'Searching the code', detail: t };
-    if (t.startsWith('Delegating')) return { kind: 'agent', label: 'Working in a subagent', detail: t.slice(12) };
+    // "Delegating to fxa-explore: find X" → detail "fxa-explore: find X"
+    if (t.startsWith('Delegating')) return { kind: 'agent', label: 'Working in a subagent', detail: t.replace(/^Delegating(?: to)?:? ?/, '') };
     if (t.startsWith('Updating the plan')) return { kind: 'plan', label: 'Planning', detail: '' };
     if (t.startsWith('Using /')) return { kind: t, label: t, detail: '' }; // each skill is its own phase
     return { kind: 'other', label: t || 'Working', detail: '' };
@@ -288,6 +286,8 @@ const STAGES = {
 export function stage(step) {
   const t = String(step ?? '');
   const { kind } = phase(t);
+  // The wrap-up's subagents review and write; the others explore.
+  if (kind === 'agent' && /^Delegating to fxa-(reviewer|writer)\b/.test(t)) return { kind: 'review', label: STAGES.review };
   if (['read', 'search', 'git', 'agent', 'plan'].includes(kind)) return { kind: 'explore', label: STAGES.explore };
   if (kind === 'edit') return { kind: 'edit', label: STAGES.edit };
   if (kind === 'test' || kind === 'check' || /^Using \/fxa-(verify|functional-local|stack)/.test(t)) return { kind: 'verify', label: STAGES.verify };
