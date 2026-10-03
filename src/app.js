@@ -306,6 +306,13 @@ async function launch(key, client, since = Date.now()) {
   await startStatus(fresh(key), 'Setting up').catch((e) => console.error('status', key, e.data?.error ?? e.message));
 }
 const say = (s, text) => app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text });
+// A stop or pause saves the work before the runner goes, which takes seconds: say so at
+// once, then turn that message into the result, so the thread is never silent meanwhile.
+async function sayWhile(s, now, work) {
+  const r = await say(s, now).catch(() => null);
+  const text = await work();
+  await (r?.ts ? app.client.chat.update({ channel: s.channel, ts: r.ts, text }) : Promise.reject()).catch(() => say(s, text));
+}
 const ordinal = (n) => { const t = n % 100, u = n % 10; return `${n}${t >= 11 && t <= 13 ? 'th' : u === 1 ? 'st' : u === 2 ? 'nd' : u === 3 ? 'rd' : 'th'}`; };
 
 // Name and picture for the dashboard's conversation view. Needs the users:read
@@ -585,12 +592,14 @@ async function bang(s, text, m, client) {
     const cur = fresh(s.key);
     if (cur.state !== 'active') { await note(cur.state === 'paused' ? 'Already paused. Reply here to pick it up again.' : `There is nothing to pause: this session is ${STATE_WORD[cur.state] ?? cur.state}.`); return; }
     if (cur.status_ts) { await note('I am in the middle of a turn. `!interrupt` first, then `!pause`.'); return; }
-    const ok = await ctl.pause(s.key).then(() => true, (e) => { console.error('pause', s.key, e.stderr || e.message); return false; });
-    if (!ok) { await note('The pause failed. The error is in the bot log.'); return; }
-    stopWatch(s.key);
-    await updateStatus(s.key, 'paused', { busy: false }).catch(() => {});
-    sessions.patch(s.key, { state: 'paused' });
-    await say(s, 'Paused. Everything is saved and the sandbox is freed. Reply here to pick it up again.');
+    await sayWhile(s, 'Pausing… saving the work first.', async () => {
+      const ok = await ctl.pause(s.key).then(() => true, (e) => { console.error('pause', s.key, e.stderr || e.message); return false; });
+      if (!ok) return 'The pause failed. The error is in the bot log.';
+      stopWatch(s.key);
+      await updateStatus(s.key, 'paused', { busy: false }).catch(() => {});
+      sessions.patch(s.key, { state: 'paused' });
+      return 'Paused. Everything is saved and the sandbox is freed. Reply here to pick it up again.';
+    });
   } else if (cmd === 'interrupt') {
     if (steerOnly()) return;
     const out = await ctl.interrupt(s.key).catch(() => '');
@@ -599,7 +608,7 @@ async function bang(s, text, m, client) {
     await say(s, 'Interrupted. The work so far is kept. Tell me what to do instead.');
   } else if (cmd === 'stop') {
     if (ownerOnly()) return;
-    await say(s, await stoppedText(s.key));
+    await sayWhile(s, 'Stopping… saving the work first.', () => stoppedText(s.key));
   } else if (cmd === 'new' || cmd === 'restart') {
     if (ownerOnly()) return;
     if (LIVE.includes(s.state) && !(await stopSession(s.key))) { await say(s, STOPPED_TEXT(false)); return; }
@@ -1303,8 +1312,7 @@ ownerAction('stop', async (s, client, action, body) => {
   await client.chat.update({ channel: s.channel, ts: body.message.ts, text: body.message.text,
     blocks: (body.message.blocks ?? []).filter((x) => x.type !== 'actions') }).catch(() => {});
   if (fresh(s.key)?.buttons_msg?.ts === body.message.ts) sessions.patch(s.key, { buttons_msg: null });
-  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: await stoppedText(s.key) })
-    .finally(() => stopping.delete(s.key));
+  await sayWhile(s, 'Stopping… saving the work first.', () => stoppedText(s.key)).finally(() => stopping.delete(s.key));
 });
 app.action(/^answer_\d+(_\d+)?$/, async ({ ack, body, action, client }) => {
   await ack();
