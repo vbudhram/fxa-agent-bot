@@ -150,7 +150,9 @@ app.event('app_mention', async ({ event, body, client }) => {
 async function begin(key, client) {
   let p = pending.get(key);
   if (!p) return;
-  if (quickFirst(p.prompt, { resuming: Boolean(p.resume_from), runtime: p.runtime, on: QUICK })) {
+  // route: the person's own words. A tap's prompt quotes the agent's question, whose options
+  // ("Fix both bugs with tests") must not send "File a Jira ticket" to a sandbox.
+  if (quickFirst(p.route ?? p.prompt, { resuming: Boolean(p.resume_from), runtime: p.runtime, on: QUICK })) {
     const r = await quick(key, p, client);
     if (r === 'answered' || !(p = pending.get(key))) return;
     if (r?.findings) pending.set(key, p = { ...p, findings: r.findings });
@@ -170,10 +172,10 @@ async function begin(key, client) {
 
 // followUp: a reply in a quick-answer thread, taken as a tag: a quick look first,
 // a sandbox when it asks for work or the agent asks for one.
-async function followUp(s, message, text, client) {
+async function followUp(s, message, text, client, route = text) {
   if ([...pending.values()].some((p) => p.channel === s.channel && p.thread_ts === s.thread_ts)) return;
   const key = sessions.newKey();
-  pending.set(key, { prompt: text, request: text, owner: message.user, team: message.team ?? s.team, channel: s.channel,
+  pending.set(key, { prompt: text, request: text, route, owner: message.user, team: message.team ?? s.team, channel: s.channel,
     thread_ts: s.thread_ts, runtime: 'claude', deadline: Date.now(), acks: message.ts ? [message.ts] : [] }); // a tap has no message to mark
   const ctx = await threadContext(client, { channel: s.channel, thread_ts: s.thread_ts, ts: message.ts, user: message.user }, { withBot: true });
   pending.set(key, { ...pending.get(key), prompt: text + ctx });
@@ -1341,7 +1343,7 @@ app.action(/^answer_\d+(_\d+)?$/, async ({ ack, body, action, client }) => {
   const asked = String((body.message.blocks ?? []).find((b) => b.type === 'markdown')?.text ?? body.message.text ?? '').slice(-600);
   const reply = asked ? `You asked:\n${asked.split('\n').map((l) => `> ${l}`).join('\n')}\nMy answer: ${v.choice}` : v.choice;
   const answer = body.user.id === s.owner ? reply : `(From someone else in the thread, not the person who started this session.)\n${reply}`;
-  if (s.state === 'answered') { await followUp(s, { user: body.user.id }, answer, client); return; }
+  if (s.state === 'answered') { await followUp(s, { user: body.user.id }, answer, client, v.choice); return; }
   await steerAndAck(s, answer, client, body.user.id);
 });
 
@@ -1370,7 +1372,7 @@ async function answerOneOfSeveral(s, v, body, client) {
   const others = Object.values(pend.got).some((a) => a.by !== s.owner);
   return `${others ? '(Some answers are from someone else in the thread, not the person who started this session.)\n' : ''}My answers:\n${lines.join('\n')}`;
   });
-  if (answer && fresh(s.key)?.state === 'answered') { await followUp(fresh(s.key), { user: body.user.id }, answer, client); return; }
+  if (answer && fresh(s.key)?.state === 'answered') { await followUp(fresh(s.key), { user: body.user.id }, answer, client, answer.split('\n').filter((l) => / → /.test(l)).map((l) => l.split(' → ').pop()).join('\n')); return; }
   if (answer) await steerAndAck(s, answer, client, body.user.id);
 }
 

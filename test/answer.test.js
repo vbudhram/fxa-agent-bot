@@ -54,3 +54,10 @@ test('the summary line matches a sandbox turn', () => {
   assert.equal(doneLine('Done', 4, 14_000, 19_000), 'Done · 4 steps · 14s · reply 19s after your message');
   assert.equal(doneLine('Done', 1, 61_000), 'Done · 1 step · 1m 1s');
 });
+
+test('a tap routes on the choice, not on the question it quotes', () => {
+  const quoted = 'You asked:\n> *1*  Fix both bugs with tests (recommended)\n> *3*  File a Jira ticket for these two bugs\nMy answer: File a Jira ticket for these two bugs';
+  assert.equal(quickFirst(quoted), false); // why the bot routes a tap on the choice alone
+  assert.equal(quickFirst('File a Jira ticket for these two bugs'), true);
+  assert.equal(quickFirst('Fix both bugs with tests (recommended)'), false);
+});
