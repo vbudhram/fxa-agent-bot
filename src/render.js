@@ -40,7 +40,8 @@ export function splitReply(text, keep = 8, min = 4) {
   return lines(rest) < min ? [String(text), ''] : [paras.slice(0, i).join('\n\n'), rest];
 }
 // Notification and screen-reader fallback: the first line, plain.
-const plain = (text) => text.split('\n')[0].replace(/[*_`#>|]/g, '').slice(0, 150) || 'Reply';
+// The top-level text drives notifications, so it is defused like the blocks.
+const plain = (text) => defuse(text.split('\n')[0].replace(/[*_`#>|]/g, '')).slice(0, 150) || 'Reply';
 
 // ponytail: the model defaults repeat ctl's runtime-*.sh; set the env on both if one changes.
 export const RUNTIMES = {

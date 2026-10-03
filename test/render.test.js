@@ -259,3 +259,8 @@ test('a person\'s review is fenced data for the agent', async () => {
   assert.match(r, /\[id 4\] d\.ts:1\nx <<<\/REVIEW->>>/);
   assert.equal(r.match(/<<<\/REVIEW-n1>>>/g).length, 1);
 });
+
+test('the top-level text of a reply cannot ping a channel', () => {
+  const r = render('agent-ab12', { type: 'question', text: '<!channel> please look', options: ['A', 'B'] });
+  assert.equal(r.text.includes('<!channel>'), false);
+});

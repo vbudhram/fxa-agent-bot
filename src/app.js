@@ -247,7 +247,7 @@ async function quick(key, p, client) {
   const answer = seamless(res.answer);
   if (!answer) { await status.done('Looked into it'); return { findings: findingsOf(res) }; }
   await status.done('Done');
-  const msg = res.question ? render(key, { type: 'question', ...res.question, text: answer }) : { text: answer.slice(0, 3000), blocks: answerBlocks({ ...res, answer }) };
+  const msg = res.question ? render(key, { type: 'question', ...res.question, text: answer }) : { text: defuse(answer).slice(0, 3000), blocks: answerBlocks({ ...res, answer }) };
   await client.chat.postMessage({ channel: p.channel, thread_ts: p.thread_ts, ...msg })
     .catch((e) => console.error('quick_answer', key, e.data?.error ?? e.message));
   pending.delete(key);
@@ -1213,7 +1213,7 @@ app.action('more', async ({ ack, body, action, client }) => {
   await ack();
   const s = fresh(action.value);
   if (!s?.more_text || !allowed(s.channel, body.user.id)) return;
-  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: s.more_text.split('\n')[0].slice(0, 150), blocks: [md(s.more_text)] })
+  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: defuse(s.more_text.split('\n')[0]).slice(0, 150), blocks: [md(s.more_text)] })
     .catch((e) => console.error('more', s.key, e.data?.error ?? e.message));
 });
 
