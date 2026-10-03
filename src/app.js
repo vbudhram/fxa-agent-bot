@@ -682,8 +682,10 @@ async function idleSweep() {
   try { await sweepOnce(); } finally { sweeping = false; }
 }
 async function sweepOnce() {
-  let paused = [];
-  try { paused = await ctl.idleSweep(); } catch (e) { console.error('idle-sweep', e.stderr || e.message); return; }
+  let paused = [], stopped = [];
+  try { ({ paused, stopped } = await ctl.idleSweep()); } catch (e) { console.error('idle-sweep', e.stderr || e.message); return; }
+  // Paused a day with no reply: stopped, quietly. A reply still resumes it.
+  for (const key of stopped) if (fresh(key)?.state === 'paused') sessions.patch(key, { state: 'stopped' });
   for (const key of paused) {
     const s = fresh(key);
     if (!s) continue;

@@ -121,8 +121,12 @@ export const interrupt = (key) => run(['interrupt', key], { timeout: 60_000 });
 // Pauses sessions idle past the ctl's threshold; returns the keys it paused.
 // The keys the controller deleted under its retention rule (session prune).
 export const prune = async () => (await run(['session', 'prune'], { timeout: 10 * 60_000 })).split('\n').filter((k) => /^agent-[a-z0-9]+$/.test(k));
-export const idleSweep = async () => (await run(['session', 'idle-sweep'], { timeout: 10 * 60_000 }))
-  .split('\n').filter((l) => l.startsWith('paused ')).map((l) => l.slice(7).trim());
+// { paused: keys the sweep paused now, stopped: keys paused for a day that it closed }.
+export const idleSweep = async () => {
+  const lines = (await run(['session', 'idle-sweep'], { timeout: 10 * 60_000 })).split('\n');
+  const keys = (word) => lines.filter((l) => l.startsWith(`${word} `)).map((l) => l.slice(word.length + 1).trim());
+  return { paused: keys('paused'), stopped: keys('stopped') };
+};
 
 // Stream the running turn's steps. Its own process group, so stop() also ends
 // the ssh under it.
