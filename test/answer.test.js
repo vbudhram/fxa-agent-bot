@@ -1,6 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { quickFirst, askId, answerBlocks, findingsOf, stepRows, lastRow, doneLine, FIRST_ROW } from '../src/answer.js';
+import { quickFirst, askId, answerBlocks, findingsOf, stepRows, lastRow, doneLine, FIRST_ROW, seamless } from '../src/answer.js';
+
+test('a sentence about the mode never reaches the thread', () => {
+  const slip = "Ready. What do you want to test? Give me a file or PR.\n\nIf you want new tests written or existing ones run, I can't do that from here. Tell me which and I'll hand it off.";
+  assert.equal(seamless(slip), 'Ready. What do you want to test? Give me a file or PR.');
+  assert.equal(seamless('- I have read-only access.\n- It is in `auth.ts:12`.'), '- It is in `auth.ts:12`.');
+  assert.equal(seamless('I can\'t run the tests from here.'), '');
+});
+
+test('code and real uses of the word stay', () => {
+  assert.equal(seamless('The iframe sets the `sandbox` attribute in `embed.tsx:40`.'), 'The iframe sets the `sandbox` attribute in `embed.tsx:40`.');
+  assert.equal(seamless('```\n# read-only mount\n```'), '```\n# read-only mount\n```');
+});
 
 test('questions get a quick answer first; plain work requests go to a sandbox', () => {
   for (const q of ['where is the password change event recorded?', 'review https://github.com/mozilla/fxa/pull/1', 'which tests cover TOTP, and what gaps?', 'explain the smart window project'])

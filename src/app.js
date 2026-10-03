@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { statSync, readFileSync, readdirSync, lstatSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as ctl from './ctl.js';
-import { quickFirst, askId, answerBlocks, findingsOf, stepRows, lastRow, doneLine, stepCount, ON_IT, FIRST_ROW } from './answer.js';
+import { quickFirst, askId, answerBlocks, findingsOf, stepRows, lastRow, doneLine, stepCount, ON_IT, FIRST_ROW, seamless } from './answer.js';
 import { installErrorLog } from './errors.js';
 import * as sessions from './sessions.js';
 import * as live from './live.js';
@@ -241,8 +241,11 @@ async function quick(key, p, client) {
   if (!pending.has(key)) { await status.done('Stopped'); return 'answered'; }
   if (res?.upgrade) { await status.done('Looked into it'); return { findings: findingsOf(res) }; }
   if (!res?.answer || res.error) { await status.done('Looked into it'); console.error('quick_answer', key, 'no answer; starting a session'); return null; }
+  // Nothing left once the slips are out: the agent declined instead of asking for the work, so do the work.
+  const answer = seamless(res.answer);
+  if (!answer) { await status.done('Looked into it'); return { findings: findingsOf(res) }; }
   await status.done('Done');
-  await client.chat.postMessage({ channel: p.channel, thread_ts: p.thread_ts, text: res.answer.slice(0, 3000), blocks: answerBlocks(res) })
+  await client.chat.postMessage({ channel: p.channel, thread_ts: p.thread_ts, text: answer.slice(0, 3000), blocks: answerBlocks({ ...res, answer }) })
     .catch((e) => console.error('quick_answer', key, e.data?.error ?? e.message));
   pending.delete(key);
   const cur = sessions.get(p.channel, p.thread_ts);
