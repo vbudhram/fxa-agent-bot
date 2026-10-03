@@ -15,7 +15,7 @@ export const askId = (key) => `ask-${String(key).replace(/^agent-/, '')}`;
 const note = (text) => ({ type: 'context', elements: [{ type: 'mrkdwn', text }] });
 
 export const answerBlocks = (res) => [md(res.answer),
-  note(`Quick answer from a read-only look at main, in ${res.secs} s. Tag me again to go further. If it needs code changes or tests, I start a sandbox.`)];
+  note(`Quick answer from a read-only look at main, in ${res.secs} s. Reply here to keep going. If it needs code changes or tests, I start a sandbox.`)];
 
 export const upgradeText = (u) => `This needs a sandbox: ${String(u?.reason ?? '').replace(/\s+$/, '').replace(/([^.!?])$/, '$1.')} Starting one now, with what I found so far.`;
 

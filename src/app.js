@@ -10,6 +10,7 @@ import { installErrorLog } from './errors.js';
 import * as sessions from './sessions.js';
 import * as live from './live.js';
 import { pollEvery } from './poll.js';
+import { defuse } from './render.js';
 import { forBotFromOthers, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, homeView, planLines, resumeNote, errorDigest, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT } from './render.js';
@@ -139,7 +140,7 @@ app.event('app_mention', async ({ event, body, client }) => {
   const { ts } = await client.chat.postMessage({ channel: event.channel, thread_ts,
     text: resume_from ? 'Picking up where we left off.' : 'Starting.',
     blocks: startCard(key, prompt, START_DELAY_S, Boolean(resume_from), runtime, CODEX) }).catch((e) => { pending.delete(key); throw e; })
-  if (event.thread_ts) prompt += await threadContext(client, event);
+  if (event.thread_ts) prompt += await threadContext(client, event, { withBot: cur?.state === 'answered' });
   if (!pending.has(key)) return;
   // Spread the current entry: a Switch click while the thread was read changed its runtime.
   pending.set(key, { ...pending.get(key), prompt, card_ts: ts, acks: [event.ts],
@@ -167,29 +168,97 @@ async function begin(key, client) {
   await launch(key, client);
 }
 
+// followUp: a reply in a quick-answer thread, taken as a tag: read-only first,
+// a sandbox when it asks for work or the agent asks for one.
+async function followUp(s, message, text, client) {
+  if ([...pending.values()].some((p) => p.channel === s.channel && p.thread_ts === s.thread_ts)) return;
+  const key = sessions.newKey();
+  pending.set(key, { prompt: text, request: text, owner: message.user, team: message.team ?? s.team, channel: s.channel,
+    thread_ts: s.thread_ts, runtime: 'claude', deadline: Date.now(), acks: [message.ts] });
+  const ctx = await threadContext(client, { channel: s.channel, thread_ts: s.thread_ts, ts: message.ts, user: message.user }, { withBot: true });
+  const { ts } = await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Looking at the code (read-only)...' }).catch(() => ({}));
+  pending.set(key, { ...pending.get(key), prompt: text + ctx, card_ts: ts });
+  await begin(key, client).catch((e) => { pending.delete(key); console.error('begin', key, e.message); });
+}
+
+// quickStatus: the quick answer's steps, in the same native stream a sandbox turn
+// uses: one row per tool, the last one running. Without streams, the start card
+// is an edited line with a spinner, the time and the latest step.
+function quickStatus(p) {
+  const t0 = Date.now(), titles = ['Looking at the code (read-only)'];
+  let ts = null, kind = null, tick = null, chain = Promise.resolve();
+  const run = (fn) => (chain = chain.then(fn).catch((e) => console.error('quick_status', e.data?.error ?? e.message)));
+  const row = (i, status) => ({ type: 'task_update', id: `q${i}`, title: titles[i].slice(0, 250), status });
+  const line = (n) => `${spinner(n)} ${titles[titles.length - 1]} · ${secs(Date.now() - t0)}`;
+  run(async () => {
+    if (streamOk) {
+      try {
+        ({ ts } = await app.client.apiCall('chat.startStream', { channel: p.channel, thread_ts: p.thread_ts,
+          recipient_user_id: p.owner, recipient_team_id: p.team ?? teamId, chunks: [row(0, 'in_progress')] }));
+        kind = 'stream';
+        return;
+      } catch (e) { streamOff(e); }
+    }
+    ts = p.card_ts; kind = 'line';
+    if (!ts) return;
+    let n = 0;
+    await app.client.chat.update({ channel: p.channel, ts, text: line(n), blocks: [] });
+    tick = setInterval(() => run(() => app.client.chat.update({ channel: p.channel, ts, text: line(++n), blocks: [] })), 3000);
+  });
+  return {
+    kind: () => kind,
+    count: () => titles.length - 1,
+    step: (text) => {
+      titles.push(defuse(text));
+      const i = titles.length - 1;
+      run(() => kind === 'stream' && app.client.apiCall('chat.appendStream', { channel: p.channel, ts, chunks: [row(i - 1, 'complete'), row(i, 'in_progress')] }));
+    },
+    done: (summary) => {
+      clearInterval(tick);
+      return run(async () => {
+        if (kind !== 'stream') return;
+        await app.client.apiCall('chat.stopStream', { channel: p.channel, ts, chunks: [row(titles.length - 1, 'complete')] });
+        await app.client.chat.update({ channel: p.channel, ts, text: summary, blocks: [{ type: 'context', elements: [{ type: 'mrkdwn', text: summary }] }] });
+      });
+    },
+  };
+}
+
 // quick: a read-only answer from the answer runner, in place of a sandbox. It
 // returns 'answered' (done, no session), {findings} (the agent asked for a
 // sandbox), or null (busy, down or failed: a session starts, as before).
 async function quick(key, p, client) {
-  if (p.card_ts) await client.chat.update({ channel: p.channel, ts: p.card_ts, text: 'Looking at the code (read-only)...', blocks: [] }).catch(() => {});
+  const status = quickStatus(p);
   let res;
-  try { res = await ctl.ask({ id: askId(key), prompt: p.prompt }); }
+  try { res = await ctl.askStream({ id: askId(key), prompt: p.prompt, onStep: status.step }); }
   catch (e) {
     if (e.code === 3) console.log('quick answer busy; starting a session', key);
     else console.error('quick_answer', key, e.stderr || e.message);
+    await status.done('No quick answer; starting a sandbox');
     return null;
   }
-  if (!pending.has(key)) return 'answered';
+  if (!pending.has(key)) { await status.done('Stopped'); return 'answered'; }
   if (res?.upgrade) {
+    await status.done(`Looked at the code: ${status.count()} steps in ${res.secs} s, then asked for a sandbox`);
     await client.chat.postMessage({ channel: p.channel, thread_ts: p.thread_ts, text: upgradeText(res.upgrade), blocks: upgradeBlocks(res) })
       .catch((e) => console.error('quick_answer', key, e.data?.error ?? e.message));
     return { findings: findingsOf(res) };
   }
-  if (!res?.answer || res.error) { console.error('quick_answer', key, 'no answer; starting a session'); return null; }
+  if (!res?.answer || res.error) { await status.done('No quick answer; starting a sandbox'); console.error('quick_answer', key, 'no answer; starting a session'); return null; }
+  await status.done(`Looked at the code (read-only): ${status.count()} steps in ${res.secs} s`);
   const post = { channel: p.channel, text: res.answer.slice(0, 3000), blocks: answerBlocks(res) };
-  await (p.card_ts ? client.chat.update({ ...post, ts: p.card_ts }) : client.chat.postMessage({ ...post, thread_ts: p.thread_ts }))
-    .catch((e) => console.error('quick_answer', key, e.data?.error ?? e.message));
+  // With a stream, the answer goes below the steps and the start card goes; without one, the card was the status line.
+  if (status.kind() === 'stream') {
+    if (p.card_ts) await client.chat.delete({ channel: p.channel, ts: p.card_ts }).catch(() => {});
+    await client.chat.postMessage({ ...post, thread_ts: p.thread_ts }).catch((e) => console.error('quick_answer', key, e.data?.error ?? e.message));
+  } else {
+    await (p.card_ts ? client.chat.update({ ...post, ts: p.card_ts }) : client.chat.postMessage({ ...post, thread_ts: p.thread_ts }))
+      .catch((e) => console.error('quick_answer', key, e.data?.error ?? e.message));
+  }
   pending.delete(key);
+  const cur = sessions.get(p.channel, p.thread_ts);
+  if (!cur || cur.state === 'answered') sessions.put({ key, state: 'answered', channel: p.channel, thread_ts: p.thread_ts,
+    owner: cur?.owner ?? p.owner, team: p.team, prompt: cur?.prompt ?? p.request ?? p.prompt, runtime: 'claude', started_at: cur?.started_at ?? Date.now() });
   for (const ts of p.acks ?? []) {
     await client.reactions.remove({ channel: p.channel, timestamp: ts, name: 'eyes' }).catch(() => {});
     await client.reactions.add({ channel: p.channel, timestamp: ts, name: 'white_check_mark' }).catch(() => {});
@@ -287,7 +356,8 @@ app.action('switch_runtime', async ({ ack, body, action, client }) => {
 
 // Tagged inside a discussion: the earlier messages ride along as context. They
 // are other people's words, so they are marked as data, not as the request.
-async function threadContext(client, event) {
+// withBot: also the bot's own earlier answers (a quick-answer thread has no agent that remembers them).
+async function threadContext(client, event, { withBot = false } = {}) {
   try {
     // replies pages oldest first; walk to the end so a long thread keeps its newest messages.
     let msgs = [], cursor;
@@ -297,8 +367,9 @@ async function threadContext(client, event) {
       cursor = r.response_metadata?.next_cursor;
       if (!cursor) break;
     }
-    const lines = msgs.filter((m) => m.ts !== event.ts && !m.bot_id && m.text)
-      .map((m) => { const who = m.user === event.user ? 'owner' : 'someone else';
+    const mine = (m) => withBot && m.user === botUserId && !/^(Look(ing|ed) at the code|No quick answer)/.test(m.text);
+    const lines = msgs.filter((m) => m.ts !== event.ts && m.text && (!m.bot_id || mine(m)))
+      .map((m) => { const who = m.bot_id ? 'you (an earlier answer)' : m.user === event.user ? 'owner' : 'someone else';
         // Label every line, so a line cannot pose as another speaker.
         return m.text.replace(/<@[A-Z0-9]+>/g, '@someone').split('\n').map((l) => `${who}: ${l}`).join('\n'); });
     if (!lines.length) return '';
@@ -385,6 +456,7 @@ app.message(async ({ message, client }) => {
       text: `This PR is ${how}, so this session is done. Tag me here with what to do next, and I will start fresh from main with this thread as context.` }).catch(() => {});
     return;
   }
+  if (s.state === 'answered' && steers) { seen(message.channel, message.ts); await followUp(s, message, text, client); return; }
   if (!LIVE.includes(s.state)) return;
   if (s.state === 'queued' && steers) {
     const who = message.user === s.owner ? 'the person who started this session' : 'someone else in the thread, not the person who started this session';
@@ -1361,7 +1433,7 @@ async function deliverMedia(key) {
 // the sessions that are still going, with links.
 const STATE_WORD = { paused: 'paused (reply to resume)', queued: 'waiting for capacity', starting: 'setting up', active: 'working', wrapping: 'wrapping up', pr_open: 'PR open', stopped: 'stopped', failed: 'failed' };
 async function statusList(client, channel) {
-  const live = sessions.all().filter((x) => !['stopped', 'failed'].includes(x.state) && x.channel === channel);
+  const live = sessions.all().filter((x) => !['stopped', 'failed', 'answered'].includes(x.state) && x.channel === channel);
   if (!live.length) return 'No sessions are running in this channel. Tag @fxa-agent in a thread to start one.';
   const lines = await Promise.all(live.map(async (x) => {
     const link = await client.chat.getPermalink({ channel: x.channel, message_ts: x.thread_ts }).then((r) => r.permalink).catch(() => null);
@@ -1466,7 +1538,7 @@ async function stoppedText(key) {
 
 // The 5 s poll owns state (replies, questions, errors, PR links); the watch
 // stream only makes the status line live between polls.
-const DONE = ['stopped', 'failed', 'pr_open', 'queued', 'paused'];
+const DONE = ['stopped', 'failed', 'pr_open', 'queued', 'paused', 'answered'];
 const again = new Set(); // keys asked to poll while a poll was in flight
 const lastWork = new Map(); // key → when a poll last saw events, a busy runner, or a non-idle state
 async function pollOne(key) {

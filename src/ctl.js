@@ -47,6 +47,27 @@ export const task = ({ key, owner, prompt, resumeFrom, fresh, thread, isNew, run
 export const ask = ({ id, prompt }) => withFile(prompt, async (f) =>
   JSON.parse(await run(['answer', 'ask', '--id', id, '--prompt-file', f, ...(MCP ? ['--mcp', MCP.replace(/\s+/g, '')] : [])], { timeout: 6 * 60_000 })));
 
+// The same answer, streamed: onStep(text) for each tool the agent uses, as it
+// uses it; resolves with the answer, rejects with the exit code (3: busy).
+export const askStream = ({ id, prompt, onStep }) => withFile(prompt, (f) => new Promise((resolve, reject) => {
+  const c = spawn(CTL, ['--backend', 'gce', 'answer', 'ask', '--id', id, '--prompt-file', f, '--stream',
+    ...(MCP ? ['--mcp', MCP.replace(/\s+/g, '')] : [])], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let buf = '', err = '', answer = null;
+  const timer = setTimeout(() => c.kill('SIGTERM'), 6 * 60_000);
+  c.stdout.on('data', (d) => {
+    buf += d;
+    for (let i; (i = buf.indexOf('\n')) >= 0; buf = buf.slice(i + 1)) {
+      try { const m = JSON.parse(buf.slice(0, i)); if (m.type === 'step') onStep?.(m.text); else if (m.type === 'answer') answer = m; } catch {}
+    }
+  });
+  c.stderr.on('data', (d) => { err += d; });
+  c.on('close', (code) => {
+    clearTimeout(timer);
+    if (code === 0 && answer) resolve(answer);
+    else reject(Object.assign(new Error(`answer ask exited ${code}`), { code, stderr: err }));
+  });
+}));
+
 export const steer = (key, message, who) => withFile(message, (f) => run(['steer', key, '--message-file', f,
   ...(who?.name ? ['--from-name', who.name] : []), ...(who?.image ? ['--from-image', who.image] : [])]));
 
