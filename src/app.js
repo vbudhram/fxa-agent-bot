@@ -999,7 +999,7 @@ const turnSummary = (s, word) => {
 };
 
 // 1: the turn's reply closes its own stream, so a turn is one message: what the
-// agent did, then what it says. Without a live stream it posts as before.
+// agent did, then what it says. A status line (no stream, or a stream Slack closed) is edited the same way.
 const finishTurn = (key, msg, ev) => serial(key, async function finishTurn() {
   clearTimeout(drafts.get(key)?.timer); drafts.delete(key);
   const seenAt = resultAt.get(key); resultAt.delete(key);
@@ -1010,15 +1010,17 @@ const finishTurn = (key, msg, ev) => serial(key, async function finishTurn() {
   settle(s);
   // The buttons and their hint line go together; they are what retireButtons removes.
   const actions = (msg.blocks ?? []).filter((b) => b.type === 'actions' || b.block_id === 'answer_hint');
-  if (s.status_kind === 'stream' && s.status_ts) {
+  // The reply takes the status message's place, streamed or edited: one message per turn.
+  if (s.status_ts) {
     const summary = withLive(key, turnSummary(s, 'Done'));
     // The rendered answer and, for a question, its options lists; the buttons follow.
     const body = (msg.blocks ?? []).filter((b) => b.type !== 'actions' && b.block_id !== 'answer_hint');
     if (!body.length) body.push(md(ev.text || 'Over to you.'));
     try {
-      await app.client.apiCall('chat.stopStream', { channel: s.channel, ts: s.status_ts,
-        chunks: [{ type: 'task_update', id: 't0', title: summary, status: 'complete' }] });
-      // Rewrite the finished stream: summary, answer, and this turn's buttons.
+      // A stream Slack already closed cannot be stopped; the edit below still lands.
+      if (s.status_kind === 'stream') await app.client.apiCall('chat.stopStream', { channel: s.channel, ts: s.status_ts,
+        chunks: [{ type: 'task_update', id: 't0', title: summary, status: 'complete' }] }).catch((e) => console.log('stop stream', key, e.data?.error ?? e.message));
+      // Rewrite the finished status: summary, answer, and this turn's buttons.
       const lt = liveTurn.get(key);
       const steps = live.closingLine(lt?.st, [...(s.rows_done ?? []), ...(s.cur_count ? [s.cur_label] : [])]);
       liveTurn.delete(key);
@@ -1171,11 +1173,11 @@ const updateStatus = (key, state, activity) => serial(key, async function update
   if (s.status_kind === 'stream') {
     try { sessions.patch(key, await updateStreamNow(s, state, activity)); }
     catch (e) {
-      // The stream ended under us (stopped by the user, or timed out): start fresh next time.
-      // That one is expected and handled, so it is not an error; anything else is.
+      // Slack closed the stream (it times out on a long turn): go on in the same message
+      // by editing it, so the turn stays one message. Any other failure: start fresh next time.
       const why = e.data?.error ?? e.message;
-      (why === 'message_not_in_streaming_state' ? console.log : console.error)('stream', key, why);
-      sessions.patch(key, STATUS_CLEAR);
+      if (why === 'message_not_in_streaming_state') { console.log('stream closed', key); sessions.patch(key, { status_kind: 'line', status_text: null }); }
+      else { console.error('stream', key, why); sessions.patch(key, STATUS_CLEAR); }
     }
     return;
   }
