@@ -1463,7 +1463,7 @@ app.event('app_home_opened', async ({ event, client }) => {
 // A URL button still sends an action; acknowledge it so Slack shows no error.
 app.action(/^home_open_/, async ({ ack }) => { await ack(); });
 
-app.command('/fxa-agent', async ({ ack, command, respond, client }) => {
+app.command(process.env.SLASH_COMMAND || '/fxa-agent', async ({ ack, command, respond, client }) => {
   await ack();
   if (!allowed(command.channel_id, command.user_id)) {
     await respond({ response_type: 'ephemeral', text: 'Run this in a channel where the agent works.' });
@@ -1773,6 +1773,7 @@ ownerAction('auto_round', async (s, client, action, body) => {
 const OPERATOR = process.env.SLACK_OPERATOR || USERS.find((u) => u !== '*');
 const SEEN_FILE = `${process.env.HOME}/.fxa-agent-errors-seen.json`;
 async function watchErrors() {
+  if (process.env.ERROR_DMS === '0') return; // a dev bot: the real bot sends these
   const rows = await ctl.errorsList();
   if (!rows || !OPERATOR) return;
   let seen = null;
