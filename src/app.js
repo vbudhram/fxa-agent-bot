@@ -174,7 +174,7 @@ async function followUp(s, message, text, client) {
   if ([...pending.values()].some((p) => p.channel === s.channel && p.thread_ts === s.thread_ts)) return;
   const key = sessions.newKey();
   pending.set(key, { prompt: text, request: text, owner: message.user, team: message.team ?? s.team, channel: s.channel,
-    thread_ts: s.thread_ts, runtime: 'claude', deadline: Date.now(), acks: [message.ts] });
+    thread_ts: s.thread_ts, runtime: 'claude', deadline: Date.now(), acks: message.ts ? [message.ts] : [] }); // a tap has no message to mark
   const ctx = await threadContext(client, { channel: s.channel, thread_ts: s.thread_ts, ts: message.ts, user: message.user }, { withBot: true });
   pending.set(key, { ...pending.get(key), prompt: text + ctx });
   await begin(key, client).catch((e) => { pending.delete(key); console.error('begin', key, e.message); });
@@ -245,7 +245,8 @@ async function quick(key, p, client) {
   const answer = seamless(res.answer);
   if (!answer) { await status.done('Looked into it'); return { findings: findingsOf(res) }; }
   await status.done('Done');
-  await client.chat.postMessage({ channel: p.channel, thread_ts: p.thread_ts, text: answer.slice(0, 3000), blocks: answerBlocks({ ...res, answer }) })
+  const msg = res.question ? render(key, { type: 'question', ...res.question, text: answer }) : { text: answer.slice(0, 3000), blocks: answerBlocks({ ...res, answer }) };
+  await client.chat.postMessage({ channel: p.channel, thread_ts: p.thread_ts, ...msg })
     .catch((e) => console.error('quick_answer', key, e.data?.error ?? e.message));
   pending.delete(key);
   const cur = sessions.get(p.channel, p.thread_ts);
@@ -1340,6 +1341,7 @@ app.action(/^answer_\d+(_\d+)?$/, async ({ ack, body, action, client }) => {
   const asked = String((body.message.blocks ?? []).find((b) => b.type === 'markdown')?.text ?? body.message.text ?? '').slice(-600);
   const reply = asked ? `You asked:\n${asked.split('\n').map((l) => `> ${l}`).join('\n')}\nMy answer: ${v.choice}` : v.choice;
   const answer = body.user.id === s.owner ? reply : `(From someone else in the thread, not the person who started this session.)\n${reply}`;
+  if (s.state === 'answered') { await followUp(s, { user: body.user.id }, answer, client); return; }
   await steerAndAck(s, answer, client, body.user.id);
 });
 
@@ -1368,6 +1370,7 @@ async function answerOneOfSeveral(s, v, body, client) {
   const others = Object.values(pend.got).some((a) => a.by !== s.owner);
   return `${others ? '(Some answers are from someone else in the thread, not the person who started this session.)\n' : ''}My answers:\n${lines.join('\n')}`;
   });
+  if (answer && fresh(s.key)?.state === 'answered') { await followUp(fresh(s.key), { user: body.user.id }, answer, client); return; }
   if (answer) await steerAndAck(s, answer, client, body.user.id);
 }
 
