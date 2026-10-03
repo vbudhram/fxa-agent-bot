@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { statSync, readFileSync, readdirSync, lstatSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as ctl from './ctl.js';
-import { quickFirst, askId, answerBlocks, upgradeBlocks, upgradeText, findingsOf } from './answer.js';
+import { quickFirst, askId, answerBlocks, findingsOf, stepRows, lastRow, doneLine, ON_IT, FIRST_ROW } from './answer.js';
 import { installErrorLog } from './errors.js';
 import * as sessions from './sessions.js';
 import * as live from './live.js';
@@ -164,11 +164,11 @@ async function begin(key, client) {
     auto_rounds: from.auto_rounds, copilot_seen_at: from.copilot_seen_at, pr_pushed_at: from.pr_pushed_at, ci_seen: from.ci_seen, last_person_at: from.last_person_at, edited_at: from.edited_at } : {};
   sessions.put({ key, ...rest, ...pr, cursor: 0, state: 'queued', started_at: Date.now() });
   pending.delete(key);
-  if (card_ts) await client.chat.update({ channel: p.channel, ts: card_ts, text: 'On it! Setting up a sandbox; the status below shows each step and how long it took. Type `!help` any time for commands.', blocks: [] }).catch(() => {});
+  if (card_ts) await client.chat.update({ channel: p.channel, ts: card_ts, text: ON_IT, blocks: [] }).catch(() => {});
   await launch(key, client);
 }
 
-// followUp: a reply in a quick-answer thread, taken as a tag: read-only first,
+// followUp: a reply in a quick-answer thread, taken as a tag: a quick look first,
 // a sandbox when it asks for work or the agent asks for one.
 async function followUp(s, message, text, client) {
   if ([...pending.values()].some((p) => p.channel === s.channel && p.thread_ts === s.thread_ts)) return;
@@ -176,85 +176,74 @@ async function followUp(s, message, text, client) {
   pending.set(key, { prompt: text, request: text, owner: message.user, team: message.team ?? s.team, channel: s.channel,
     thread_ts: s.thread_ts, runtime: 'claude', deadline: Date.now(), acks: [message.ts] });
   const ctx = await threadContext(client, { channel: s.channel, thread_ts: s.thread_ts, ts: message.ts, user: message.user }, { withBot: true });
-  const { ts } = await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Looking at the code (read-only)...' }).catch(() => ({}));
-  pending.set(key, { ...pending.get(key), prompt: text + ctx, card_ts: ts });
+  pending.set(key, { ...pending.get(key), prompt: text + ctx });
   await begin(key, client).catch((e) => { pending.delete(key); console.error('begin', key, e.message); });
 }
 
-// quickStatus: the quick answer's steps, in the same native stream a sandbox turn
-// uses: one row per tool, the last one running. Without streams, the start card
-// is an edited line with a spinner, the time and the latest step.
+// quickStatus: the status a sandbox turn shows (a native stream with a row per
+// stage, or an edited line), for the quick look's steps.
 function quickStatus(p) {
-  const t0 = Date.now(), titles = ['Looking at the code (read-only)'];
-  let ts = null, kind = null, tick = null, chain = Promise.resolve();
+  const t0 = Date.now(), asked = Number(p.acks?.[0]) * 1000 || 0;
+  let ts = null, kind = null, tick = null, chain = Promise.resolve(), n = 0;
+  let st = { t: 0, kind: null, label: FIRST_ROW, count: 0 };
+  const at = () => ({ channel: p.channel, ts });
   const run = (fn) => (chain = chain.then(fn).catch((e) => console.error('quick_status', e.data?.error ?? e.message)));
-  const row = (i, status) => ({ type: 'task_update', id: `q${i}`, title: titles[i].slice(0, 250), status });
-  const line = (n) => `${spinner(n)} ${titles[titles.length - 1]} · ${secs(Date.now() - t0)}`;
   run(async () => {
     if (streamOk) {
       try {
-        ({ ts } = await app.client.apiCall('chat.startStream', { channel: p.channel, thread_ts: p.thread_ts,
-          recipient_user_id: p.owner, recipient_team_id: p.team ?? teamId, chunks: [row(0, 'in_progress')] }));
+        ({ ts } = await app.client.apiCall('chat.startStream', { channel: p.channel, thread_ts: p.thread_ts, recipient_user_id: p.owner,
+          recipient_team_id: p.team ?? teamId, chunks: [{ type: 'task_update', id: 't0', title: FIRST_ROW, status: 'in_progress' }] }));
         kind = 'stream';
         return;
       } catch (e) { streamOff(e); }
     }
-    ts = p.card_ts; kind = 'line';
-    if (!ts) return;
-    let n = 0;
-    await app.client.chat.update({ channel: p.channel, ts, text: line(n), blocks: [] });
-    tick = setInterval(() => run(() => app.client.chat.update({ channel: p.channel, ts, text: line(++n), blocks: [] })), 3000);
+    let k = 0;
+    const text = () => `${spinner(k)} ${st.label} · ${secs(Date.now() - t0)}`;
+    ({ ts } = await app.client.chat.postMessage({ channel: p.channel, thread_ts: p.thread_ts, text: text() }));
+    kind = 'line';
+    tick = setInterval(() => { k++; run(() => app.client.chat.update({ ...at(), text: text() })); }, 3000);
   });
   return {
-    kind: () => kind,
-    count: () => titles.length - 1,
+    count: () => n,
     step: (text) => {
-      titles.push(defuse(text));
-      const i = titles.length - 1;
-      run(() => kind === 'stream' && app.client.apiCall('chat.appendStream', { channel: p.channel, ts, chunks: [row(i - 1, 'complete'), row(i, 'in_progress')] }));
+      const r = stepRows(st, defuse(text));
+      st = r.st; n++;
+      run(() => kind === 'stream' && app.client.apiCall('chat.appendStream', { ...at(), chunks: r.chunks }));
     },
-    done: (summary) => {
+    // word: Done for an answer; on the way to a sandbox, a status with no steps goes away.
+    done: (word) => {
       clearInterval(tick);
       return run(async () => {
-        if (kind !== 'stream') return;
-        await app.client.apiCall('chat.stopStream', { channel: p.channel, ts, chunks: [row(titles.length - 1, 'complete')] });
-        await app.client.chat.update({ channel: p.channel, ts, text: summary, blocks: [{ type: 'context', elements: [{ type: 'mrkdwn', text: summary }] }] });
+        if (!ts) return;
+        if (kind === 'stream') await app.client.apiCall('chat.stopStream', { ...at(), chunks: [lastRow(st)] });
+        if (!n && word !== 'Done') { await app.client.chat.delete(at()).catch(() => {}); return; }
+        const summary = doneLine(word, n, Date.now() - t0, word === 'Done' && asked ? Date.now() - asked : 0);
+        await app.client.chat.update({ ...at(), text: summary, blocks: [{ type: 'context', elements: [{ type: 'mrkdwn', text: summary }] }] });
       });
     },
   };
 }
 
-// quick: a read-only answer from the answer runner, in place of a sandbox. It
-// returns 'answered' (done, no session), {findings} (the agent asked for a
-// sandbox), or null (busy, down or failed: a session starts, as before).
+// quick: the quick look, in place of a sandbox. It returns 'answered' (done, no
+// session), {findings} (the agent asked for a sandbox), or null (busy, down or
+// failed: a session starts, as before). The person sees one bot either way.
 async function quick(key, p, client) {
+  if (p.card_ts) await client.chat.update({ channel: p.channel, ts: p.card_ts, text: ON_IT, blocks: [] }).catch(() => {});
   const status = quickStatus(p);
   let res;
   try { res = await ctl.askStream({ id: askId(key), prompt: p.prompt, onStep: status.step }); }
   catch (e) {
     if (e.code === 3) console.log('quick answer busy; starting a session', key);
     else console.error('quick_answer', key, e.stderr || e.message);
-    await status.done('No quick answer; starting a sandbox');
+    await status.done('Looked into it');
     return null;
   }
   if (!pending.has(key)) { await status.done('Stopped'); return 'answered'; }
-  if (res?.upgrade) {
-    await status.done(`Looked at the code: ${status.count()} steps in ${res.secs} s, then asked for a sandbox`);
-    await client.chat.postMessage({ channel: p.channel, thread_ts: p.thread_ts, text: upgradeText(res.upgrade), blocks: upgradeBlocks(res) })
-      .catch((e) => console.error('quick_answer', key, e.data?.error ?? e.message));
-    return { findings: findingsOf(res) };
-  }
-  if (!res?.answer || res.error) { await status.done('No quick answer; starting a sandbox'); console.error('quick_answer', key, 'no answer; starting a session'); return null; }
-  await status.done(`Looked at the code (read-only): ${status.count()} steps in ${res.secs} s`);
-  const post = { channel: p.channel, text: res.answer.slice(0, 3000), blocks: answerBlocks(res) };
-  // With a stream, the answer goes below the steps and the start card goes; without one, the card was the status line.
-  if (status.kind() === 'stream') {
-    if (p.card_ts) await client.chat.delete({ channel: p.channel, ts: p.card_ts }).catch(() => {});
-    await client.chat.postMessage({ ...post, thread_ts: p.thread_ts }).catch((e) => console.error('quick_answer', key, e.data?.error ?? e.message));
-  } else {
-    await (p.card_ts ? client.chat.update({ ...post, ts: p.card_ts }) : client.chat.postMessage({ ...post, thread_ts: p.thread_ts }))
-      .catch((e) => console.error('quick_answer', key, e.data?.error ?? e.message));
-  }
+  if (res?.upgrade) { await status.done('Looked into it'); return { findings: findingsOf(res) }; }
+  if (!res?.answer || res.error) { await status.done('Looked into it'); console.error('quick_answer', key, 'no answer; starting a session'); return null; }
+  await status.done('Done');
+  await client.chat.postMessage({ channel: p.channel, thread_ts: p.thread_ts, text: res.answer.slice(0, 3000), blocks: answerBlocks(res) })
+    .catch((e) => console.error('quick_answer', key, e.data?.error ?? e.message));
   pending.delete(key);
   const cur = sessions.get(p.channel, p.thread_ts);
   if (!cur || cur.state === 'answered') sessions.put({ key, state: 'answered', channel: p.channel, thread_ts: p.thread_ts,
@@ -367,7 +356,7 @@ async function threadContext(client, event, { withBot = false } = {}) {
       cursor = r.response_metadata?.next_cursor;
       if (!cursor) break;
     }
-    const mine = (m) => withBot && m.user === botUserId && !/^(Look(ing|ed) at the code|No quick answer)/.test(m.text);
+    const mine = (m) => withBot && m.user === botUserId && !/^(On it!|Starting|Picking up|(Done|Looked into it|Stopped|Interrupted|Paused|Failed) · )/.test(m.text);
     const lines = msgs.filter((m) => m.ts !== event.ts && m.text && (!m.bot_id || mine(m)))
       .map((m) => { const who = m.bot_id ? 'you (an earlier answer)' : m.user === event.user ? 'owner' : 'someone else';
         // Label every line, so a line cannot pose as another speaker.
@@ -775,7 +764,7 @@ async function startStatusNow(s, verb) {
   const cur = fresh(s.key);
   if (!cur || cur.status_ts || cur.muted) return;
   steps.delete(s.key); unsent.delete(s.key); stepAt.delete(s.key); said.delete(s.key);
-  const first = verb === 'Setting up' ? 'Setting up a sandbox' : `${verb} on it`;
+  const first = verb === 'Setting up' ? 'Getting ready' : `${verb} on it`;
   liveTurn.set(s.key, newLive(first));
   if (streamOk) {
     try {
@@ -827,7 +816,7 @@ async function updateStreamNow(s, state, activity) {
   // Not while still starting: a stack prewarm keeps the state there after the boot.
   if (state !== 'starting' && activity?.boot?.done && !s.boot_shown && !kind) {
     const { details, boot_n } = bootDetails(s, activity.boot, true);
-    label = `Sandbox ready in ${activity.boot.total}s`;
+    label = `Ready in ${activity.boot.total}s`;
     await app.client.apiCall('chat.appendStream', { ...at, chunks: [row(t, label, 'in_progress', details)] });
     s = { ...s, boot_n, boot_shown: true, cur_label: label, last_act: label };
     sessions.patch(s.key, { boot_n, boot_shown: true, cur_label: label, last_act: label, boot_s: activity.boot.total });
@@ -901,7 +890,7 @@ async function updateStreamNow(s, state, activity) {
     if (state === 'starting') {
       const b = activity.boot;
       const up = Math.round(b?.elapsed ?? (Date.now() - (s.busy_since ?? Date.now())) / 1000);
-      label = `Setting up the sandbox: ${news.at(-1)} · ${up}s of about ${b?.expect ?? SETUP_EXPECT_S}s`;
+      label = `Getting ready: ${news.at(-1)} · ${up}s of about ${b?.expect ?? SETUP_EXPECT_S}s`;
       const { details, boot_n } = bootDetails(s, b, false);
       await send([row(t, label, 'in_progress', details)]);
       return { last_act: label, cur_label: label, last_step: news.at(-1), boot_n };

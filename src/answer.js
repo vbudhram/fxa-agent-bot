@@ -1,7 +1,8 @@
-// Quick answers: a read-only look at main before any sandbox. The agent asks for
-// a sandbox itself (an upgrade) when the request needs changes, tests or a push;
-// a request that plainly asks for that work skips the look.
-import { md } from './render.js';
+// Quick answers: the agent first looks at main without a sandbox, and asks for
+// one itself (an upgrade) when the request needs changes, tests or a push. A
+// request that plainly asks for that work skips the look. The person sees one
+// bot: the same card, the same status rows and the same summary either way.
+import { md, stage, phase } from './render.js';
 
 // Only the request is matched, not the thread context the bot appends to it.
 const WORK = /\b(?:fix|implement|refactor|rebase|push|open (?:a |the )?(?:pr|pull request)|create (?:a |the )?(?:pr|pull request)|run (?:the |all )?(?:\w+ )?tests?|record|video|screenshot|install|deploy|reproduce|repro|sandbox|build (?:a|an|the|me))\b/i;
@@ -12,14 +13,35 @@ export const quickFirst = (prompt, { resuming = false, runtime = 'claude', on = 
 
 export const askId = (key) => `ask-${String(key).replace(/^agent-/, '')}`;
 
-const note = (text) => ({ type: 'context', elements: [{ type: 'mrkdwn', text }] });
+// The reply, as a sandbox turn's reply looks: the text, nothing about how it was made.
+export const answerBlocks = (res) => [md(res.answer)];
 
-export const answerBlocks = (res) => [md(res.answer),
-  note(`Quick answer from a read-only look at main, in ${res.secs} s. Reply here to keep going. If it needs code changes or tests, I start a sandbox.`)];
-
-export const upgradeText = (u) => `This needs a sandbox: ${String(u?.reason ?? '').replace(/\s+$/, '').replace(/([^.!?])$/, '$1.')} Starting one now, with what I found so far.`;
-
-export const upgradeBlocks = (res) => [...(res.answer ? [md(res.answer)] : []), note(upgradeText(res.upgrade))];
-
-// What the session gets from the quick look: the findings, then the answer so far.
+// What the session gets from the quick look: the findings, then the reply so far.
 export const findingsOf = (res) => [res.upgrade?.findings, res.answer && `Its reply so far:\n${res.answer}`].filter(Boolean).join('\n\n');
+
+// The card and the first status row, the same for both paths.
+export const ON_IT = 'On it! The status below shows each step and how long it took. Type `!help` any time for commands.';
+export const FIRST_ROW = 'Working on it';
+
+const row = (t, title, status, details) => ({ type: 'task_update', id: `t${t}`, title: String(title).slice(0, 250),
+  ...(details ? { details: String(details).slice(0, 250) } : {}), status });
+export const rowTitle = (st) => (st.count ? `${st.label} · ${st.count}` : st.label);
+
+// stepRows(st, step): the checklist rows a sandbox turn shows, for steps that come one
+// at a time: a new row when the stage changes (the last one ticks), else a count.
+// st: {t, kind, label, count}; start from {t: 0, kind: null, label: FIRST_ROW, count: 0}.
+export function stepRows(st, text) {
+  const g = stage(text), detail = phase(text).detail || text;
+  if (g && g.kind !== st.kind) {
+    const next = { t: st.t + 1, kind: g.kind, label: g.label, count: 1 };
+    return { st: next, chunks: [row(st.t, rowTitle(st), 'complete'), row(next.t, rowTitle(next), 'in_progress', detail)] };
+  }
+  const next = { ...st, count: st.count + 1 };
+  return { st: next, chunks: [row(st.t, rowTitle(next), 'in_progress', detail)] };
+}
+export const lastRow = (st) => row(st.t, rowTitle(st), 'complete');
+
+const secs = (ms) => { const t = Math.round(ms / 1000); return t < 60 ? `${t}s` : `${Math.floor(t / 60)}m ${t % 60}s`; };
+// The summary line a sandbox turn ends with.
+export const doneLine = (word, n, tookMs, askedMs) =>
+  `${word} · ${n ? `${n} step${n === 1 ? '' : 's'} · ` : ''}${secs(tookMs)}${askedMs ? ` · reply ${secs(askedMs)} after your message` : ''}`;
