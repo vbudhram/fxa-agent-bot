@@ -32,12 +32,20 @@ async function withFile(text, fn) {
 // MCP_CONNECTORS: the read-only MCP connectors for every Slack session. Unset or empty: none.
 const MCP = process.env.MCP_CONNECTORS;
 
-export const task = ({ key, owner, prompt, resumeFrom, fresh, thread, isNew, runtime, link, who, queuedS }) => withFile(prompt, (f) =>
-  run(['task', '--source', 'slack', '--id', key, '--owner', owner, '--prompt-file', f,
+// findings: what a quick answer found before it asked for a sandbox. It goes in a
+// second file, deleted with the first; an empty one means none.
+export const task = ({ key, owner, prompt, resumeFrom, fresh, thread, isNew, runtime, link, who, queuedS, findings }) => withFile(prompt, (f) =>
+  withFile(findings ?? '', (ff) => run(['task', '--source', 'slack', '--id', key, '--owner', owner, '--prompt-file', f,
     ...(thread ? ['--thread', thread, ...(isNew ? ['--new'] : [])] : []),
     ...(resumeFrom ? ['--resume-from', resumeFrom, ...(fresh ? ['--fresh'] : [])] : []), ...(runtime ? ['--runtime', runtime] : []),
-    ...(link ? ['--link', link] : []), ...(queuedS ? ['--queued-s', String(queuedS)] : []), ...(MCP !== undefined ? ['--mcp', MCP.replace(/\s+/g, '')] : []),
-    ...(who?.name ? ['--owner-name', who.name] : []), ...(who?.image ? ['--owner-image', who.image] : [])]));
+    ...(link ? ['--link', link] : []), ...(queuedS ? ['--queued-s', String(queuedS)] : []), ...(findings ? ['--findings-file', ff] : []),
+    ...(MCP !== undefined ? ['--mcp', MCP.replace(/\s+/g, '')] : []),
+    ...(who?.name ? ['--owner-name', who.name] : []), ...(who?.image ? ['--owner-image', who.image] : [])])));
+
+// A quick, read-only answer: {id, answer, upgrade, secs, cost_usd, turns, error}.
+// Rejects when the answer runner is busy (exit 3) or down; the caller starts a session then.
+export const ask = ({ id, prompt }) => withFile(prompt, async (f) =>
+  JSON.parse(await run(['answer', 'ask', '--id', id, '--prompt-file', f, ...(MCP ? ['--mcp', MCP.replace(/\s+/g, '')] : [])], { timeout: 6 * 60_000 })));
 
 export const steer = (key, message, who) => withFile(message, (f) => run(['steer', key, '--message-file', f,
   ...(who?.name ? ['--from-name', who.name] : []), ...(who?.image ? ['--from-image', who.image] : [])]));

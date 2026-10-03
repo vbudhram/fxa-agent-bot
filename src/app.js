@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { statSync, readFileSync, readdirSync, lstatSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as ctl from './ctl.js';
+import { quickFirst, askId, answerBlocks, upgradeBlocks, upgradeText, findingsOf } from './answer.js';
 import { installErrorLog } from './errors.js';
 import * as sessions from './sessions.js';
 import * as live from './live.js';
@@ -65,6 +66,8 @@ const START_DELAY_S = process.env.CODEX_ENABLED === '1' ? 10 : 0;
 const DESKTOP_EMAILS = new Map((process.env.DESKTOP_EMAILS || '').split(',').map((p) => p.trim().split(':')).filter(([u, e]) => /^[UW][A-Z0-9]+$/.test(u ?? '') && /^[^@\s]+@[^@\s]+$/.test(e ?? '')));
 // Codex needs a Codex login on the controller host; off unless CODEX_ENABLED=1.
 const CODEX = process.env.CODEX_ENABLED === '1';
+// A read-only answer before any sandbox; QUICK_ANSWERS=0 turns it off.
+const QUICK = process.env.QUICK_ANSWERS !== '0';
 
 // The first visible answer to any message: one reactions.add, sent before any
 // other work and not awaited. It turns into ✅ (or ⚠️) when the turn ends.
@@ -144,8 +147,13 @@ app.event('app_mention', async ({ event, body, client }) => {
 });
 
 async function begin(key, client) {
-  const p = pending.get(key);
+  let p = pending.get(key);
   if (!p) return;
+  if (quickFirst(p.prompt, { resuming: Boolean(p.resume_from), runtime: p.runtime, on: QUICK })) {
+    const r = await quick(key, p, client);
+    if (r === 'answered' || !(p = pending.get(key))) return;
+    if (r?.findings) pending.set(key, p = { ...p, findings: r.findings });
+  }
   const { timer, card_ts, deadline, ...rest } = p;
   // Record the session before releasing the thread's reservation.
   // Continuing a PR: the new session replaces the old one in the thread, so it
@@ -157,6 +165,36 @@ async function begin(key, client) {
   pending.delete(key);
   if (card_ts) await client.chat.update({ channel: p.channel, ts: card_ts, text: 'On it! Setting up a sandbox; the status below shows each step and how long it took. Type `!help` any time for commands.', blocks: [] }).catch(() => {});
   await launch(key, client);
+}
+
+// quick: a read-only answer from the answer runner, in place of a sandbox. It
+// returns 'answered' (done, no session), {findings} (the agent asked for a
+// sandbox), or null (busy, down or failed: a session starts, as before).
+async function quick(key, p, client) {
+  if (p.card_ts) await client.chat.update({ channel: p.channel, ts: p.card_ts, text: 'Looking at the code (read-only)...', blocks: [] }).catch(() => {});
+  let res;
+  try { res = await ctl.ask({ id: askId(key), prompt: p.prompt }); }
+  catch (e) {
+    if (e.code === 3) console.log('quick answer busy; starting a session', key);
+    else console.error('quick_answer', key, e.stderr || e.message);
+    return null;
+  }
+  if (!pending.has(key)) return 'answered';
+  if (res?.upgrade) {
+    await client.chat.postMessage({ channel: p.channel, thread_ts: p.thread_ts, text: upgradeText(res.upgrade), blocks: upgradeBlocks(res) })
+      .catch((e) => console.error('quick_answer', key, e.data?.error ?? e.message));
+    return { findings: findingsOf(res) };
+  }
+  if (!res?.answer || res.error) { console.error('quick_answer', key, 'no answer; starting a session'); return null; }
+  const post = { channel: p.channel, text: res.answer.slice(0, 3000), blocks: answerBlocks(res) };
+  await (p.card_ts ? client.chat.update({ ...post, ts: p.card_ts }) : client.chat.postMessage({ ...post, thread_ts: p.thread_ts }))
+    .catch((e) => console.error('quick_answer', key, e.data?.error ?? e.message));
+  pending.delete(key);
+  for (const ts of p.acks ?? []) {
+    await client.reactions.remove({ channel: p.channel, timestamp: ts, name: 'eyes' }).catch(() => {});
+    await client.reactions.add({ channel: p.channel, timestamp: ts, name: 'white_check_mark' }).catch(() => {});
+  }
+  return 'answered';
 }
 
 // At the session cap the request waits in line, as Claude Tag's does, instead
@@ -172,7 +210,7 @@ async function launch(key, client, since = Date.now()) {
     const [link, who] = await Promise.all([linkP, whoIs(app.client, s.owner)]);
     // A request that waited at the cap reports the wait, for the dashboard's load card.
     const queuedS = s.queued_note ? Math.round((Date.now() - since) / 1000) : undefined;
-    await ctl.task({ key, owner: s.owner, prompt: s.prompt, resumeFrom: s.resume_from, fresh: s.fresh, thread: `${s.channel}:${s.thread_ts}`, isNew: s.is_new, runtime: s.resume_from ? undefined : s.runtime, link, who, queuedS });
+    await ctl.task({ key, owner: s.owner, prompt: s.prompt, resumeFrom: s.resume_from, fresh: s.fresh, thread: `${s.channel}:${s.thread_ts}`, isNew: s.is_new, runtime: s.resume_from ? undefined : s.runtime, link, who, queuedS, findings: s.findings });
   } catch (e) {
     if (!/cap \d+ \(FXA_SESSION_MAX\)/.test(e.stderr ?? '')) { sessions.patch(key, { state: 'failed' }); await fail(client, s, e); return; }
     if (Date.now() - since > QUEUE_GIVE_UP_MS) {
@@ -205,7 +243,7 @@ async function launch(key, client, since = Date.now()) {
   sessions.patch(key, extra ? { next_acks: [...(cur.next_acks ?? []), ...(cur.late_acks ?? [])], late_acks: [] }
     : { acks: [...ackList(cur), ...(cur.late_acks ?? [])], late_acks: [] });
   // The runner is booting from here on: a Slack hiccup is logged, not fatal.
-  sessions.patch(key, { state: 'starting', started_at: Date.now() });
+  sessions.patch(key, { state: 'starting', started_at: Date.now(), findings: null });
   if (fresh(key).queue_ts) await app.client.chat.update({ channel: s.channel, ts: fresh(key).queue_ts, text: 'A session freed up; starting now.' }).catch(() => {});
   await startStatus(fresh(key), 'Setting up').catch((e) => console.error('status', key, e.data?.error ?? e.message));
 }
