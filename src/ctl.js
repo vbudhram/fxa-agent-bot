@@ -32,11 +32,11 @@ async function withFile(text, fn) {
 // MCP_CONNECTORS: the read-only MCP connectors for every Slack session. Unset or empty: none.
 const MCP = process.env.MCP_CONNECTORS;
 
-export const task = ({ key, owner, prompt, resumeFrom, fresh, thread, isNew, runtime, link, who }) => withFile(prompt, (f) =>
+export const task = ({ key, owner, prompt, resumeFrom, fresh, thread, isNew, runtime, link, who, queuedS }) => withFile(prompt, (f) =>
   run(['task', '--source', 'slack', '--id', key, '--owner', owner, '--prompt-file', f,
     ...(thread ? ['--thread', thread, ...(isNew ? ['--new'] : [])] : []),
     ...(resumeFrom ? ['--resume-from', resumeFrom, ...(fresh ? ['--fresh'] : [])] : []), ...(runtime ? ['--runtime', runtime] : []),
-    ...(link ? ['--link', link] : []), ...(MCP !== undefined ? ['--mcp', MCP.replace(/\s+/g, '')] : []),
+    ...(link ? ['--link', link] : []), ...(queuedS ? ['--queued-s', String(queuedS)] : []), ...(MCP !== undefined ? ['--mcp', MCP.replace(/\s+/g, '')] : []),
     ...(who?.name ? ['--owner-name', who.name] : []), ...(who?.image ? ['--owner-image', who.image] : [])]));
 
 export const steer = (key, message, who) => withFile(message, (f) => run(['steer', key, '--message-file', f,

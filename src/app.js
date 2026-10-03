@@ -170,10 +170,13 @@ async function launch(key, client, since = Date.now()) {
   try {
     // Together, not one after the other: both are on the path to the first status.
     const [link, who] = await Promise.all([linkP, whoIs(app.client, s.owner)]);
-    await ctl.task({ key, owner: s.owner, prompt: s.prompt, resumeFrom: s.resume_from, fresh: s.fresh, thread: `${s.channel}:${s.thread_ts}`, isNew: s.is_new, runtime: s.resume_from ? undefined : s.runtime, link, who });
+    // A request that waited at the cap reports the wait, for the dashboard's load card.
+    const queuedS = s.queued_note ? Math.round((Date.now() - since) / 1000) : undefined;
+    await ctl.task({ key, owner: s.owner, prompt: s.prompt, resumeFrom: s.resume_from, fresh: s.fresh, thread: `${s.channel}:${s.thread_ts}`, isNew: s.is_new, runtime: s.resume_from ? undefined : s.runtime, link, who, queuedS });
   } catch (e) {
     if (!/cap \d+ \(FXA_SESSION_MAX\)/.test(e.stderr ?? '')) { sessions.patch(key, { state: 'failed' }); await fail(client, s, e); return; }
     if (Date.now() - since > QUEUE_GIVE_UP_MS) {
+      console.error('queue_dropped', key, 'no session freed up in 30 minutes');   // counted on the dashboard
       sessions.patch(key, { state: 'stopped' });
       await say(s, 'I waited 30 minutes and no session freed up, so I dropped this request. Tag me again to retry.');
       return;
