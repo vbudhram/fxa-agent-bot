@@ -25,7 +25,8 @@ export const FIRST_ROW = 'Working on it';
 
 const row = (t, title, status, details) => ({ type: 'task_update', id: `t${t}`, title: String(title).slice(0, 250),
   ...(details ? { details: String(details).slice(0, 250) } : {}), status });
-export const rowTitle = (st) => (st.count ? `${st.label} · ${st.count}` : st.label);
+export const stepCount = (n) => `${n} step${n === 1 ? '' : 's'}`;
+export const rowTitle = (st) => (st.count ? `${st.label} · ${stepCount(st.count)}` : st.label);
 
 // stepRows(st, step): the checklist rows a sandbox turn shows, for steps that come one
 // at a time: a new row when the stage changes (the last one ticks), else a count.
@@ -44,4 +45,4 @@ export const lastRow = (st) => row(st.t, rowTitle(st), 'complete');
 const secs = (ms) => { const t = Math.round(ms / 1000); return t < 60 ? `${t}s` : `${Math.floor(t / 60)}m ${t % 60}s`; };
 // The summary line a sandbox turn ends with.
 export const doneLine = (word, n, tookMs, askedMs) =>
-  `${word} · ${n ? `${n} step${n === 1 ? '' : 's'} · ` : ''}${secs(tookMs)}${askedMs ? ` · reply ${secs(askedMs)} after your message` : ''}`;
+  `${word} · ${n ? `${stepCount(n)} · ` : ''}${secs(tookMs)}${askedMs ? ` · reply ${secs(askedMs)} after your message` : ''}`;

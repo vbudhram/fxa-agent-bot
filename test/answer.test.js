@@ -32,10 +32,10 @@ test('the session gets the findings and the reply so far', () => {
 test('steps become the rows a sandbox turn shows: a row per stage, a count within it', () => {
   let st = { t: 0, kind: null, label: FIRST_ROW, count: 0 };
   let r = stepRows(st, 'Searching for `changePassword`');
-  assert.deepEqual(r.chunks.map((c) => [c.id, c.title, c.status]), [['t0', 'Working on it', 'complete'], ['t1', 'Exploring the code · 1', 'in_progress']]);
+  assert.deepEqual(r.chunks.map((c) => [c.id, c.title, c.status]), [['t0', 'Working on it', 'complete'], ['t1', 'Exploring the code · 1 step', 'in_progress']]);
   r = stepRows(r.st, 'Reading `password.ts`');
-  assert.deepEqual(r.chunks.map((c) => [c.id, c.title, c.details]), [['t1', 'Exploring the code · 2', '`password.ts`']]);
-  assert.deepEqual(lastRow(r.st), { type: 'task_update', id: 't1', title: 'Exploring the code · 2', status: 'complete' });
+  assert.deepEqual(r.chunks.map((c) => [c.id, c.title, c.details]), [['t1', 'Exploring the code · 2 steps', '`password.ts`']]);
+  assert.deepEqual(lastRow(r.st), { type: 'task_update', id: 't1', title: 'Exploring the code · 2 steps', status: 'complete' });
 });
 
 test('the summary line matches a sandbox turn', () => {

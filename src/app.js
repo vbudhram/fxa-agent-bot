@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { statSync, readFileSync, readdirSync, lstatSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as ctl from './ctl.js';
-import { quickFirst, askId, answerBlocks, findingsOf, stepRows, lastRow, doneLine, ON_IT, FIRST_ROW } from './answer.js';
+import { quickFirst, askId, answerBlocks, findingsOf, stepRows, lastRow, doneLine, stepCount, ON_IT, FIRST_ROW } from './answer.js';
 import { installErrorLog } from './errors.js';
 import * as sessions from './sessions.js';
 import * as live from './live.js';
@@ -812,7 +812,7 @@ async function updateStreamNow(s, state, activity) {
   // Long turns: the running row shows the turn's time, so a quiet 15-minute
   // test run still visibly moves.
   const took = () => { const m = Math.floor((Date.now() - (s.busy_since ?? Date.now())) / 60_000); return m ? ` · ${m}m` : ''; };
-  const rowTitle = (running = false) => (count ? `${label} · ${count}` : label) + (running ? took() : '');
+  const rowTitle = (running = false) => (count ? `${label} · ${stepCount(count)}` : label) + (running ? took() : '');
   // Not while still starting: a stack prewarm keeps the state there after the boot.
   if (state !== 'starting' && activity?.boot?.done && !s.boot_shown && !kind) {
     const { details, boot_n } = bootDetails(s, activity.boot, true);
