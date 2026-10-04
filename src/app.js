@@ -109,6 +109,7 @@ const strip = (t) => (t ?? '').replace(/<@[A-Z0-9]+>/g, '').trim();
 
 // A mention starts at once, after a short window to cancel a mistaken tag.
 app.event('app_mention', async ({ event, body, client }) => {
+  if (fromBot(event)) return; // another app's post, as for thread replies
   if (!allowed(event.channel, event.user)) {
     if (CHANNELS.includes(event.channel)) await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts,
       text: "Sorry, you're not on the list of people who can start agent sessions here." }).catch(() => {});
@@ -135,7 +136,6 @@ app.event('app_mention', async ({ event, body, client }) => {
   }
   // Reserve the thread before any await: a second tag meanwhile would start a second session.
   if ([...pending.values()].some((p) => p.channel === event.channel && p.thread_ts === thread)) return;
-  seen(event.channel, event.ts);
   const key = sessions.newKey();
   // The last session here stopped (a pause, Stop, or the runner limit): continue
   // its conversation and changes instead of starting from scratch.
@@ -145,6 +145,13 @@ app.event('app_mention', async ({ event, body, client }) => {
   const prDone = ['MERGED', 'CLOSED'].includes(cur?.pr_seen?.state);
   const prOpen = cur?.state === 'pr_open' && !prDone;
   const resume_from = cur && !prDone && (['stopped', 'failed', 'paused'].includes(cur.state) || prOpen) ? cur.key : undefined;
+  // Someone else's tag must not take the session over: the message handler resumes it for the owner.
+  if (resume_from && event.user !== cur.owner) {
+    if (!STEER_ANYONE) await client.chat.postEphemeral({ channel: event.channel, thread_ts, user: event.user,
+      text: `This is <@${cur.owner}>'s session. Only they can continue it here.` }).catch(() => {});
+    return;
+  }
+  seen(event.channel, event.ts);
   if (resume_from) runtime = cur.runtime || 'claude'; // ctl resumes with the session's own agent
   const deadline = Date.now() + START_DELAY_S * 1000;
   // team: the workspace the person wrote from. In an org-wide install the bot's own team (auth.test) is not it.
@@ -280,7 +287,7 @@ async function quick(key, p, client) {
   pending.delete(key);
   const cur = sessions.get(p.channel, p.thread_ts);
   if (!cur || cur.state === 'answered') sessions.put({ key, state: 'answered', channel: p.channel, thread_ts: p.thread_ts,
-    owner: cur?.owner ?? p.owner, team: p.team, prompt: cur?.prompt ?? p.request ?? p.prompt, runtime: 'claude', started_at: cur?.started_at ?? Date.now() });
+    owner: cur?.owner ?? p.owner, team: p.team, prompt: cur?.prompt ?? p.request ?? p.prompt, runtime: 'claude', started_at: cur?.started_at ?? Date.now(), answered_at: Date.now() });
   for (const ts of p.acks ?? []) {
     await client.reactions.remove({ channel: p.channel, timestamp: ts, name: 'eyes' }).catch(() => {});
     await client.reactions.add({ channel: p.channel, timestamp: ts, name: 'white_check_mark' }).catch(() => {});
@@ -599,7 +606,7 @@ async function bang(s, text, m, client) {
     // In the thread, not just for the asker: whoever follows it may want to know.
     const cur = fresh(s.key), mins = cur.started_at ? Math.round((Date.now() - cur.started_at) / 60_000) : 0;
     await say(s, [`*${STATE_WORD[cur.state] ?? cur.state}* · ${mins} min · started by <@${cur.owner}>`,
-      cur.last_act ? `Now: ${cur.last_act}` : null,
+      cur.last_act ? `Now: ${defuse(String(cur.last_act)).slice(0, 200)}` : null,
       cur.pr_url ? `PR: ${cur.pr_url}` : null,
       cur.boot_s ? `Setup took ${cur.boot_s}s.` : null,
       cur.state === 'active' && !cur.status_ts ? 'Waiting for you. I pause after 10 minutes without a message; a reply picks it up again.' : null,
@@ -742,6 +749,9 @@ setInterval(() => { idleSweep(); }, 60_000);
 // forgets their threads, so its own file keeps no old thread text either. Every 6 hours.
 async function prune() {
   try { for (const key of await ctl.prune()) sessions.remove(key); } catch (e) { console.error('prune', e.stderr || e.message); }
+  // A quick answer that never became a session has no ctl record to prune: drop it here, as ctl does, by last use.
+  const cutoff = Date.now() - (Number(process.env.FXA_SESSION_RETAIN_DAYS) || 30) * 86400_000;
+  for (const s of sessions.all()) if (s.state === 'answered' && (s.answered_at ?? s.started_at ?? 0) < cutoff) sessions.remove(s.key);
 }
 setInterval(prune, 6 * 3600_000);
 setTimeout(prune, 60_000);
