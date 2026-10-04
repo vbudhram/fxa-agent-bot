@@ -375,15 +375,6 @@ export function planLines(plan) {
     + (i.level === 'ci' && i.why ? ` _(CI: ${esc(String(i.why).slice(0, 80))})_` : '')).join('\n');
 }
 
-// 7: where a resumed session left off: the start of its last reply, and its totals.
-export function resumeNote(history, summary) {
-  const last = [...(history ?? [])].reverse().find((h) => h.role === 'agent' && h.text);
-  const gist = last ? esc(String(last.text).split('\n').find((l) => l.trim()) ?? '').replace(/[*_`]/g, '').slice(0, 220) : '';
-  const sm = summaryLine(summary);
-  return ['Picking up where we left off. I am setting up a new sandbox; the status below shows where I am.',
-    gist ? `Last time: _${gist}_` : null, sm ? `_${sm}_` : null].filter(Boolean).join('\n');
-}
-
 // 6: new or reopened error signatures, as one DM for the operator.
 export function errorDigest(rows) {
   if (!rows?.length) return '';

@@ -121,16 +121,6 @@ test('a test plan renders as one short line per item', async () => {
   assert.equal(planLines(null), '');
 });
 
-test('a resumed session says where it left off', async () => {
-  const { resumeNote } = await import('../src/render.js');
-  const out = resumeNote([{ role: 'user', text: 'q' }, { role: 'agent', text: '\n**Fixed** the footer test.\nMore.' }],
-    { minutes: 12, turns: 3, cost: 1.5, tokens: 45000, diff: '' });
-  assert.match(out, /^Picking up where we left off\./);
-  assert.match(out, /Last time: _Fixed the footer test\._/);
-  assert.match(out, /_Session: 12 min · 3 turns_/);
-  assert.doesNotMatch(resumeNote([], null), /Last time/);
-});
-
 test('new errors make one short DM', async () => {
   const { errorDigest } = await import('../src/render.js');
   const out = errorDigest([{ sig: 'abc1234567', status: 'reopened', source: 'ctl', kind: 'crash', where: 'fxa-sandbox-ctl:10 f', message: 'exit 1: grep', keys: ['agent-aa11bb'] }]);

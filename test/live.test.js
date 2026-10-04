@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { start, reduce, todoRows, currentRow, changedRows, facts, summary, todoLine, closingLine, advanceRows, lineRows, MAX_ROWS } from '../src/live.js';
+import { start, reduce, todoRows, currentRow, changedRows, facts, summary, todoLine, closingLine, advanceRows, lineRows, lostContact, LOST_MS, GIVE_UP_MS, MAX_ROWS } from '../src/live.js';
 
 const feed = (evs) => evs.reduce(reduce, start());
 const todos = (...s) => ({ type: 'todos', items: s.map(([content, status, active]) => ({ content, status, active })) });
@@ -111,4 +111,17 @@ test('a closed stream goes on with the same stage rows, not raw commands', () =>
   assert.deepEqual(lineRows(start(), advanceRows({}, ['Running node x.js'])), ['› Exploring the code · 1 step']);
   const todos = reduce(start(), { type: 'todos', items: [{ content: 'a', status: 'completed' }, { content: 'b', status: 'in_progress' }, { content: 'c', status: 'pending' }] });
   assert.deepEqual(lineRows(todos, r), ['✓ a', '› b', '○ c']);
+});
+
+test('lost contact: one warning, a recovery, one give-up, and quiet for a short blip', () => {
+  let r = lostContact(null, false, 0);
+  assert.equal(r.show, null);
+  r = lostContact(r.st, false, LOST_MS - 1); assert.equal(r.show, null);
+  r = lostContact(r.st, false, LOST_MS); assert.equal(r.show, 'warn');
+  r = lostContact(r.st, false, LOST_MS + 5000); assert.equal(r.show, null);
+  assert.equal(lostContact(r.st, true, LOST_MS + 6000).show, 'recover');
+  r = lostContact(r.st, false, GIVE_UP_MS); assert.equal(r.show, 'give_up');
+  assert.equal(lostContact(r.st, false, GIVE_UP_MS + 60_000).show, null);
+  assert.equal(lostContact(r.st, true, GIVE_UP_MS + 70_000).show, null);
+  assert.equal(lostContact({ since: 0, warned: false }, true, 30_000).show, null);
 });

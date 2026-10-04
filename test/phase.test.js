@@ -46,3 +46,7 @@ test("a subagent's own steps stay in its row, and the wrap-up's subagents review
   assert.equal(phase('Delegating to fxa-explore: find X').detail, 'fxa-explore: find X');
   assert.equal(phase('Delegating: find X').detail, 'find X');
 });
+
+test('a script that edits a file is a change, not exploring', () => {
+  assert.equal(stage('Editing with a script: python3 - <<EOF p="a.tsx"')?.kind, 'edit');
+});

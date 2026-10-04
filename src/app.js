@@ -13,7 +13,7 @@ import { pollEvery } from './poll.js';
 import { defuse } from './render.js';
 import { forBotFromOthers, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
-import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, homeView, planLines, resumeNote, errorDigest, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT } from './render.js';
+import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, homeView, planLines, errorDigest, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT } from './render.js';
 
 const { App } = bolt;
 installErrorLog(ctl.errorsPush);
@@ -244,7 +244,9 @@ function quickStatus(p) {
       return run(async () => {
         if (!ts) return;
         if (kind === 'stream') await app.client.apiCall('chat.stopStream', { ...at(), chunks: [lastRow(st)] });
-        if (!n && word !== 'Done') { await app.client.chat.delete(at()).catch(() => {}); return; }
+        // On the way to a sandbox the quick look's status goes: the sandbox's status takes
+        // its place, one status per turn, and its findings go to the session.
+        if (word === HANDOFF || (!n && word !== 'Done')) { await app.client.chat.delete(at()).catch(() => {}); return; }
         const summary = doneLine(word, n, Date.now() - t0, word === 'Done' && asked ? Date.now() - asked : 0);
         await app.client.chat.update({ ...at(), text: summary, blocks: [{ type: 'context', elements: [{ type: 'mrkdwn', text: summary }] }] });
       });
@@ -255,6 +257,7 @@ function quickStatus(p) {
 // quick: the quick look, in place of a sandbox. It returns 'answered' (done, no
 // session), {findings} (the agent asked for a sandbox), or null (busy, down or
 // failed: a session starts, as before). The person sees one bot either way.
+const HANDOFF = 'Looked into it';
 async function quick(key, p, client) {
   if (p.card_ts) await client.chat.update({ channel: p.channel, ts: p.card_ts, text: ON_IT, blocks: [] }).catch(() => {});
   const status = quickStatus(p);
@@ -263,15 +266,15 @@ async function quick(key, p, client) {
   catch (e) {
     if (e.code === 3) console.log('quick answer busy; starting a session', key);
     else console.error('quick_answer', key, e.stderr || e.message);
-    await status.done('Looked into it');
+    await status.done(HANDOFF);
     return null;
   }
   if (!pending.has(key)) { await status.done('Stopped'); return 'answered'; }
-  if (res?.upgrade) { await status.done('Looked into it'); return { findings: findingsOf(res) }; }
-  if (!res?.answer || res.error) { await status.done('Looked into it'); console.error('quick_answer', key, 'no answer; starting a session'); return null; }
+  if (res?.upgrade) { await status.done(HANDOFF); return { findings: findingsOf(res) }; }
+  if (!res?.answer || res.error) { await status.done(HANDOFF); console.error('quick_answer', key, 'no answer; starting a session'); return null; }
   // Nothing left once the slips are out: the agent declined instead of asking for the work, so do the work.
   const answer = seamless(res.answer);
-  if (!answer) { await status.done('Looked into it'); return { findings: findingsOf(res) }; }
+  if (!answer) { await status.done(HANDOFF); return { findings: findingsOf(res) }; }
   const msg = res.question ? render(key, { type: 'question', ...res.question, text: answer }) : { text: defuse(answer).slice(0, 3000), blocks: answerBlocks({ ...res, answer }) };
   await status.answer(msg);
   pending.delete(key);
@@ -708,8 +711,7 @@ async function resumePaused(s, text, client, extra = {}) {
   text = takeAside(s.key) + text;
   const key = sessions.newKey();
   pending.set(key, { prompt: text, request: requestOf(s), owner: s.owner, team: s.team, channel: s.channel, thread_ts: s.thread_ts, resume_from: s.key, acks: ackList(fresh(s.key)), ...extra });
-  const [hist, sm] = await Promise.all([ctl.history(s.key), ctl.summary(s.key)]);
-  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: resumeNote(hist, sm) }).catch(() => {});
+  // No note before the status: its first row says it picks up where it left off.
   await begin(key, client);
 }
 
@@ -802,11 +804,13 @@ const fresh = (key) => sessions.all().find((x) => x.key === key);
 const requestOf = (s) => s?.request ?? (s?.prompt ?? '').split('\n\nEarlier messages')[0];
 
 const startStatus = (s, verb) => serial(s.key, () => startStatusNow(s, verb));
+// The setup row's words: a resumed session says so there, in place of a note before it.
+const readyWord = (s) => (s?.resume_from ? 'Picking up where we left off' : 'Getting ready');
 async function startStatusNow(s, verb) {
   const cur = fresh(s.key);
   if (!cur || cur.status_ts || cur.muted) return;
   steps.delete(s.key); unsent.delete(s.key); stepAt.delete(s.key); said.delete(s.key);
-  const first = verb === 'Setting up' ? 'Getting ready' : `${verb} on it`;
+  const first = verb === 'Setting up' ? readyWord(cur) : `${verb} on it`;
   liveTurn.set(s.key, newLive(first));
   if (streamOk) {
     try {
@@ -932,7 +936,7 @@ async function updateStreamNow(s, state, activity) {
     if (state === 'starting') {
       const b = activity.boot;
       const up = Math.round(b?.elapsed ?? (Date.now() - (s.busy_since ?? Date.now())) / 1000);
-      label = `Getting ready: ${news.at(-1)} · ${up}s of about ${b?.expect ?? SETUP_EXPECT_S}s`;
+      label = `${readyWord(s)}: ${news.at(-1)} · ${up}s of about ${b?.expect ?? SETUP_EXPECT_S}s`;
       const { details, boot_n } = bootDetails(s, b, false);
       await send([row(t, label, 'in_progress', details)]);
       return { last_act: label, cur_label: label, last_step: news.at(-1), boot_n };
@@ -1508,6 +1512,29 @@ app.command(process.env.SLASH_COMMAND || '/fxa-agent', async ({ ack, command, re
 // Matches the ctl's FXA_SESSION_MAX_RUN_SECONDS (4 h). The idle pause usually
 // ends a session long before this.
 const RUNNER_MIN = Number(process.env.SESSION_MAX_MINUTES || 240), WARN_AT_MIN = RUNNER_MIN - 15, PAUSE_AT_MIN = RUNNER_MIN - 5;
+// While a turn runs, polls that keep failing show in its status: a warning after a minute,
+// "Reconnected" when a poll works again, and after 10 minutes the turn ends as failed with
+// one message that says how to go on. Between turns nothing shows: no one is waiting.
+const lostState = new Map();
+async function showLost(key, ok) {
+  const s = fresh(key);
+  if (!s?.status_ts) { lostState.delete(key); return; }
+  const r = live.lostContact(lostState.get(key), ok, Date.now());
+  if (r.st) lostState.set(key, r.st); else lostState.delete(key);
+  if (!r.show) return;
+  if (r.show === 'give_up') {
+    console.error('lost', key, 'no contact with the sandbox for 10 minutes');
+    await updateStatus(key, 'failed', { busy: false }).catch(() => {});
+    await settle(fresh(key), false);
+    await say(s, 'I lost contact with the sandbox 10 minutes ago and could not reach it again. `!restart` starts fresh from this thread.').catch(() => {});
+    return;
+  }
+  const title = r.show === 'warn' ? ':warning: Lost contact with the sandbox, retrying…' : 'Reconnected to the sandbox';
+  const at = { channel: s.channel, ts: s.status_ts };
+  if (s.status_kind === 'stream') await app.client.apiCall('chat.appendStream', { ...at, chunks: [{ type: 'task_update', id: 'lost', title, status: r.show === 'warn' ? 'in_progress' : 'complete' }] }).catch(() => {});
+  else if (r.show === 'warn') await app.client.chat.update({ ...at, text: `${title}\n${s.status_text ?? ''}`.trim() }).catch(() => {});
+}
+
 async function mindLifetime(key, state) {
   const s = fresh(key);
   if (state !== 'active' || !s.started_at) return;
@@ -1594,11 +1621,18 @@ async function pollOne(key) {
   try {
     const { cursor, state, events, activity: act, boot } = await ctl.events(s.key, s.cursor);
     ctlMs = Date.now() - polledAt;
+    await showLost(key, true);
     const activity = { ...act, boot };
     if (events.length || act?.busy || state !== 'active') lastWork.set(key, Date.now());
     const endAt = events.findLastIndex((e) => e.type === 'turn_end' || e.type === 'question');
     // A turn that died ends with an error and no turn end: its pending ship must not fire on a later turn.
-    if (endAt < 0 && events.some((e) => e.type === 'error') && fresh(key)?.then_wrap) sessions.patch(key, { then_wrap: null });
+    if (endAt < 0 && events.some((e) => e.type === 'error') && fresh(key)?.then_wrap) {
+      const tw = fresh(key).then_wrap;
+      sessions.patch(key, { then_wrap: null });
+      // The person asked for this step; say it did not happen rather than drop it quietly.
+      const what = tw === 'pr_auto' ? 'update the PR' : /push/.test(tw) ? 'push the branch' : 'open the PR';
+      await say(s, `That turn failed, so I did not ${what}.${tw === 'pr_auto' ? '' : ' Tap the button again when you are ready.'}`).catch(() => {});
+    }
     // Each event posts on its own: ctl has already moved the cursor past this
     // batch, so a failed post is logged and skipped, never re-sent every 5 s.
     for (const [i, ev] of events.entries()) {
@@ -1639,6 +1673,7 @@ async function pollOne(key) {
     if (events.some((e) => e.type === 'turn_end' || e.type === 'question')) await deliverMedia(key);
   } catch (e) {
     console.error('events', key, e.stderr || e.message);
+    await showLost(key, false).catch((x) => console.error('lost', key, x.message));
   } finally {
     busy.delete(key);
     const took = Date.now() - polledAt;

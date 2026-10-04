@@ -114,6 +114,18 @@ export function lineRows(st, rows) {
   return [...(rows?.rows_done ?? []).map((r) => `✓ ${defuse(r)}`), ...(rows?.cur_count ? [`› ${defuse(rows.cur_label)} · ${steps(rows.cur_count)}`] : [])];
 }
 
+// Lost contact: the polls of a running turn keep failing. One warning after LOST_MS, a
+// recovery when a poll works again, and one give-up after GIVE_UP_MS. st: {since, warned,
+// gave_up} or null; returns the next st and what to show: 'warn', 'recover', 'give_up' or null.
+export const LOST_MS = 60_000, GIVE_UP_MS = 600_000;
+export function lostContact(st, ok, now) {
+  if (ok) return { st: null, show: st?.warned && !st.gave_up ? 'recover' : null };
+  const cur = st ?? { since: now, warned: false, gave_up: false };
+  if (!cur.gave_up && now - cur.since >= GIVE_UP_MS) return { st: { ...cur, warned: true, gave_up: true }, show: 'give_up' };
+  if (!cur.warned && now - cur.since >= LOST_MS) return { st: { ...cur, warned: true }, show: 'warn' };
+  return { st: cur, show: null };
+}
+
 // A short "how is it going" message. While a turn runs the bot answers it from
 // this state at once; queued for the agent it waited until the turn ended.
 // Every sentence must be a status ask: "what's happening with CI? rerun it" is a real message.
