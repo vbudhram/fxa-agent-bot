@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { start, reduce, todoRows, currentRow, changedRows, facts, summary, todoLine, closingLine, MAX_ROWS } from '../src/live.js';
+import { start, reduce, todoRows, currentRow, changedRows, facts, summary, todoLine, closingLine, advanceRows, lineRows, MAX_ROWS } from '../src/live.js';
 
 const feed = (evs) => evs.reduce(reduce, start());
 const todos = (...s) => ({ type: 'todos', items: s.map(([content, status, active]) => ({ content, status, active })) });
@@ -102,4 +102,13 @@ test('closing line: open todos, else several kinds of work, never the counts aga
   assert.equal(closingLine(start(), ['Exploring the code · 4 steps']), null);
   assert.equal(closingLine(start(), ['Exploring the code · 4 steps', 'Making changes · 2 steps', 'Exploring the code · 1 step']), '✓ Exploring the code  ·  ✓ Making changes');
   assert.equal(closingLine(undefined, []), null);
+});
+
+test('a closed stream goes on with the same stage rows, not raw commands', () => {
+  const left = { rows_done: ['Exploring the code · 5 steps'], cur_kind: 'verify', cur_label: 'Verifying', cur_count: 1 };
+  const r = advanceRows(left, ['Running npx jest pushbox', 'Running node x.js', 'Editing index.ts', '↳ Running git diff']);
+  assert.deepEqual(lineRows(start(), r), ['✓ Exploring the code · 5 steps', '✓ Verifying · 3 steps', '› Making changes · 2 steps']);
+  assert.deepEqual(lineRows(start(), advanceRows({}, ['Running node x.js'])), ['› Exploring the code · 1 step']);
+  const todos = reduce(start(), { type: 'todos', items: [{ content: 'a', status: 'completed' }, { content: 'b', status: 'in_progress' }, { content: 'c', status: 'pending' }] });
+  assert.deepEqual(lineRows(todos, r), ['✓ a', '› b', '○ c']);
 });

@@ -1,7 +1,7 @@
 // The live status of one turn, built from the watch's events: the agent's todo
 // list, the files it edited, its subagents, and test, lint and type-check
 // counts. Pure functions; app.js sends what they return. Nothing here is saved.
-import { defuse } from './render.js';
+import { defuse, stage } from './render.js';
 
 export const MAX_ROWS = 40; // Slack keeps 50 rows per message and drops the rest silently
 
@@ -89,6 +89,29 @@ export function closingLine(st, stages = []) {
   if (todos.length) return todos.some((t) => t.status !== 'completed') ? todoLine(st) : null;
   const kinds = [...new Set(stages.map((r) => String(r).replace(/ · \d+( steps?)?$/, '')))];
   return kinds.length > 1 ? kinds.map((k) => `✓ ${defuse(k)}`).join('  ·  ') : null;
+}
+
+// After Slack closes a turn's stream, the turn goes on as an edited line with the same rows
+// the stream showed, not raw commands. rows: {rows_done, cur_kind, cur_label, cur_count} as
+// the stream left them; each new step joins its stage row or opens the next one.
+const steps = (n) => `${n} step${n === 1 ? '' : 's'}`;
+export function advanceRows(rows, news) {
+  let { rows_done: done = [], cur_kind: kind = null, cur_label: label = null, cur_count: count = 0 } = rows ?? {};
+  done = [...(done ?? [])];
+  for (const step of news) {
+    const st = stage(step) ?? (kind ? { kind, label } : { kind: 'explore', label: 'Exploring the code' });
+    if (st.kind !== kind) {
+      if (count) done.push(`${label} · ${steps(count)}`);
+      kind = st.kind; label = st.label; count = 1;
+    } else count += 1;
+  }
+  return { rows_done: done, cur_kind: kind, cur_label: label, cur_count: count };
+}
+// The line's body: the todos when there are any, else the stage rows; the running one is marked ›.
+export function lineRows(st, rows) {
+  const todos = todoRows(st ?? start());
+  if (todos.length) { const cur = currentRow(todos); return todos.map((r) => `${r.status === 'complete' ? '✓' : r.id === cur ? '›' : '○'} ${r.title}`); }
+  return [...(rows?.rows_done ?? []).map((r) => `✓ ${defuse(r)}`), ...(rows?.cur_count ? [`› ${defuse(rows.cur_label)} · ${steps(rows.cur_count)}`] : [])];
 }
 
 // A short "how is it going" message. While a turn runs the bot answers it from

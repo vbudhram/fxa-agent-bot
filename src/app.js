@@ -981,7 +981,7 @@ function bootDetails(s, b, done) {
   return { details: lines.length ? (from ? '\n' : '') + lines.join('\n') : undefined, boot_n: Math.max(from, upto) };
 }
 const SETUP_EXPECT_S = 80; // measured boot to a running agent, 75-90 s
-const STATUS_CLEAR = { status_ts: null, status_kind: null, busy_since: null, last_act: null, last_detail: null, last_step: null, step_n: null, task_n: null, cur_kind: null, cur_count: null, cur_label: null, cur_lines: null, title_at: null, rows_done: null, interrupted: null };
+const STATUS_CLEAR = { status_ts: null, status_kind: null, busy_since: null, last_act: null, last_detail: null, last_step: null, step_n: null, task_n: null, cur_kind: null, cur_count: null, cur_label: null, cur_lines: null, title_at: null, rows_done: null, interrupted: null, stream_closed: null };
 // The finished turn's checklist, compact: every work row, ticked.
 // How a status line reads when it closes: a failure must not say Done.
 const endWord = (s, state) => {
@@ -1176,7 +1176,7 @@ const updateStatus = (key, state, activity) => serial(key, async function update
       // Slack closed the stream (it times out on a long turn): go on in the same message
       // by editing it, so the turn stays one message. Any other failure: start fresh next time.
       const why = e.data?.error ?? e.message;
-      if (why === 'message_not_in_streaming_state') { console.log('stream closed', key); sessions.patch(key, { status_kind: 'line', status_text: null }); }
+      if (why === 'message_not_in_streaming_state') { console.log('stream closed', key); sessions.patch(key, { status_kind: 'line', status_text: null, stream_closed: true }); }
       else { console.error('stream', key, why); sessions.patch(key, STATUS_CLEAR); }
     }
     return;
@@ -1191,14 +1191,18 @@ async function updateStatusNow(s, state, activity) {
     const doing = activity.text ?? s.last_act;
     const tick = (s.tick ?? 0) + 1;
     const log = steps.get(s.key) ?? [];
-    const text = log.length
-      ? `${spinner(tick)} ${VERB[state] ?? 'Working'} · ${secs(Date.now() - since)}\n` +
-        log.map((t, i) => `${i === log.length - 1 ? '›' : '✓'} ${t}`).join('\n')
-      : `${spinner(tick)} ${VERB[state] ?? 'Working'} · ${secs(Date.now() - since)}${doing ? ` · ${doing}` : ''}`;
+    // A stream Slack closed goes on with its stage rows (or todos), not the raw commands, and
+    // its clock counts minutes: the line is edited when a row or the minute changes, not each poll.
+    let rows = null;
+    const head = s.stream_closed ? `:hourglass_flowing_sand: ${VERB[state] ?? 'Working'} · ${Math.floor((Date.now() - since) / 60_000)}m`
+      : `${spinner(tick)} ${VERB[state] ?? 'Working'} · ${secs(Date.now() - since)}`;
+    if (s.stream_closed) { const news = unsent.get(s.key) ?? []; unsent.delete(s.key); rows = { ...live.advanceRows(s, news), step_n: (s.step_n ?? 0) + news.length }; }
+    const body = rows ? live.lineRows(liveTurn.get(s.key)?.st, rows) : log.map((t, i) => `${i === log.length - 1 ? '›' : '✓'} ${t}`);
+    const text = body.length ? `${head}\n${body.join('\n')}` : `${head}${doing ? ` · ${doing}` : ''}`;
     let status_ts = s.status_ts;
     if (!status_ts) status_ts = (await post(text)).ts;
     else if (text !== s.status_text) await edit(text);
-    return { busy_since: since, last_act: doing, status_ts, status_text: text, tick };
+    return { busy_since: since, last_act: doing, status_ts, status_text: text, tick, ...(rows ?? {}) };
   }
   steps.delete(s.key);
   if (s.status_ts) {
