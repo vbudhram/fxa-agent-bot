@@ -230,7 +230,8 @@ export function render(key, ev) {
       const [head, more] = ev.status === 'ready' ? splitReply(full) : [full, ''];
       const row = [...(more ? [['Show more', 'more']] : []),
         // No changed file: nothing to diff or ship. Push branch only before a PR; after it, Update PR pushes.
-        ...(ev.status === 'ready' && ev.changes !== 0 ? [['Diff', 'diff'], ...(ev.pr ? [['Update PR', 'open_pr']] : [['Open PR', 'open_pr'], ['Push branch', 'push_branch']])] : [])];
+        ...(ev.status === 'ready' && ev.changes !== 0 ? [['Diff', 'diff'], ...(ev.pr ? [['Update PR', 'open_pr']] : [['Open PR', 'open_pr'], ['Push branch', 'push_branch']]),
+          ...(ev.desktop ? [['Try it in Firefox', 'desktop']] : [])] : [])];
       return { text: plain(full), blocks: [md(head), ...(row.length ? [buttons(key, ...row)] : [])], ...(more ? { more } : {}) };
     }
     case 'pr': {

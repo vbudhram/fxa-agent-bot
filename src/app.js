@@ -351,7 +351,8 @@ const say = (s, text) => app.client.chat.postMessage({ channel: s.channel, threa
 async function sayWhile(s, now, work) {
   const r = await say(s, now).catch(() => null);
   const text = await work();
-  await (r?.ts ? app.client.chat.update({ channel: s.channel, ts: r.ts, text }) : Promise.reject()).catch(() => say(s, text));
+  // The ts of the message that ends up holding the result.
+  return (r?.ts ? app.client.chat.update({ channel: s.channel, ts: r.ts, text }).then(() => r.ts) : Promise.reject()).catch(() => say(s, text).then((x) => x.ts));
 }
 const ordinal = (n) => { const t = n % 100, u = n % 10; return `${n}${t >= 11 && t <= 13 ? 'th' : u === 1 ? 'st' : u === 2 ? 'nd' : u === 3 ? 'rd' : 'th'}`; };
 
@@ -638,6 +639,7 @@ async function bang(s, text, m, client) {
       stopWatch(s.key);
       await updateStatus(s.key, 'paused', { busy: false }).catch(() => {});
       sessions.patch(s.key, { state: 'paused' });
+      await desktopClosed(s.key, 'paused');
       return 'Paused. Everything is saved and the sandbox is freed. Reply here to pick it up again.';
     });
   } else if (cmd === 'interrupt') {
@@ -667,22 +669,7 @@ async function bang(s, text, m, client) {
     await note(`${summaryLine(sm) || 'No usage recorded yet.'}\nI pause this session when it reaches its usage limit.`);
   } else if (cmd === 'desktop') {
     if (ownerOnly()) return;
-    const what = 'Firefox against the running stack, and the repo read-only';
-    // With the IAP gateway the link works anywhere, for the owner's Google account only.
-    if (process.env.DESKTOP_GATEWAY) {
-      await note('Starting the desktop. This takes about a minute the first time.');
-      // A person whose Slack email is not the Google account they sign in with.
-      const email = DESKTOP_EMAILS.get(s.owner) ?? await client.users.info({ user: s.owner }).then((r) => r.user?.profile?.email, () => null);
-      if (!email) { await note('I could not read your email from Slack (the app needs the users:read.email scope), so I cannot open the desktop for you.'); return; }
-      const url = await ctl.desktop(s.key, email).catch((e) => { console.error('desktop', s.key, e.stderr || e.message); return null; });
-      // In the thread, not ephemeral: an ephemeral note is lost on reload and on a phone. The gateway admits only the owner.
-      await say(s, url ? `<${url}|Open the desktop> for this session: ${what}. Only <@${s.owner}> can open it.` : 'The desktop did not start. The error is in the bot log.')
-        .catch((e) => console.error('desktop post', s.key, e.data?.error ?? e.message));
-      return;
-    }
-    // The dashboard opens the tunnel, so the link works only where it runs.
-    const base = process.env.DASHBOARD_URL || 'http://localhost:8787';
-    await note(`<${base}/desktop/${s.key}|Open the desktop> for this session: ${what}. It works on the Mac that runs the dashboard. The first open takes about a minute.`);
+    await desktopFor(s, client, note);
   } else if (cmd === 'plan') {
     // In the thread: the plan is how the change will be checked, which all its readers care about.
     const p = await ctl.plan(s.key);
@@ -722,6 +709,46 @@ async function resumePaused(s, text, client, extra = {}) {
   await begin(key, client);
 }
 
+// The !desktop command and the Firefox button both start the desktop here.
+const desktopStarting = new Set();
+async function desktopFor(s, client, note) {
+  const cur = fresh(s.key);
+  if (ENDED.includes(cur.state)) { await note('The sandbox is paused. Reply here to pick it up, then `!desktop`.'); return; }
+  if (['queued', 'starting'].includes(cur.state)) { await note('The sandbox is still starting. Try `!desktop` again in a minute.'); return; }
+  const what = 'Firefox against the running stack, and the repo read-only';
+  if (!process.env.DESKTOP_GATEWAY) {
+    // The dashboard opens the tunnel, so the link works only where it runs.
+    const base = process.env.DASHBOARD_URL || 'http://localhost:8787';
+    await note(`<${base}/desktop/${s.key}|Open the desktop> for this session: ${what}. It works on the Mac that runs the dashboard. The first open takes about a minute.`);
+    return;
+  }
+  // Two setups at once collide on the runner's apt lock.
+  if (desktopStarting.has(s.key)) { await note('The desktop is already starting; the link comes here in a moment.'); return; }
+  // A person whose Slack email is not the Google account they sign in with.
+  const email = DESKTOP_EMAILS.get(s.owner) ?? await client.users.info({ user: s.owner }).then((r) => r.user?.profile?.email, () => null);
+  if (!email) { await note('I could not get your email from Slack, so I cannot open the desktop. Ask the bot admin to add you to DESKTOP_EMAILS.'); return; }
+  desktopStarting.add(s.key);
+  try {
+    let url = null;
+    // In the thread, not ephemeral: a phone often drops an ephemeral note. The gateway admits only the owner.
+    const ts = await sayWhile(s, 'Starting the desktop… about a minute the first time.', async () => {
+      url = await ctl.desktop(s.key, email).catch((e) => { console.error('desktop', s.key, e.stderr || e.message); return null; });
+      return url ? `<${url}|Open the desktop> for this session: ${what}. Only <@${s.owner}> can open it. It works until the session pauses. While the tab is open, the session stays awake, so close the tab when you are done.`
+        : 'The desktop did not start. Try `!desktop` again; if it fails twice, tell the bot admin.';
+    }).catch((e) => { console.error('desktop post', s.key, e.data?.error ?? e.message); return null; });
+    if (url && ts) sessions.patch(s.key, { desktop_ts: ts });
+    // The email only to the owner, not in the thread.
+    if (url) await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: s.owner, text: `Sign in with ${email}.` }).catch(() => {});
+  } finally { desktopStarting.delete(s.key); }
+}
+// The runner went, and the desktop link with it: say so on the link itself.
+async function desktopClosed(key, why) {
+  const s = fresh(key);
+  if (!s?.desktop_ts) return;
+  sessions.patch(key, { desktop_ts: null });
+  await app.client.chat.update({ channel: s.channel, ts: s.desktop_ts, text: `The desktop closed when the session ${why}. Reply here, then \`!desktop\` for a new link.` }).catch(() => {});
+}
+
 // Every minute the ctl pauses sessions idle for 10 minutes (FXA_SESSION_IDLE_SECONDS).
 let sweeping = false;
 async function idleSweep() {
@@ -740,6 +767,7 @@ async function sweepOnce() {
     stopWatch(key);
     await updateStatus(key, 'paused', { busy: false }).catch(() => {});
     sessions.patch(key, { state: 'paused' });
+    await desktopClosed(key, 'paused');
     if (!s.muted) await say(s, "I'll pause since it's been quiet. Everything's saved; reply here when you're ready.").catch(() => {});
   }
 }
@@ -1261,6 +1289,9 @@ const ownerAction = (id, fn) => app.action(id, async ({ ack, body, action, clien
 
 // 8: a one-line summary a phone can read, with the diff as a highlighted snippet.
 const working = (s, body, text) => app.client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: body.user.id, text }).catch(() => {});
+ownerAction('desktop', async (s, client, action, body) => {
+  await desktopFor(s, client, (t) => working(s, body, t));
+});
 ownerAction('diff', async (s, client, action, body) => {
   working(s, body, 'Getting the diff…');
   await postDiff(s, client);
@@ -1597,6 +1628,7 @@ async function pauseNow(key, why) {
   stopWatch(key);
   await updateStatus(key, 'paused', { busy: false }).catch(() => {});
   sessions.patch(key, { state: 'paused' });
+  await desktopClosed(key, 'paused');
   return true;
 }
 
@@ -1630,6 +1662,7 @@ async function stopSession(key) {
   stopWatch(key);
   await updateStatus(key, 'stopped', { busy: false }).catch(() => {});
   for (const m of [steps, unsent, lastEdit, chains]) m.delete(key);
+  await desktopClosed(key, 'stopped');
   if (!hadRunner) return true;
   const ok = await ctl.stop(key).then(() => true, (e) => { console.error('stop', key, e.stderr || e.message); return false; });
   sessions.patch(key, { stop_failed: !ok });
@@ -1676,7 +1709,7 @@ async function pollOne(key) {
     for (const [i, ev] of events.entries()) {
       // The PR outlives the session's state: the thread follows it from here.
       if (ev.type === 'pr' && ev.url) sessions.patch(key, { pr_url: ev.url, pr_follow_since: fresh(key)?.pr_follow_since ?? Date.now(), pr_pushed_at: Date.now() });
-      const msg = render(s.key, ev);
+      const msg = render(s.key, { ...ev, desktop: Boolean(process.env.DESKTOP_GATEWAY) });
       // A session resumed by Open PR or Push, or an automatic round, ships after the turn closes.
       const ship = () => {
         const tw = i === endAt && fresh(key)?.then_wrap;
