@@ -108,6 +108,7 @@ test('a ready turn offers Diff and PR only when files changed', () => {
   assert.deepEqual(ids(render('agent-x', { type: 'turn_end', status: 'ready', text: 'Done.', changes: 0 })), []);
   assert.deepEqual(ids(render('agent-x', { type: 'turn_end', status: 'ready', text: 'Done.', changes: 3 })), ['diff', 'open_pr', 'push_branch']);
   assert.deepEqual(ids(render('agent-x', { type: 'turn_end', status: 'ready', text: 'Done.', changes: 3, pr: 'u' })), ['diff', 'open_pr']);
+  assert.deepEqual(ids(render('agent-x', { type: 'turn_end', status: 'ready', text: 'Done.', changes: 3, desktop: true })), ['diff', 'open_pr', 'push_branch', 'desktop']);
   // Unknown count (the runner did not answer): keep the buttons.
   assert.deepEqual(ids(render('agent-x', { type: 'turn_end', status: 'ready', text: 'Done.' })), ['diff', 'open_pr', 'push_branch']);
 });

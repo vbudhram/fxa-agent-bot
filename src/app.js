@@ -1595,6 +1595,7 @@ async function showLost(key, ok) {
     console.error('lost', key, 'no contact with the sandbox for 10 minutes');
     await updateStatus(key, 'failed', { busy: false }).catch(() => {});
     await settle(fresh(key), false);
+    await desktopClosed(key, 'lost contact');
     await say(s, 'I lost contact with the sandbox 10 minutes ago and could not reach it again. `!restart` starts fresh from this thread.').catch(() => {});
     return;
   }
