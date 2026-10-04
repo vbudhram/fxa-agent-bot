@@ -13,7 +13,7 @@ import { pollEvery } from './poll.js';
 import { defuse } from './render.js';
 import { forBotFromOthers, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
-import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, homeView, planLines, errorDigest, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT } from './render.js';
+import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, prEndedNote, ciNote, prCard, homeView, planLines, errorDigest, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT } from './render.js';
 
 const { App } = bolt;
 installErrorLog(ctl.errorsPush);
@@ -185,7 +185,8 @@ async function begin(key, client) {
   // takes over following the PR from what the old one saw.
   const from = rest.resume_from && fresh(rest.resume_from);
   const pr = from?.pr_seen || from?.pr_url ? { pr_seen: from.pr_seen, pr_follow_since: from.pr_follow_since, pr_url: from.pr_url,
-    auto_rounds: from.auto_rounds, copilot_seen_at: from.copilot_seen_at, pr_pushed_at: from.pr_pushed_at, ci_seen: from.ci_seen, last_person_at: from.last_person_at, edited_at: from.edited_at } : {};
+    auto_rounds: from.auto_rounds, copilot_seen_at: from.copilot_seen_at, pr_pushed_at: from.pr_pushed_at, ci_seen: from.ci_seen, last_person_at: from.last_person_at, edited_at: from.edited_at,
+    pr_card_ts: from.pr_card_ts, pr_card_head: from.pr_card_head, pr_card_text: from.pr_card_text } : {};
   sessions.put({ key, ...rest, ...pr, cursor: 0, state: 'queued', started_at: Date.now() });
   pending.delete(key);
   if (card_ts) await client.chat.update({ channel: p.channel, ts: card_ts, text: ON_IT, blocks: [] }).catch(() => {});
@@ -1084,10 +1085,11 @@ const finishTurn = (key, msg, ev) => serial(key, async function finishTurn() {
 
 async function postMsg(key, msg) {
   const s = fresh(key);
-  if (s.muted) return;
+  if (s.muted) return null;
   const { ts } = await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...msg });
   const blocks = (msg.blocks ?? []).filter((b) => b.type !== 'actions' && b.block_id !== 'answer_hint');
   if (blocks.length !== (msg.blocks ?? []).length) await retireButtons(key, { ts, text: msg.text, blocks });
+  return ts;
 }
 
 // 2: only the newest message keeps its buttons; an older Diff or Open PR row
@@ -1354,11 +1356,8 @@ async function startWrap(s, client, what, user, msg) {
   return null;
 }
 async function openPr(s, client) {
-  // The note goes first; finish then returns at once and the poll posts the PR link.
-  // The session stays open after its PR, so a second Open PR updates that PR.
-  const text = fresh(s.key)?.pr_url ? 'Updating the PR: review, the safety checks, then a push to it. The session stays open.'
-    : 'Wrapping up: review, PR description, then a draft PR. I will post the link here, and the session stays open.';
-  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text });
+  // No note first: the tapped row already says what started, and the wrap-up's own status
+  // shows its steps. The poll posts the PR link. A second Open PR updates that PR.
   await ctl.finish(s.key);
 }
 async function pushBranch(s, client) {
@@ -1720,7 +1719,11 @@ async function pollOne(key) {
       if (!msg) { if (i === endAt) { clearTimeout(drafts.get(key)?.timer); drafts.delete(key); await settle(fresh(key)); ship(); } continue; }
       if (msg.operator) { const kind = msg.operator; delete msg.operator; if (!firstOperatorNote(key, kind)) continue; }
       if (msg.more !== undefined) { sessions.patch(key, { more_text: msg.more }); delete msg.more; }
-      await (i === endAt ? finishTurn(key, msg, ev) : postMsg(key, msg))
+      // The PR link's message becomes the PR's card: the follower edits its state into it.
+      if (ev.type === 'pr' && i !== endAt) {
+        const ts = await postMsg(key, msg).catch((e) => console.error('post', key, ev.type, e.data?.error ?? e.message));
+        if (ts) sessions.patch(key, { pr_card_ts: ts, pr_card_head: msg.text, pr_card_text: null });
+      } else await (i === endAt ? finishTurn(key, msg, ev) : postMsg(key, msg))
         .catch((e) => console.error('post', key, ev.type, e.data?.error ?? e.message));
       ship();
     }
@@ -1781,8 +1784,7 @@ async function followPrs() {
       // so stop it and free the sandbox, once no turn is running.
       if (s.pr_ended && s.state === 'active' && !s.status_ts && !busy.has(s.key) && sessions.get(s.channel, s.thread_ts)?.key === s.key) {
         const ok = await stopSession(s.key);
-        if (!s.muted) await say(s, ok ? `The PR ${s.pr_ended === 'MERGED' ? 'merged' : 'closed'}, so I stopped this session and freed its sandbox. Tag me here with what to do next, and I will start fresh from main with this thread as context.`
-          : STOPPED_TEXT(false)).catch(() => {});
+        if (!s.muted) await say(s, prEndedNote({ ...s.pr_seen, state: s.pr_ended }, ok)).catch(() => {});
         continue;
       }
       // Any session with a PR, while it is the thread's current one: a continued
@@ -1798,9 +1800,16 @@ async function followPrs() {
       if (!cur) continue;
       const ciPassAt = cur.ci !== 'pass' ? null : s.pr_seen?.ci === 'pass' ? s.ci_pass_at ?? Date.now() : Date.now();
       const nudge = reviewNudge(cur, ciPassAt, s.nudged_at, Date.now());
-      for (const item of [...prChanges(s.pr_seen, cur), ...(nudge ? [nudge] : [])]) {
+      // One message per event: an automatic round (autoRound) posts a CI failure with its
+      // checks, and the stop above posts the merge or close. These mirror their conditions.
+      const ciByRound = Boolean(s.pr_pushed_at && !s.pr_ended && cur.state === 'OPEN' && cur.links?.length);
+      const endByStop = s.state === 'active' && sessions.get(s.channel, s.thread_ts)?.key === s.key;
+      // A new message only where a person must act: a button (fix, rebase, mark ready) or the
+      // day-old review reminder. The rest (CI, approvals, merge) is edited into the PR's card.
+      for (const item of [...prChanges(s.pr_seen, cur, { ciByRound, endByStop }).filter((x) => typeof x !== 'string'), ...(nudge ? [nudge] : [])]) {
         if (!s.muted) await postPrNote(s, item).catch((e) => console.error('follow', s.key, e.data?.error ?? e.message));
       }
+      if (!s.muted) await updatePrCard(s, cur).catch((e) => console.error('pr card', s.key, e.data?.error ?? e.message));
       const prev = s.pr_seen;
       sessions.patch(s.key, { pr_seen: cur, pr_follow_since: since, ci_pass_at: ciPassAt, ...(nudge ? { nudged_at: ciPassAt } : {}),
         ...(['MERGED', 'CLOSED'].includes(cur.state) ? { pr_follow_done: true, pr_ended: cur.state } : {}) });
@@ -1810,6 +1819,20 @@ async function followPrs() {
 }
 const lastFollow = new Map();
 setInterval(followPrs, 30_000);
+// The PR's card: its link message with the state line under it, edited when the line
+// changes. A session with no card (older, or one continued from another) gets one, once.
+async function updatePrCard(s, cur) {
+  const line = prCard(cur);
+  if (!line || line === fresh(s.key)?.pr_card_text) return;
+  const head = s.pr_card_ts ? (s.pr_card_head ?? '') : '';
+  const text = head ? `${head}\n${line}` : line;
+  if (s.pr_card_ts) {
+    const ok = await app.client.chat.update({ channel: s.channel, ts: s.pr_card_ts, text }).then(() => true, () => false);
+    if (ok) { sessions.patch(s.key, { pr_card_text: line }); return; }
+  }
+  const { ts } = await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: line });
+  sessions.patch(s.key, { pr_card_ts: ts, pr_card_head: '', pr_card_text: line });
+}
 // A PR note: plain text, or text with the owner's buttons. Their value carries the reviewer for Fix these.
 function postPrNote(s, item) {
   if (typeof item === 'string') return app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: item });
@@ -1872,7 +1895,7 @@ async function autoRound(s, prev, cur) {
     if (comments.length) job = { note: (why) => copilotNote(comments, why), text: copilotRound(comments, randomBytes(6).toString('hex')) };
   } else if (ciKey && ciKey !== s.ci_seen) {
     seen = { ci_seen: ciKey };
-    job = { note: (why) => why ? `CI failed. ${why} Tap to have me fix it.` : 'CI failed. I am fixing it, then I update the PR.', text: ciRound(cur) };
+    job = { note: (why) => ciNote(cur, why), text: ciRound(cur) };
   }
   if (!job) { if (seen) sessions.patch(s.key, seen); return; }
   // Ask, and count nothing, when an automatic round could mix with work the owner has in hand.

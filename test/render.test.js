@@ -15,13 +15,13 @@ test('an operator error renders the plain message and its kind', () => {
   assert.match(msg.text, /gcloud auth login/);
 });
 
-test('the PR message carries its notes and the session summary', () => {
+test('the PR message carries its notes, not the session summary', () => {
   const msg = render('agent-x', { type: 'pr', url: 'https://github.com/mozilla/fxa/pull/1',
     notes: ['6 screenshot(s) did not upload, so the PR is missing them.'],
     summary: { minutes: 34, turns: 5, cost: 2.1, tokens: 2100000, diff: '3 files changed, 10 insertions(+)' } });
   assert.match(msg.text, /pull\/1/);
   assert.match(msg.text, /⚠️ 6 screenshot/);
-  assert.match(msg.text, /Session: 34 min · 5 turns · 3 files changed/);
+  assert.doesNotMatch(msg.text, /Session:/);
 });
 
 test('a summary with nothing known is empty', () => {
@@ -254,4 +254,31 @@ test('a person\'s review is fenced data for the agent', async () => {
 test('the top-level text of a reply cannot ping a channel', () => {
   const r = render('agent-ab12', { type: 'question', text: '<!channel> please look', options: ['A', 'B'] });
   assert.equal(r.text.includes('<!channel>'), false);
+});
+
+test('PR events: one message each, the follower skipping what a round or the stop posts', async () => {
+  const { prChanges, prEndedNote, ciNote } = await import('../src/render.js');
+  const url = 'https://github.com/mozilla/fxa/pull/1';
+  const fail = { url, state: 'OPEN', ci: 'fail', failing: ['unit', 'lint'], infra: [], reviews: [] };
+  assert.equal(prChanges({ ci: 'running', reviews: [] }, fail).length, 1);
+  assert.equal(prChanges({ ci: 'running', reviews: [] }, fail, { ciByRound: true }).length, 0);
+  assert.match(ciNote(fail, ''), /^CI failed \(unit, lint\); I am fixing it/);
+  assert.match(ciNote(fail, 'I already ran 3 automatic rounds on this PR.'), /Tap to have me fix it/);
+  const merged = { url, state: 'MERGED', ci: 'pass', reviews: [] };
+  assert.equal(prChanges({ state: 'OPEN', ci: 'pass', reviews: [] }, merged).length, 1);
+  assert.equal(prChanges({ state: 'OPEN', ci: 'pass', reviews: [] }, merged, { endByStop: true }).length, 0);
+  assert.match(prEndedNote(merged, true), /^The PR merged\. 🎉.* I stopped this session/);
+  assert.match(prEndedNote(merged, false), /tap Stop/);
+  assert.equal(prEndedNote({ state: 'CLOSED' }), 'The PR was closed without merging.');
+});
+
+test('the PR card: its state on one line', async () => {
+  const { prCard } = await import('../src/render.js');
+  const url = 'https://github.com/mozilla/fxa/pull/12';
+  assert.equal(prCard({ url, state: 'OPEN', draft: true, ci: 'running', reviews: [] }), `<${url}|PR #12> · draft · ⏳ CI running`);
+  assert.equal(prCard({ url, state: 'OPEN', ci: 'fail', failing: ['unit'], mergeable: 'CONFLICTING',
+    reviews: [{ login: 'ana', state: 'CHANGES_REQUESTED' }, { login: 'copilot-pull-request-reviewer[bot]', state: 'COMMENTED' }] }),
+    `<${url}|PR #12> · open · ❌ CI failed (unit) · ana asked for changes · merge conflicts with main`);
+  assert.equal(prCard({ url, state: 'MERGED', ci: 'pass', reviews: [] }), `<${url}|PR #12> · merged 🎉`);
+  assert.equal(prCard(null), '');
 });

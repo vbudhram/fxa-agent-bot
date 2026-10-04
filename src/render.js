@@ -112,12 +112,14 @@ Reply in at most 4 lines, and end with 'status: ready'.`;
 
 const READY = ['Mark ready for review', 'pr_ready'];
 // What changed on the PR: a string, or { text, buttons } when the owner can act on it.
-export function prChanges(prev, cur) {
+// ciByRound: an automatic round posts the CI failure itself (ciNote); endByStop: the
+// session's stop posts the merge or close (prEndedNote). Either way, one message, not two.
+export function prChanges(prev, cur, { ciByRound = false, endByStop = false } = {}) {
   if (!cur) return [];
   const out = [], was = prev ?? { ci: 'running', reviews: [] };
   const url = gh(cur.url), link = (label) => (url ? ` <${url}|${label}>` : '');
   const checks = url ? ` <${url}/checks|Checks>` : '';
-  if (cur.ci !== was.ci && cur.ci === 'fail') {
+  if (cur.ci !== was.ci && cur.ci === 'fail' && !ciByRound) {
     const infraOnly = cur.failing.length && cur.failing.every((n) => cur.infra.includes(n));
     out.push(`CI failed: ${esc(cur.failing.join(', '))}.${infraOnly ? ' That is a known failure in the repo\'s CI setup, not in the change.' : ''}${checks}`);
   } else if (cur.ci !== was.ci && cur.ci === 'pass') {
@@ -135,10 +137,40 @@ export function prChanges(prev, cur) {
     else if (r.state === 'CHANGES_REQUESTED') out.push({ text: `${who} asked for changes on the PR.${link('The review')} Tap to have me fix them.`, ...fix });
     else if (r.state === 'COMMENTED') out.push({ text: `${who} left review comments on the PR.${link('The review')} Tap to have me fix them.`, ...fix });
   }
-  const ticket = process.env.JIRA_URL && /^FXA-\d+$/.test(cur.jira ?? '') ? ` Ticket: <${process.env.JIRA_URL}/browse/${cur.jira}|${cur.jira}>.` : '';
-  if (cur.state === 'MERGED' && was.state !== 'MERGED') out.push(`The PR merged. 🎉${ticket}`);
-  if (cur.state === 'CLOSED' && was.state !== 'CLOSED') out.push('The PR was closed without merging.');
+  if (cur.state !== was.state && ['MERGED', 'CLOSED'].includes(cur.state) && !endByStop) out.push(prEndedNote(cur));
   return out;
+}
+const ticketOf = (cur) => process.env.JIRA_URL && /^FXA-\d+$/.test(cur?.jira ?? '') ? ` Ticket: <${process.env.JIRA_URL}/browse/${cur.jira}|${cur.jira}>.` : '';
+// The PR's state on one line, edited into its one message as CI, reviews and merging move:
+// "PR #12 · draft · ❌ CI failed (unit) · ana asked for changes · merge conflicts with main".
+const REVIEW_WORD = { APPROVED: 'approved', CHANGES_REQUESTED: 'asked for changes', COMMENTED: 'commented' };
+export function prCard(cur) {
+  if (!cur) return '';
+  const url = gh(cur.url), n = url.match(/\/pull\/(\d+)$/)?.[1];
+  const bits = [url && n ? `<${url}|PR #${n}>` : 'The PR'];
+  if (cur.state === 'MERGED') return [...bits, 'merged 🎉'].join(' · ');
+  if (cur.state === 'CLOSED') return [...bits, 'closed without merging'].join(' · ');
+  bits.push(cur.draft ? 'draft' : 'open');
+  bits.push(cur.ci === 'pass' ? '✅ CI passed' : cur.ci === 'fail' ? `❌ CI failed${(cur.failing ?? []).length ? ` (${esc(cur.failing.join(', '))})` : ''}` : '⏳ CI running');
+  for (const r of cur.reviews ?? []) if (!isCopilot(r.login)) bits.push(`${esc(r.login)} ${REVIEW_WORD[r.state] ?? String(r.state).toLowerCase()}`);
+  if (cur.mergeable === 'CONFLICTING') bits.push('merge conflicts with main');
+  return bits.join(' · ');
+}
+
+// The PR merged or closed. stopped: true or false when this also stopped the session (false:
+// the stop failed), undefined when no stop ran.
+export function prEndedNote(cur, stopped) {
+  const what = cur?.state === 'MERGED' ? `The PR merged. 🎉${ticketOf(cur)}` : 'The PR was closed without merging.';
+  if (stopped === undefined) return what;
+  return stopped ? `${what} I stopped this session and freed its sandbox. Tag me here with what to do next, and I will start fresh from main with this thread as context.`
+    : `${what} I could not stop this session's sandbox; tap Stop.`;
+}
+// An automatic CI round's note: which checks failed and what happens next. why: the reason
+// no round runs (then the owner taps to start one).
+export function ciNote(cur, why) {
+  const names = (cur?.failing ?? []).length ? ` (${esc(cur.failing.join(', '))})` : '';
+  const checks = gh(cur?.url) ? ` <${gh(cur.url)}/checks|Checks>` : '';
+  return why ? `CI failed${names}. ${why} Tap to have me fix it.${checks}` : `CI failed${names}; I am fixing it, then I update the PR.${checks}`;
 }
 
 // One reminder when CI passed a day ago and no person has reviewed the PR. ciPassAt: when the bot saw CI pass.
@@ -237,8 +269,8 @@ export function render(key, ev) {
     case 'pr': {
       const head = !gh(ev.url) ? 'The PR is up; its link did not look like a GitHub PR, so check the repo.'
         : ev.updated ? `Updated the PR: ${gh(ev.url)}` : `Draft PR is up: ${gh(ev.url)}. I am still here: reply to change it or to ask about the review.`;
-      const sm = summaryLine(ev.summary);
-      return { text: `${head}${noteLines(ev.notes)}${sm ? `\n_${sm}_` : ''}` };
+      // The session's totals are in the stop message and !usage, not here.
+      return { text: `${head}${noteLines(ev.notes)}` };
     }
     case 'pushed': return { text: `Pushed \`${esc(ev.branch).replace(/`/g, '')}\`.${gh(ev.url) ? ` <${gh(ev.url)}|Open a PR from it> when you are ready, or keep steering here.` : ' Keep steering here, or open a PR from it on GitHub.'}${noteLines(ev.notes)}` };
     case 'error': {
