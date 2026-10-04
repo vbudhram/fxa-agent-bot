@@ -1166,6 +1166,27 @@ function liveEdit(key) {
 
 // Writes the status fields itself, inside the serial section, so no caller can
 // overwrite a status line posted in between with stale fields.
+// Slack closes a stream after about 5 minutes. Open a new one at the bottom of the thread
+// and delete the closed one: still one live message for the turn, with its spinner. The
+// rows so far become one "Earlier" row; a todo list is sent again in full. False: no stream.
+async function restartStream(key) {
+  const s = fresh(key);
+  if (!s?.status_ts || !streamOk) return false;
+  const earlier = [...new Set([...(s.rows_done ?? []), ...(s.cur_count ? [`${s.cur_label} · ${stepCount(s.cur_count)}`] : [])])];
+  const L = liveTurn.get(key);
+  try {
+    const { ts } = await app.client.apiCall('chat.startStream', {
+      channel: s.channel, thread_ts: s.thread_ts, recipient_user_id: s.owner, recipient_team_id: s.team ?? teamId,
+      chunks: [...(earlier.length && !L?.st.todos?.length ? [{ type: 'task_update', id: 'e0', title: `Earlier: ${earlier.join(' · ')}`.slice(0, 250), status: 'complete' }] : []),
+        { type: 'task_update', id: 't0', title: 'Still working', status: 'in_progress' }],
+    });
+    await app.client.chat.delete({ channel: s.channel, ts: s.status_ts }).catch(() => {});
+    // The new stream starts its rows again; the counts and rows_done stay for the closing line.
+    if (L) { L.sent = {}; L.lines = {}; L.header = ''; L.headerAt = 0; L.title0 = 'Still working'; }
+    sessions.patch(key, { status_ts: ts, status_kind: 'stream', cur_kind: null, cur_count: 0, cur_lines: 0, task_n: 0, cur_label: 'Still working', last_act: 'Still working', title_at: Date.now() });
+    return true;
+  } catch (e) { console.error('stream restart', key, e.data?.error ?? e.message); return false; }
+}
 const updateStatus = (key, state, activity) => serial(key, async function updateStatus() {
   const s = fresh(key);
   // A turn the bot did not start itself (a queued message, the first plan): open its status now.
@@ -1180,7 +1201,11 @@ const updateStatus = (key, state, activity) => serial(key, async function update
       // Slack closed the stream (it times out on a long turn): go on in the same message
       // by editing it, so the turn stays one message. Any other failure: start fresh next time.
       const why = e.data?.error ?? e.message;
-      if (why === 'message_not_in_streaming_state') { console.log('stream closed', key); sessions.patch(key, { status_kind: 'line', status_text: null, stream_closed: true }); }
+      if (why === 'message_not_in_streaming_state') {
+        console.log('stream closed', key);
+        // A new live stream at the bottom, so the spinner and the rows go on; the edited line is the fallback.
+        if (!(await restartStream(key))) sessions.patch(key, { status_kind: 'line', status_text: null, stream_closed: true });
+      }
       else { console.error('stream', key, why); sessions.patch(key, STATUS_CLEAR); }
     }
     return;
