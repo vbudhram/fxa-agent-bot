@@ -1464,13 +1464,16 @@ function explain(e, key) {
   const m = err.match(/ERROR: ([^\n]+)(?:\n\s*-\s*([^\n]+))?/);
   const line = m && (m[1].endsWith(':') && m[2] ? `${m[1]} ${m[2]}` : m[1]);
   if (/takes no messages/.test(err)) return 'This session has ended. Tag me again to start a new one.';
+  if (/is (paused|stopped); reply in the thread to resume it/.test(err)) return 'This session is paused. Reply here to pick it up, then try that again.';
   if (/nothing to push: no files changed/.test(err)) return 'There is nothing to push or open a PR for: I have not changed any files in this session.';
   if (/no Claude session id/.test(err)) return "I'm still starting up. Send that again in a minute.";
   if (/ETIMEDOUT|timed out|SIGTERM/.test(err)) return 'The sandbox did not answer in time. Try again, or `!restart` to start fresh.';
   return `Something went wrong${line ? `: ${line}` : ''}. Try again, or \`!restart\` to start fresh.`;
 }
 async function fail(client, s, e) {
-  console.error(s.key, e.stderr || e.message);
+  // A paused or stopped session is a state the person can fix, not an error.
+  const ended = /is (paused|stopped); reply in the thread to resume it/.test(`${e.stderr ?? ''}${e.message ?? ''}`);
+  (ended ? console.log : console.error)(s.key, e.stderr || e.message);
   settle(s, false);
   const text = explain(e, s.key);
   if (text) await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text });
