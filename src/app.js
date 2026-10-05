@@ -270,7 +270,7 @@ async function quick(key, p, client) {
   if (p.card_ts) await client.chat.update({ channel: p.channel, ts: p.card_ts, text: ON_IT, blocks: [] }).catch(() => {});
   const status = quickStatus(p);
   let res;
-  try { res = await ctl.askStream({ id: askId(key), prompt: p.prompt, onStep: status.step }); }
+  try { res = await ctl.askStream({ id: askId(key), prompt: p.prompt, thread: `${p.channel}:${p.thread_ts}`, onStep: status.step }); }
   catch (e) {
     if (e.code === 3) console.log('quick answer busy; starting a session', key);
     else console.error('quick_answer', key, e.stderr || e.message);

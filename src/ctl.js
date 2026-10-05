@@ -44,13 +44,13 @@ export const task = ({ key, owner, prompt, resumeFrom, fresh, thread, isNew, run
 
 // A quick, read-only answer: {id, answer, upgrade, secs, cost_usd, turns, error}.
 // Rejects when the answer runner is busy (exit 3) or down; the caller starts a session then.
-export const ask = ({ id, prompt }) => withFile(prompt, async (f) =>
-  JSON.parse(await run(['answer', 'ask', '--id', id, '--prompt-file', f, ...(MCP ? ['--mcp', MCP.replace(/\s+/g, '')] : [])], { timeout: 6 * 60_000 })));
+export const ask = ({ id, prompt, thread }) => withFile(prompt, async (f) =>
+  JSON.parse(await run(['answer', 'ask', '--id', id, '--prompt-file', f, ...(thread ? ['--thread', thread] : []), ...(MCP ? ['--mcp', MCP.replace(/\s+/g, '')] : [])], { timeout: 6 * 60_000 })));
 
 // The same answer, streamed: onStep(text) for each tool the agent uses, as it
 // uses it; resolves with the answer, rejects with the exit code (3: busy).
-export const askStream = ({ id, prompt, onStep }) => withFile(prompt, (f) => new Promise((resolve, reject) => {
-  const c = spawn(CTL, ['--backend', 'gce', 'answer', 'ask', '--id', id, '--prompt-file', f, '--stream',
+export const askStream = ({ id, prompt, thread, onStep }) => withFile(prompt, (f) => new Promise((resolve, reject) => {
+  const c = spawn(CTL, ['--backend', 'gce', 'answer', 'ask', '--id', id, '--prompt-file', f, '--stream', ...(thread ? ['--thread', thread] : []),
     ...(MCP ? ['--mcp', MCP.replace(/\s+/g, '')] : [])], { stdio: ['ignore', 'pipe', 'pipe'] });
   let buf = '', err = '', answer = null;
   const timer = setTimeout(() => c.kill('SIGTERM'), 6 * 60_000);
