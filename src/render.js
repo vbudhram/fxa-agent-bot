@@ -342,12 +342,15 @@ conflict so that BOTH sides survive: keep main's change and yours, never one sid
 two cannot coexist, stop with 'git rebase --abort' and say why. If yarn.lock changed, run
 'yarn install'. Then run the verify again. Reply in a few lines: how far main moved, what
 conflicted and how you resolved it, and what you checked. '!pr' then updates the PR.`;
-export const COMMANDS = ['status', 'plan', 'interrupt', 'desktop', 'diff', 'pr', 'push', 'rebase', 'pause', 'stop', 'new', 'restart', 'usage', 'mute', 'unmute', 'help'];
+// The gateway's read-only page for a thread: one link for all the thread's sessions.
+export const watchUrl = (gateway, channel, threadTs) => `${gateway.replace(/\/+$/, '')}/w/${channel}:${threadTs}`;
+export const COMMANDS = ['status', 'plan', 'interrupt', 'watch', 'desktop', 'diff', 'pr', 'push', 'rebase', 'pause', 'stop', 'new', 'restart', 'usage', 'mute', 'unmute', 'help'];
 export const HELP = [
   '*While I work*',
   '`!status` what I am doing, the PR, and how long setup took',
   '`!plan` the test plan: how each change will be checked',
   '`!interrupt` stop the current step; the session stays',
+  '`!watch` a link to see what I am doing, read-only; it stays the same for this thread',
   '`!desktop` a Linux desktop with Firefox on this sandbox, just for you',
   '*When it is ready*',
   '`!diff` the changes so far',

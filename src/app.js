@@ -10,7 +10,7 @@ import { installErrorLog } from './errors.js';
 import * as sessions from './sessions.js';
 import * as live from './live.js';
 import { pollEvery } from './poll.js';
-import { defuse } from './render.js';
+import { defuse, watchUrl } from './render.js';
 import { forBotFromOthers, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, prEndedNote, ciNote, prCard, homeView, planLines, errorDigest, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT } from './render.js';
@@ -668,6 +668,9 @@ async function bang(s, text, m, client) {
   } else if (cmd === 'usage') {
     const sm = await ctl.cost(s.key);
     await note(`${summaryLine(sm) || 'No usage recorded yet.'}\nI pause this session when it reaches its usage limit.`);
+  } else if (cmd === 'watch') {
+    if (!process.env.DESKTOP_GATEWAY) { await note('Watching needs the gateway (DESKTOP_GATEWAY), and this bot has none.'); return; }
+    await note(`<${watchUrl(process.env.DESKTOP_GATEWAY, s.channel, s.thread_ts)}|Watch the agent> in this thread: my output, read-only, updated every 5 s. The link stays the same after a pause.`);
   } else if (cmd === 'desktop') {
     if (ownerOnly()) return;
     await desktopFor(s, client, note);

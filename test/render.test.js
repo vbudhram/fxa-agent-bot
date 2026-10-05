@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { render, operatorProblem, summaryLine, closestCommand, draftSplit, toSomeoneElse, asideBlock } from '../src/render.js';
+import { render, operatorProblem, summaryLine, closestCommand, watchUrl, draftSplit, toSomeoneElse, asideBlock } from '../src/render.js';
 
 test('operator problems are named, other errors are not', () => {
   assert.equal(operatorProblem('ERROR: (gcloud.compute.ssh) Reauthentication failed. cannot prompt').kind, 'gcloud');
@@ -281,4 +281,9 @@ test('the PR card: its state on one line', async () => {
     `<${url}|PR #12> · open · ❌ CI failed (unit) · ana asked for changes · merge conflicts with main`);
   assert.equal(prCard({ url, state: 'MERGED', ci: 'pass', reviews: [] }), `<${url}|PR #12> · merged 🎉`);
   assert.equal(prCard(null), '');
+});
+
+test('the watch link names the thread, whatever the gateway ends with', () => {
+  assert.equal(watchUrl('https://gw.example.com/', 'C0AB12CD3', '1791135361.015169'), 'https://gw.example.com/w/C0AB12CD3:1791135361.015169');
+  assert.equal(closestCommand('wach'), 'watch');
 });

@@ -33,6 +33,7 @@ Event types: `question` (with `options`), `turn_end` (with `status`: `needs-inpu
 - Anyone in `ALLOWED_USERS` (`*` for everyone) in an `ALLOWED_CHANNELS` channel can start a session and steer any session in that channel, as in Claude Tag. The agent is told when a message is not from the person who started the session.
 - `STEER` sets who steers a session. `mention` (the default): the person who started it, and anyone else allowed who tags the bot; an untagged reply from someone else is kept as context for the next turn. `anyone`: untagged replies steer too. `owner` also limits Interrupt, `!interrupt`, `!mute`, and 👎 to the person who started the session.
 - The Open PR, Push branch, Stop, Diff, desktop, Mark ready for review, Rebase onto main, and Fix these buttons, and `!pr`, `!push`, `!rebase`, `!diff`, `!pause`, `!stop`, `!new`, `!restart`, and `!desktop`, are always owner-only.
+- `!watch` is for anyone in the thread. It gives the gateway's read-only page for the thread, `/w/<channel>:<thread ts>`, which anyone that IAP lets in can open.
 
 ## Not in v0
 
