@@ -205,6 +205,13 @@ export function summaryLine(sm) {
   return parts.length ? `Session: ${parts.join(' · ')}` : '';
 }
 
+// The whole Slack thread, for !usage: sessions, turns, minutes of work. No dollars, as above.
+export function threadLine(tu) {
+  if (!tu || tu.sessions < 2) return '';
+  const m = tu.minutes, work = m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`;
+  return `This thread: ${tu.sessions} sessions · ${tu.turns} turn${tu.turns === 1 ? '' : 's'} · ${work} of work`;
+}
+
 export function render(key, ev) {
   switch (ev.type) {
     case 'question': {

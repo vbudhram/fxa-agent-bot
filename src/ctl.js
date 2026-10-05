@@ -90,6 +90,7 @@ export const cleanup = (dir) => rm(dir, { recursive: true, force: true });
 export const finish = (key, noPr = false) => run(['finish', '--session', key, ...(noPr ? ['--no-pr'] : [])], { timeout: 60_000 });
 export const stop = (key) => run(['stop', key]);
 export const cost = async (key) => { try { return JSON.parse((await run(['session', 'cost', key], { timeout: 60_000 })).trim() || 'null'); } catch { return null; } };
+export const threadUsage = async (key) => { try { return JSON.parse((await run(['session', 'thread-usage', key], { timeout: 30_000 })).trim() || 'null'); } catch { return null; } };
 export const pause = (key) => run(['session', 'pause', key], { timeout: 5 * 60_000 });
 export const plan = async (key) => { try { return JSON.parse((await run(['session', 'plan', key], { timeout: 60_000 })).trim() || 'null'); } catch { return null; } };
 export const history = async (key) => { try { return JSON.parse((await run(['session', 'history', key], { timeout: 30_000 })).trim() || '[]'); } catch { return []; } };

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { render, operatorProblem, summaryLine, closestCommand, watchUrl, draftSplit, toSomeoneElse, asideBlock } from '../src/render.js';
+import { render, operatorProblem, summaryLine, closestCommand, watchUrl, threadLine, draftSplit, toSomeoneElse, asideBlock } from '../src/render.js';
 
 test('operator problems are named, other errors are not', () => {
   assert.equal(operatorProblem('ERROR: (gcloud.compute.ssh) Reauthentication failed. cannot prompt').kind, 'gcloud');
@@ -286,4 +286,10 @@ test('the PR card: its state on one line', async () => {
 test('the watch link names the thread, whatever the gateway ends with', () => {
   assert.equal(watchUrl('https://gw.example.com/', 'C0AB12CD3', '1791135361.015169'), 'https://gw.example.com/w/C0AB12CD3:1791135361.015169');
   assert.equal(closestCommand('wach'), 'watch');
+});
+
+test('the thread line counts sessions, turns and work, without dollars', () => {
+  assert.equal(threadLine({ sessions: 4, turns: 9, minutes: 184 }), 'This thread: 4 sessions · 9 turns · 3 h 4 min of work');
+  assert.equal(threadLine({ sessions: 1, turns: 2, minutes: 5 }), '');
+  assert.equal(threadLine(null), '');
 });
