@@ -114,11 +114,15 @@ const READY = ['Mark ready for review', 'pr_ready'];
 // What changed on the PR: a string, or { text, buttons } when the owner can act on it.
 // ciByRound: an automatic round posts the CI failure itself (ciNote); endByStop: the
 // session's stop posts the merge or close (prEndedNote). Either way, one message, not two.
-export function prChanges(prev, cur, { ciByRound = false, endByStop = false } = {}) {
+export function prChanges(prev, cur, { ciByRound = false, endByStop = false, jiraOffer = false } = {}) {
   if (!cur) return [];
   const out = [], was = prev ?? { ci: 'running', reviews: [] };
   const url = gh(cur.url), link = (label) => (url ? ` <${url}|${label}>` : '');
   const checks = url ? ` <${url}/checks|Checks>` : '';
+  // A session PR with no ticket: offer one, once, when the bot first sees the PR (JIRA_OFFER=1).
+  if (jiraOffer && !prev && cur.state === 'OPEN' && !cur.jira) {
+    out.push({ text: `${link('The PR')} has no Jira ticket. Tap to create an FXA task from it, linked to the PR and this thread.`.trim(), buttons: [['Create Jira ticket', 'create_jira']] });
+  }
   if (cur.ci !== was.ci && cur.ci === 'fail' && !ciByRound) {
     const infraOnly = cur.failing.length && cur.failing.every((n) => cur.infra.includes(n));
     out.push(`CI failed: ${esc(cur.failing.join(', '))}.${infraOnly ? ' That is a known failure in the repo\'s CI setup, not in the change.' : ''}${checks}`);
@@ -438,6 +442,9 @@ export function draftSplit(buf) {
 }
 
 // A thread message for someone else: it tags a person and not the bot.
+// The session owner is the person who started the thread: its first message's author.
+// A thread a bot started, or one Slack did not return, falls back to whoever asked.
+export const threadStarter = (root, fallback) => (root?.user && !root.bot_id ? root.user : fallback);
 export function toSomeoneElse(raw, botId) {
   if (!botId) return false;
   const ids = [...String(raw ?? '').matchAll(/<@([A-Z0-9]+)(?:\|[^>]*)?>/g)].map((m) => m[1]);

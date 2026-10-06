@@ -31,6 +31,8 @@ Event types: `question` (with `options`), `turn_end` (with `status`: `needs-inpu
 ## Who can do what
 
 - Anyone in `ALLOWED_USERS` (`*` for everyone) in an `ALLOWED_CHANNELS` channel can start a session and steer any session in that channel, as in Claude Tag. The agent is told when a message is not from the person who started the session.
+- A session's owner is the person who started the thread, even when someone else's tag started the session. Only the owner can use the session's buttons (Open PR, Push branch); anyone else who taps one is told so privately. A message sent while the session wraps up is kept as context, not lost.
+- `JIRA_OFFER=1` offers to create an FXA task when a session's PR names no ticket. `WORK_OBJECTS=1` turns Jira and watch links into Work Object cards (needs Work Object Previews on in the Slack app). Both are off by default.
 - `STEER` sets who steers a session. `mention` (the default): the person who started it, and anyone else allowed who tags the bot; an untagged reply from someone else is kept as context for the next turn. `anyone`: untagged replies steer too. `owner` also limits Interrupt, `!interrupt`, `!mute`, and 👎 to the person who started the session.
 - The Open PR, Push branch, Stop, Diff, desktop, Mark ready for review, Rebase onto main, and Fix these buttons, and `!pr`, `!push`, `!rebase`, `!diff`, `!pause`, `!stop`, `!new`, `!restart`, and `!desktop`, are always owner-only.
 - `!watch` is for anyone in the thread. It gives the gateway's read-only page for the thread, `/w/<channel>:<thread ts>`, which anyone that IAP lets in can open.

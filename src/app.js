@@ -10,7 +10,8 @@ import { installErrorLog } from './errors.js';
 import * as sessions from './sessions.js';
 import * as live from './live.js';
 import { pollEvery, reachable } from './poll.js';
-import { defuse, watchUrl, threadLine } from './render.js';
+import * as unfurl from './unfurl.js';
+import { defuse, watchUrl, threadLine, threadStarter } from './render.js';
 import { forBotFromOthers, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, prEndedNote, ciNote, prCard, homeView, planLines, errorDigest, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT } from './render.js';
@@ -156,7 +157,7 @@ app.event('app_mention', async ({ event, body, client }) => {
   if (resume_from) runtime = cur.runtime || 'claude'; // ctl resumes with the session's own agent
   const deadline = Date.now() + START_DELAY_S * 1000;
   // team: the workspace the person wrote from. In an org-wide install the bot's own team (auth.test) is not it.
-  pending.set(key, { prompt, request: resume_from ? requestOf(cur) : prompt, owner: event.user, team: event.team ?? body?.team_id ?? cur?.team, channel: event.channel, thread_ts, resume_from, runtime, deadline });
+  pending.set(key, { prompt, request: resume_from ? requestOf(cur) : prompt, owner: await ownerOf(client, event.channel, event.thread_ts, event.user), team: event.team ?? body?.team_id ?? cur?.team, channel: event.channel, thread_ts, resume_from, runtime, deadline });
   // The card goes up first; reading a long thread for context can take seconds.
   // A failed post must release the thread, or it stays reserved until a restart.
   // With no delay there is nothing to cancel: 👀 is the acknowledgement, and the status follows.
@@ -194,12 +195,24 @@ async function begin(key, client) {
   await launch(key, client);
 }
 
+// ownerOf: who owns a session in this thread, the thread's starter (see threadStarter).
+// One Slack read per thread, kept in memory.
+const STARTERS = new Map();
+async function ownerOf(client, channel, thread_ts, asker) {
+  if (!thread_ts) return asker;
+  const id = `${channel}:${thread_ts}`;
+  if (!STARTERS.has(id)) {
+    const root = await client.conversations.replies({ channel, ts: thread_ts, limit: 1 }).then((r) => r.messages?.[0], () => null);
+    if (root) STARTERS.set(id, threadStarter(root, null));
+  }
+  return STARTERS.get(id) || asker;
+}
 // followUp: a reply in a quick-answer thread, taken as a tag: a quick look first,
 // a sandbox when it asks for work or the agent asks for one.
 async function followUp(s, message, text, client, route = text) {
   if ([...pending.values()].some((p) => p.channel === s.channel && p.thread_ts === s.thread_ts)) return;
   const key = sessions.newKey();
-  pending.set(key, { prompt: text, request: text, route, owner: message.user, team: message.team ?? s.team, channel: s.channel,
+  pending.set(key, { prompt: text, request: text, route, owner: await ownerOf(client, s.channel, s.thread_ts, message.user), team: message.team ?? s.team, channel: s.channel,
     thread_ts: s.thread_ts, runtime: 'claude', deadline: Date.now(), acks: message.ts ? [message.ts] : [] }); // a tap has no message to mark
   const ctx = await threadContext(client, { channel: s.channel, thread_ts: s.thread_ts, ts: message.ts, user: message.user }, { withBot: true });
   pending.set(key, { ...pending.get(key), prompt: text + ctx });
@@ -503,6 +516,13 @@ app.message(async ({ message, client }) => {
     sessions.patch(s.key, { prompt: `${cur.prompt}\n\nA later message in the thread, from ${who}:\n${text}`, late_acks: [...(cur.late_acks ?? []), message.ts] });
     await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: message.user,
       text: cur.queue_ts ? "Got it. I'm still waiting for capacity; I'll include that when I start." : "Got it. I'll include that." }).catch(() => {});
+    return;
+  }
+  // A wrap-up takes no messages (the host refuses them): keep it as context, and say so.
+  if (s.state === 'wrapping' && steers) {
+    keepAside(s, message);
+    await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: message.user,
+      text: "I'm wrapping up and opening the PR, so I can't act on this now. I kept it as context. Reply here once the PR is open, and I'll pick it up." }).catch(() => {});
     return;
   }
   if (message.user !== s.owner && !(STEER_ANYONE && allowed(message.channel, message.user))) {
@@ -1289,7 +1309,13 @@ const ownerAction = (id, fn) => app.action(id, async ({ ack, body, action, clien
   await ack();
   // A value can carry more after the key: "<key>|<login>".
   const s = sessions.all().find((x) => x.key === action.value.split('|')[0]);
-  if (!s || body.user.id !== s.owner || !allowed(s.channel, body.user.id)) return;
+  if (!s) return;
+  if (body.user.id !== s.owner || !allowed(s.channel, body.user.id)) {
+    // Say why nothing happened: a silent tap looked broken.
+    if (allowed(s.channel, body.user.id)) await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: body.user.id,
+      text: `Only <@${s.owner}> can use these buttons: it is their session. Ask them, or tag me with what you need.` }).catch(() => {});
+    return;
+  }
   await fn(s, client, action, body).catch((e) => fail(client, s, e));
 });
 
@@ -1553,6 +1579,35 @@ async function statusList(client, channel) {
   }));
   return `${live.length} session${live.length === 1 ? '' : 's'}:\n${lines.join('\n')}`;
 }
+// Work Object cards (WORK_OBJECTS=1, with the app's Work Object Previews on): a watch
+// link or an FXA Jira link posted in an allowed channel unfurls as a card.
+const WORK_OBJECTS = process.env.WORK_OBJECTS === '1';
+const LINK_HOSTS = { gateway: process.env.DESKTOP_GATEWAY, jira: process.env.JIRA_URL || 'https://mozilla-hub.atlassian.net' };
+async function cardPayload(link) {
+  if (link.kind === 'watch') return unfurl.watchPayload(link, sessions.get(link.channel, link.ts));
+  const card = await ctl.jiraCard(link.key);
+  return card ? unfurl.jiraPayload(card) : null; // hidden or unreadable: no card
+}
+app.event('link_shared', async ({ event, client }) => {
+  if (!WORK_OBJECTS || (CHANNELS.length && !CHANNELS.includes(event.channel))) return;
+  const links = unfurl.parseLinks((event.links ?? []).map((l) => l.url), LINK_HOSTS);
+  const entities = [];
+  for (const link of links) { const p = await cardPayload(link); if (p) entities.push(unfurl.entity(link, p)); }
+  if (!entities.length) return;
+  const where = event.unfurl_id ? { unfurl_id: event.unfurl_id, source: event.source } : { channel: event.channel, ts: event.message_ts };
+  await client.apiCall('chat.unfurl', { ...where, metadata: JSON.stringify({ entities }) })
+    .catch((e) => console.error('unfurl', e.data?.error ?? e.message));
+});
+app.event('entity_details_requested', async ({ event, client }) => {
+  if (!WORK_OBJECTS) return;
+  const [link] = unfurl.parseLinks([event.app_unfurl_url ?? event.entity_url], LINK_HOSTS);
+  const payload = link && await cardPayload(link);
+  const body = payload ? { metadata: JSON.stringify({ entity_type: unfurl.TASK, entity_payload: payload }) }
+    : { error: JSON.stringify({ status: 'custom_partial_view', custom_title: 'Not available', custom_message: 'This item cannot be shown here.' }) };
+  await client.apiCall('entity.presentDetails', { trigger_id: event.trigger_id, ...body })
+    .catch((e) => console.error('entity details', e.data?.error ?? e.message));
+});
+
 // 8: the App Home tab lists the viewer's own sessions each time they open it.
 app.event('app_home_opened', async ({ event, client }) => {
   if (event.tab !== 'home') return;
@@ -1812,7 +1867,7 @@ async function followPrs() {
       const endByStop = s.state === 'active' && sessions.get(s.channel, s.thread_ts)?.key === s.key;
       // A new message only where a person must act: a button (fix, rebase, mark ready) or the
       // day-old review reminder. The rest (CI, approvals, merge) is edited into the PR's card.
-      for (const item of [...prChanges(s.pr_seen, cur, { ciByRound, endByStop }).filter((x) => typeof x !== 'string'), ...(nudge ? [nudge] : [])]) {
+      for (const item of [...prChanges(s.pr_seen, cur, { ciByRound, endByStop, jiraOffer: process.env.JIRA_OFFER === '1' }).filter((x) => typeof x !== 'string'), ...(nudge ? [nudge] : [])]) {
         if (!s.muted) await postPrNote(s, item).catch((e) => console.error('follow', s.key, e.data?.error ?? e.message));
       }
       if (!s.muted) await updatePrCard(s, cur).catch((e) => console.error('pr card', s.key, e.data?.error ?? e.message));
@@ -1850,6 +1905,14 @@ function postPrNote(s, item) {
 // A tapped PR button: the row becomes who tapped it and what started.
 const tapped = (client, s, body, what) => client.chat.update({ channel: s.channel, ts: body.message.ts, text: body.message.text,
   blocks: [...(body.message.blocks ?? []).filter((b) => b.type !== 'actions'), { type: 'context', elements: [{ type: 'mrkdwn', text: `${what} · <@${body.user.id}>` }] }] }).catch(() => {});
+ownerAction('create_jira', async (s, client, action, body) => {
+  await tapped(client, s, body, 'Creating a Jira ticket');
+  const key = await ctl.createJira(s.key);
+  sessions.patch(s.key, { jira: key });
+  const url = process.env.JIRA_URL ? `${process.env.JIRA_URL}/browse/${key}` : '';
+  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts,
+    text: `Created ${url ? `<${url}|${key}>` : key} from the PR, and added it to the PR body.` });
+});
 ownerAction('pr_ready', async (s, client, action, body) => {
   await tapped(client, s, body, 'Marking the PR ready');
   const ok = await ctl.prReady(s.key).then(() => true, (e) => { console.error('pr-ready', s.key, e.stderr || e.message); return false; });

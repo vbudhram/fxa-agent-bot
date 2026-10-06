@@ -90,6 +90,7 @@ export const cleanup = (dir) => rm(dir, { recursive: true, force: true });
 export const finish = (key, noPr = false) => run(['finish', '--session', key, ...(noPr ? ['--no-pr'] : [])], { timeout: 60_000 });
 export const stop = (key) => run(['stop', key]);
 export const cost = async (key) => { try { return JSON.parse((await run(['session', 'cost', key], { timeout: 60_000 })).trim() || 'null'); } catch { return null; } };
+export const jiraCard = async (key) => { try { return JSON.parse((await run(['jira-card', key], { timeout: 30_000 })).trim() || 'null'); } catch { return null; } };
 export const threadUsage = async (key) => { try { return JSON.parse((await run(['session', 'thread-usage', key], { timeout: 30_000 })).trim() || 'null'); } catch { return null; } };
 export const pause = (key) => run(['session', 'pause', key], { timeout: 5 * 60_000 });
 export const plan = async (key) => { try { return JSON.parse((await run(['session', 'plan', key], { timeout: 60_000 })).trim() || 'null'); } catch { return null; } };
@@ -99,6 +100,7 @@ export const attach = (key, paths) => run(['session', 'attach', key, ...paths], 
 export const errorsPush = () => run(['errors', 'push', '--now'], { timeout: 120_000 });
 export const copilotComments = async (key) => { try { return JSON.parse((await run(['session', 'copilot-comments', key], { timeout: 60_000 })).trim() || '[]'); } catch { return []; } };
 export const reviewComments = async (key, login) => { try { return JSON.parse((await run(['session', 'review-comments', key, login], { timeout: 60_000 })).trim() || '[]'); } catch { return []; } };
+export const createJira = async (key) => (await run(['session', 'create-jira', key], { timeout: 60_000 })).trim();
 export const prReady = (key) => run(['session', 'pr-ready', key], { timeout: 60_000 });
 // The STE lint the handoff check runs, on a reply's text: its problem lines, [] on any failure.
 const STE = join(dirname(CTL), 'skills/fxa-vm-handoff/ste.sh');

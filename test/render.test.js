@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { render, operatorProblem, summaryLine, closestCommand, watchUrl, threadLine, draftSplit, toSomeoneElse, asideBlock } from '../src/render.js';
+import { threadStarter, render, operatorProblem, summaryLine, closestCommand, watchUrl, threadLine, draftSplit, toSomeoneElse, asideBlock } from '../src/render.js';
 
 test('operator problems are named, other errors are not', () => {
   assert.equal(operatorProblem('ERROR: (gcloud.compute.ssh) Reauthentication failed. cannot prompt').kind, 'gcloud');
@@ -32,7 +32,7 @@ test('a summary with nothing known is empty', () => {
 test('PR follow-up posts only what changed', async () => {
   const { prChanges } = await import('../src/render.js');
   const url = 'https://github.com/mozilla/fxa/pull/1';
-  const running = { url, state: 'OPEN', ci: 'running', failing: [], infra: [], reviews: [] };
+  const running = { url, state: 'OPEN', ci: 'running', failing: [], infra: [], reviews: [], jira: 'FXA-1' };
   assert.deepEqual(prChanges(null, running), []);
   const infraRed = { ...running, ci: 'fail', failing: ['extract'], infra: ['extract'] };
   const [line] = prChanges(running, infraRed);
@@ -292,4 +292,22 @@ test('the thread line counts sessions, turns and work, without dollars', () => {
   assert.equal(threadLine({ sessions: 4, turns: 9, minutes: 184 }), 'This thread: 4 sessions · 9 turns · 3 h 4 min of work');
   assert.equal(threadLine({ sessions: 1, turns: 2, minutes: 5 }), '');
   assert.equal(threadLine(null), '');
+});
+
+test('a session PR with no ticket gets one offer, when the bot first sees it', async () => {
+  const { prChanges } = await import('../src/render.js');
+  const cur = { url: 'https://github.com/mozilla/fxa/pull/2', state: 'OPEN', ci: 'running', failing: [], infra: [], reviews: [], jira: null };
+  assert.deepEqual(prChanges(null, cur), []); // off unless JIRA_OFFER=1
+  const [offer] = prChanges(null, cur, { jiraOffer: true });
+  assert.match(offer.text, /has no Jira ticket/);
+  assert.deepEqual(offer.buttons, [['Create Jira ticket', 'create_jira']]);
+  assert.deepEqual(prChanges(cur, cur), []);
+  assert.deepEqual(prChanges(null, { ...cur, jira: 'FXA-9' }, { jiraOffer: true }), []);
+  assert.deepEqual(prChanges(null, { ...cur, state: 'MERGED' }, { jiraOffer: true }).filter((x) => x.buttons), []);
+});
+
+test('the session owner is the person who started the thread', () => {
+  assert.equal(threadStarter({ user: 'U_WIL', text: 'hey bot' }, 'U_BARRY'), 'U_WIL');
+  assert.equal(threadStarter({ user: 'U_BOT', bot_id: 'B1' }, 'U_BARRY'), 'U_BARRY');
+  assert.equal(threadStarter(null, 'U_BARRY'), 'U_BARRY');
 });
