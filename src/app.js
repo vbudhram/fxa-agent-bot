@@ -11,7 +11,7 @@ import * as sessions from './sessions.js';
 import * as live from './live.js';
 import { pollEvery, reachable } from './poll.js';
 import * as unfurl from './unfurl.js';
-import { defuse, watchUrl, threadLine, threadStarter } from './render.js';
+import { defuse, watchUrl, threadLine, threadStarter, endWord, prCardMessage } from './render.js';
 import { forBotFromOthers, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, prEndedNote, ciNote, prCard, homeView, planLines, errorDigest, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT } from './render.js';
@@ -1048,15 +1048,9 @@ function bootDetails(s, b, done) {
   return { details: lines.length ? (from ? '\n' : '') + lines.join('\n') : undefined, boot_n: Math.max(from, upto) };
 }
 const SETUP_EXPECT_S = 80; // measured boot to a running agent, 75-90 s
-const STATUS_CLEAR = { status_ts: null, status_kind: null, busy_since: null, last_act: null, last_detail: null, last_step: null, step_n: null, task_n: null, cur_kind: null, cur_count: null, cur_label: null, cur_lines: null, title_at: null, rows_done: null, interrupted: null, stream_closed: null };
+const STATUS_CLEAR = { status_ts: null, status_kind: null, busy_since: null, last_act: null, last_detail: null, last_step: null, step_n: null, task_n: null, cur_kind: null, cur_count: null, cur_label: null, cur_lines: null, title_at: null, rows_done: null, interrupted: null, stream_closed: null, wrap_done: null };
 // The finished turn's checklist, compact: every work row, ticked.
-// How a status line reads when it closes: a failure must not say Done.
-const endWord = (s, state) => {
-  if (state === 'failed') return s.step_n ? 'Failed' : 'Setup failed';
-  if (state === 'stopped') return 'Stopped';
-  if (state === 'paused') return 'Paused';
-  return s.interrupted ? 'Interrupted' : 'Done';
-};
+
 const turnSummary = (s, word) => {
   const n = s.step_n ?? 0, took = secs(Date.now() - (s.busy_since ?? Date.now()));
   // The Slack time of the first message this turn answers.
@@ -1091,7 +1085,9 @@ const finishTurn = (key, msg, ev) => serial(key, async function finishTurn() {
       const lt = liveTurn.get(key);
       const steps = live.closingLine(lt?.st, [...(s.rows_done ?? []), ...(s.cur_count ? [s.cur_label] : [])]);
       liveTurn.delete(key);
-      const kept = [{ type: 'context', elements: [{ type: 'mrkdwn', text: summary }, ...(steps ? [{ type: 'mrkdwn', text: steps.slice(0, 2900) }] : [])] }, ...body];
+      // One element, the checklist on its own line: two elements sit side by side, and Slack's
+      // plain text (notifications, copy) ran them together ("…your message✓ Exploring the code").
+      const kept = [{ type: 'context', elements: [{ type: 'mrkdwn', text: steps ? `${summary}\n${steps.slice(0, 2900)}` : summary }] }, ...body];
       // The answer's own order: with several questions, each row of buttons sits
       // under its question, not all together at the end.
       const ordered = (msg.blocks ?? []).length ? [kept[0], ...msg.blocks] : [...kept, ...actions];
@@ -1768,6 +1764,8 @@ async function pollOne(key) {
     for (const [i, ev] of events.entries()) {
       // The PR outlives the session's state: the thread follows it from here.
       if (ev.type === 'pr' && ev.url) sessions.patch(key, { pr_url: ev.url, pr_follow_since: fresh(key)?.pr_follow_since ?? Date.now(), pr_pushed_at: Date.now() });
+      // The wrap-up's status line closes later in this poll; it says what the wrap-up did.
+      if ((ev.type === 'pr' || ev.type === 'pushed') && fresh(key)?.status_ts) sessions.patch(key, { wrap_done: ev.type });
       const msg = render(s.key, { ...ev, desktop: Boolean(process.env.DESKTOP_GATEWAY) });
       // A session resumed by Open PR or Push, or an automatic round, ships after the turn closes.
       const ship = () => {
@@ -1886,12 +1884,12 @@ async function updatePrCard(s, cur) {
   const line = prCard(cur);
   if (!line || line === fresh(s.key)?.pr_card_text) return;
   const head = s.pr_card_ts ? (s.pr_card_head ?? '') : '';
-  const text = head ? `${head}\n${line}` : line;
+  const msg = prCardMessage(head, line);
   if (s.pr_card_ts) {
-    const ok = await app.client.chat.update({ channel: s.channel, ts: s.pr_card_ts, text }).then(() => true, () => false);
+    const ok = await app.client.chat.update({ channel: s.channel, ts: s.pr_card_ts, ...msg }).then(() => true, () => false);
     if (ok) { sessions.patch(s.key, { pr_card_text: line }); return; }
   }
-  const { ts } = await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: line });
+  const { ts } = await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...prCardMessage('', line) });
   sessions.patch(s.key, { pr_card_ts: ts, pr_card_head: '', pr_card_text: line });
 }
 // A PR note: plain text, or text with the owner's buttons. Their value carries the reviewer for Fix these.

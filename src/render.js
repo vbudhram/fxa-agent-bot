@@ -161,6 +161,13 @@ export function prCard(cur) {
   return bits.join(' · ');
 }
 
+// The PR card's message: the PR state as a small grey line, as the turn's status line is, under
+// the message it was added to (the "PR is up" note). text stays plain, for notifications.
+export const prCardMessage = (head, line) => ({
+  text: head ? `${head}\n${line}` : line,
+  blocks: [...(head ? [{ type: 'section', text: { type: 'mrkdwn', text: head } }] : []), { type: 'context', elements: [{ type: 'mrkdwn', text: line }] }],
+});
+
 // The PR merged or closed. stopped: true or false when this also stopped the session (false:
 // the stop failed), undefined when no stop ran.
 export function prEndedNote(cur, stopped) {
@@ -442,6 +449,17 @@ export function draftSplit(buf) {
 }
 
 // A thread message for someone else: it tags a person and not the bot.
+// How a status line reads when it closes: a failure must not say Done. A wrap-up has no
+// Slack reply (its output is the PR), so it says what it did. wrap_done: the pr or pushed
+// event that ended it; the state is already active again by then.
+export const endWord = (s, state) => {
+  if (state === 'failed') return s.step_n ? 'Failed' : 'Setup failed';
+  if (state === 'stopped') return 'Stopped';
+  if (state === 'paused') return 'Paused';
+  if (s.interrupted) return 'Interrupted';
+  if (s.wrap_done === 'pr') return 'Wrapped up for the PR (review, title and body)';
+  return s.wrap_done === 'pushed' ? 'Wrapped up for the push' : 'Done';
+};
 // The session owner is the person who started the thread: its first message's author.
 // A thread a bot started, or one Slack did not return, falls back to whoever asked.
 export const threadStarter = (root, fallback) => (root?.user && !root.bot_id ? root.user : fallback);

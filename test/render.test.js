@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { threadStarter, render, operatorProblem, summaryLine, closestCommand, watchUrl, threadLine, draftSplit, toSomeoneElse, asideBlock } from '../src/render.js';
+import { threadStarter, endWord, prCardMessage, render, operatorProblem, summaryLine, closestCommand, watchUrl, threadLine, draftSplit, toSomeoneElse, asideBlock } from '../src/render.js';
 
 test('operator problems are named, other errors are not', () => {
   assert.equal(operatorProblem('ERROR: (gcloud.compute.ssh) Reauthentication failed. cannot prompt').kind, 'gcloud');
@@ -310,4 +310,22 @@ test('the session owner is the person who started the thread', () => {
   assert.equal(threadStarter({ user: 'U_WIL', text: 'hey bot' }, 'U_BARRY'), 'U_WIL');
   assert.equal(threadStarter({ user: 'U_BOT', bot_id: 'B1' }, 'U_BARRY'), 'U_BARRY');
   assert.equal(threadStarter(null, 'U_BARRY'), 'U_BARRY');
+});
+
+test('a closed status line says what ended it; a wrap-up says it wrapped up for the PR', () => {
+  assert.equal(endWord({ step_n: 3 }, 'failed'), 'Failed');
+  assert.equal(endWord({}, 'failed'), 'Setup failed');
+  assert.equal(endWord({ interrupted: true }, 'active'), 'Interrupted');
+  assert.equal(endWord({}, 'active'), 'Done');
+  // The poll that brings the PR also sees the state back at active.
+  assert.equal(endWord({ wrap_done: 'pr' }, 'active'), 'Wrapped up for the PR (review, title and body)');
+  assert.equal(endWord({ wrap_done: 'pushed' }, 'active'), 'Wrapped up for the push');
+  assert.equal(endWord({ wrap_done: 'pr' }, 'stopped'), 'Stopped');
+});
+
+test('the PR card is a small grey line under its note, with plain text for notifications', () => {
+  const m = prCardMessage('Draft PR is up: <https://x/pull/1>.', 'PR #1 · draft · ⏳ CI running');
+  assert.equal(m.text, 'Draft PR is up: <https://x/pull/1>.\nPR #1 · draft · ⏳ CI running');
+  assert.deepEqual(m.blocks.map((b) => b.type), ['section', 'context']);
+  assert.deepEqual(prCardMessage('', 'PR #1 · open').blocks.map((b) => b.type), ['context']);
 });
