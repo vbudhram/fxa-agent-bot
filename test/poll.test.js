@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pollEvery, IDLE_MS } from '../src/poll.js';
+import { pollEvery, IDLE_MS, reachable } from '../src/poll.js';
 
 test('a session waiting for its person polls slowly; one with work polls every 5 s', () => {
   const now = 1_000_000;
@@ -10,4 +10,10 @@ test('a session waiting for its person polls slowly; one with work polls every 5
   assert.equal(pollEvery({ state: 'wrapping' }, now, 0), 5_000);
   assert.equal(pollEvery({ state: 'active' }, now, now - 30_000), 5_000); // work 30 s ago: a queued turn may start
   assert.equal(pollEvery({ state: 'active' }, now, now - IDLE_MS), IDLE_MS);
+});
+
+test('the loops leave alone a session in a channel no longer allowed', () => {
+  assert.equal(reachable({ channel: 'C0C4RBW02Q1' }, ['CLV3KMZ8B', 'CD02L9Z1Q']), false);
+  assert.equal(reachable({ channel: 'CLV3KMZ8B' }, ['CLV3KMZ8B', 'CD02L9Z1Q']), true);
+  assert.equal(reachable({ channel: 'C1' }, []), true);
 });

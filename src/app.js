@@ -9,7 +9,7 @@ import { quickFirst, askId, answerBlocks, findingsOf, stepRows, lastRow, doneLin
 import { installErrorLog } from './errors.js';
 import * as sessions from './sessions.js';
 import * as live from './live.js';
-import { pollEvery } from './poll.js';
+import { pollEvery, reachable } from './poll.js';
 import { defuse, watchUrl, threadLine } from './render.js';
 import { forBotFromOthers, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
@@ -72,6 +72,7 @@ const busy = new Set();    // sessions with a poll in flight
 // The dev bot is that app too: its own posts carry its bot user, a person's carry the person.
 const fromBot = (m) => Boolean(m?.bot_id) && !(process.env.DRIVER_APP_ID && m.app_id === process.env.DRIVER_APP_ID && botUserId && m.user && m.user !== botUserId);
 const allowed = (channel, user) => CHANNELS.includes(channel) && (USERS.includes('*') || USERS.includes(user));
+const here = (s) => reachable(s, CHANNELS);
 
 // A pause to switch runtime or cancel. With Codex off there is nothing to switch, so start at once.
 const START_DELAY_S = process.env.CODEX_ENABLED === '1' ? 10 : 0;
@@ -1767,6 +1768,7 @@ const lastPoll = new Map();
 setInterval(() => {
   const now = Date.now();
   for (const s of sessions.all()) {
+    if (!here(s)) continue;
     const fast = s.state === 'starting' && s.status_kind !== 'line';
     if (!fast && now - (lastPoll.get(s.key) ?? 0) < pollEvery(s, now, lastWork.get(s.key) ?? 0)) continue;
     lastPoll.set(s.key, now);
@@ -1783,6 +1785,7 @@ async function followPrs() {
   following = true;
   try {
     for (const s of sessions.all()) {
+      if (!here(s)) continue;
       // The PR merged or closed while its session still runs: the work is done,
       // so stop it and free the sandbox, once no turn is running.
       if (s.pr_ended && s.state === 'active' && !s.status_ts && !busy.has(s.key) && sessions.get(s.channel, s.thread_ts)?.key === s.key) {

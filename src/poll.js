@@ -8,3 +8,7 @@ export function pollEvery(s, now, lastWorkAt) {
   const working = s.state !== 'active' || Boolean(s.status_ts) || now - lastWorkAt < IDLE_MS;
   return working ? 5_000 : IDLE_MS;
 }
+
+// A session in a channel no longer allowed (another workspace, after a token change): the bot
+// cannot post there, so its loops leave it alone. Adding the channel back resumes it.
+export const reachable = (s, channels) => !channels.length || channels.includes(s.channel);
