@@ -3,3 +3,4 @@ node_modules/
 *.log
 # Any .env copy, such as .env.retired from the move to the manager VM: they hold tokens.
 .env.*
+.DS_Store
