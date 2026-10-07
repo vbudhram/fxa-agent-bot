@@ -30,7 +30,7 @@ test('a summary with nothing known is empty', () => {
 });
 
 test('PR follow-up posts only what changed', async () => {
-  const { prChanges } = await import('../src/render.js');
+  const { prChanges, settleMergeable } = await import('../src/render.js');
   const url = 'https://github.com/mozilla/fxa/pull/1';
   const running = { url, state: 'OPEN', ci: 'running', failing: [], infra: [], reviews: [], jira: 'FXA-1' };
   assert.deepEqual(prChanges(null, running), []);
@@ -50,6 +50,15 @@ test('PR follow-up posts only what changed', async () => {
   const [conflict] = prChanges(open, { ...open, mergeable: 'CONFLICTING' });
   assert.deepEqual(conflict.buttons, [['Rebase onto main', 'rebase_pr']]);
   assert.deepEqual(prChanges({ ...open, mergeable: 'CONFLICTING' }, { ...open, mergeable: 'CONFLICTING' }), []);
+  // Each push to main makes GitHub say UNKNOWN while it recomputes: one conflict note, not one per push.
+  let seen = settleMergeable(undefined, { ...open, mergeable: 'CONFLICTING' });
+  for (const m of ['UNKNOWN', 'CONFLICTING', null, 'CONFLICTING']) {
+    const next = settleMergeable(seen, { ...open, mergeable: m });
+    assert.deepEqual(prChanges(seen, next), []);
+    seen = next;
+  }
+  seen = settleMergeable(seen, { ...open, mergeable: 'MERGEABLE' });
+  assert.equal(prChanges(seen, settleMergeable(seen, { ...open, mergeable: 'CONFLICTING' })).length, 1);
   const [ask] = prChanges(open, { ...open, reviews: [{ login: 'rev2', state: 'CHANGES_REQUESTED' }] });
   assert.equal(ask.login, 'rev2');
   assert.deepEqual(ask.buttons, [['Fix these', 'fix_review']]);

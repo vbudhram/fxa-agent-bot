@@ -14,7 +14,7 @@ import * as unfurl from './unfurl.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, prCardMessage } from './render.js';
 import { forBotFromOthers, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
-import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, prEndedNote, ciNote, prCard, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT } from './render.js';
+import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, prCard, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT } from './render.js';
 
 const { App } = bolt;
 installErrorLog(ctl.errorsPush);
@@ -1858,7 +1858,7 @@ async function followPrs() {
       const every = Date.now() - (s.pr_pushed_at ?? 0) < 20 * 60_000 ? 30_000 : 120_000;
       if (Date.now() - (lastFollow.get(s.key) ?? 0) < every) continue;
       lastFollow.set(s.key, Date.now());
-      const cur = await ctl.prStatus(s.key);
+      const cur = settleMergeable(s.pr_seen, await ctl.prStatus(s.key));
       if (!cur) continue;
       const ciPassAt = cur.ci !== 'pass' ? null : s.pr_seen?.ci === 'pass' ? s.ci_pass_at ?? Date.now() : Date.now();
       const nudge = reviewNudge(cur, ciPassAt, s.nudged_at, Date.now());

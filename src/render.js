@@ -110,6 +110,8 @@ Find the cause. If the change caused it, fix it, verify the fix, and write /work
 If it is flaky or not caused by the change, change nothing, write [] to that file, and say so in one line.
 Reply in at most 4 lines, and end with 'status: ready'.`;
 
+// GitHub says UNKNOWN while it recomputes mergeability, after each push to main: keep the last known value.
+export const settleMergeable = (prev, cur) => !cur || ['MERGEABLE', 'CONFLICTING'].includes(cur.mergeable) || !prev?.mergeable ? cur : { ...cur, mergeable: prev.mergeable };
 const READY = ['Mark ready for review', 'pr_ready'];
 // What changed on the PR: a string, or { text, buttons } when the owner can act on it.
 // ciByRound: an automatic round posts the CI failure itself (ciNote); endByStop: the
