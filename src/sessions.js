@@ -22,6 +22,9 @@ export function put(s) {
   // A write for a session that has left the map (its thread now holds another
   // key) would otherwise land under "undefined:undefined".
   if (!s?.key || !s.channel || !s.thread_ts) return s;
+  // The runner gets the thread's earlier media back (ctl boot): a new session must not post it again.
+  const prev = sessions[threadId(s.channel, s.thread_ts)];
+  if (prev?.media_sent && prev.key !== s.key && !s.media_sent) s = { ...s, media_sent: prev.media_sent };
   sessions[threadId(s.channel, s.thread_ts)] = s;
   save();
   return s;

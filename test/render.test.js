@@ -256,6 +256,19 @@ test('retention forgets the thread whose current session the controller deleted'
   assert.deepEqual(sessions.all().map((s) => s.key), ['agent-new1']);
 });
 
+test('a new session in a thread keeps the list of media already posted there', async () => {
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  process.env.FXA_AGENT_STATE = `${mkdtempSync(`${tmpdir()}/bot-`)}/s.json`;
+  const sessions = await import(`../src/sessions.js?media=${Date.now()}`);
+  sessions.put({ key: 'agent-a', channel: 'C1', thread_ts: '1.1', media_sent: ['shot.png:10'] });
+  sessions.put({ key: 'agent-q', channel: 'C1', thread_ts: '1.1', state: 'answered' }); // a quick answer between
+  sessions.put({ key: 'agent-b', channel: 'C1', thread_ts: '1.1' });
+  assert.deepEqual(sessions.get('C1', '1.1').media_sent, ['shot.png:10']);
+  sessions.put({ key: 'agent-c', channel: 'C1', thread_ts: '2.2' });
+  assert.equal(sessions.get('C1', '2.2').media_sent, undefined);
+});
+
 test('one review reminder a day after CI passed with no person reviewing', async () => {
   const { reviewNudge, NUDGE_MS } = await import('../src/render.js');
   const cur = { url: 'https://github.com/mozilla/fxa/pull/1', state: 'OPEN', ci: 'pass', reviews: [{ login: 'Copilot', state: 'COMMENTED' }] };

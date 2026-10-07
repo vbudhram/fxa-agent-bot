@@ -189,8 +189,7 @@ async function begin(key, client) {
   const pr = from?.pr_seen || from?.pr_url ? { pr_seen: from.pr_seen, pr_follow_since: from.pr_follow_since, pr_url: from.pr_url,
     auto_rounds: from.auto_rounds, copilot_seen_at: from.copilot_seen_at, pr_pushed_at: from.pr_pushed_at, ci_seen: from.ci_seen, last_person_at: from.last_person_at, edited_at: from.edited_at,
     pr_card_ts: from.pr_card_ts, pr_card_head: from.pr_card_head, pr_card_text: from.pr_card_text } : {};
-  // The runner gets the earlier session's media back (ctl resume): do not post it again.
-  sessions.put({ key, ...rest, ...pr, ...(from?.media_sent ? { media_sent: from.media_sent } : {}), cursor: 0, state: 'queued', started_at: Date.now() });
+  sessions.put({ key, ...rest, ...pr, cursor: 0, state: 'queued', started_at: Date.now() });
   pending.delete(key);
   if (card_ts) await client.chat.update({ channel: p.channel, ts: card_ts, text: ON_IT, blocks: [] }).catch(() => {});
   await launch(key, client);
