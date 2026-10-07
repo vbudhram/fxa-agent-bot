@@ -190,6 +190,21 @@ test('someone other than the owner steers only when they tag the bot', async () 
   assert.equal(forBotFromOthers({ user: 'UOTHER', text: 'booo' }, s, null, 'mention'), true); // bot id not known yet: do not drop messages
 });
 
+test('the owner must tag the bot once others are in the thread, or after a person stopped the session', async () => {
+  const { forBotFromOthers, othersIn } = await import('../src/render.js');
+  const s = { owner: 'UOWNER' };
+  assert.equal(forBotFromOthers({ user: 'UOWNER', text: 'was chatting with dan' }, s, 'UBOT', 'mention', true), false);
+  assert.equal(forBotFromOthers({ user: 'UOWNER', text: '<@UBOT> open the PR' }, s, 'UBOT', 'mention', true), true);
+  assert.equal(forBotFromOthers({ user: 'UOWNER', text: 'go on' }, { ...s, hand_stopped: true }, 'UBOT', 'mention'), false);
+  assert.equal(forBotFromOthers({ user: 'UOWNER', text: '<@UBOT> go on' }, { ...s, hand_stopped: true }, 'UBOT', 'mention'), true);
+  assert.equal(forBotFromOthers({ user: 'UOWNER', text: 'go on' }, s, 'UBOT', 'anyone', true), true); // STEER=anyone keeps the old way
+  const owner = { user: 'UOWNER', text: '<@UBOT> fix it' }, bot = { user: 'UBOT', bot_id: 'B1', text: 'Done' };
+  assert.equal(othersIn([owner, bot, { user: 'UOWNER', text: 'thanks' }], 'UOWNER', 'UBOT'), false);
+  assert.equal(othersIn([owner, bot, { user: 'UOTHER', text: 'looks good' }], 'UOWNER', 'UBOT'), true);
+  assert.equal(othersIn([owner, { user: 'UOWNER', text: '<@UDAN> can you check?' }], 'UOWNER', 'UBOT'), true); // the owner talks to a person
+  assert.equal(othersIn([owner, { user: 'UAPP', bot_id: 'B2', text: 'CI failed' }], 'UOWNER', 'UBOT'), false); // another app is not a person
+});
+
 test('a long reply shows its first paragraphs, and Show more holds the rest', async () => {
   const { splitReply } = await import('../src/render.js');
   const para = (k) => Array.from({ length: 3 }, (_, i) => `p${k} line ${i}`).join('\n');

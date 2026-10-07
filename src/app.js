@@ -12,7 +12,7 @@ import * as live from './live.js';
 import { pollEvery, reachable } from './poll.js';
 import * as unfurl from './unfurl.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, prCardMessage } from './render.js';
-import { forBotFromOthers, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
+import { forBotFromOthers, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, prCard, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT } from './render.js';
 
@@ -196,10 +196,13 @@ async function begin(key, client) {
 }
 
 // ownerOf: who owns a session in this thread, the thread's starter (see threadStarter).
+// The first session's owner stays the owner: a later tag by someone else does not take the thread.
 // One Slack read per thread, kept in memory.
 const STARTERS = new Map();
 async function ownerOf(client, channel, thread_ts, asker) {
   if (!thread_ts) return asker;
+  const prior = sessions.get(channel, thread_ts)?.owner;
+  if (prior) return prior;
   const id = `${channel}:${thread_ts}`;
   if (!STARTERS.has(id)) {
     const root = await client.conversations.replies({ channel, ts: thread_ts, limit: 1 }).then((r) => r.messages?.[0], () => null);
@@ -451,6 +454,17 @@ function takeAside(key) {
   sessions.patch(key, { aside: null });
   return `${asideBlock(a)}\n\n`;
 }
+// Threads where people other than the owner take part (othersIn). Once true, always true.
+// ponytail: reads the first 200 replies only; page through if longer threads miss it.
+const CROWDED = new Set();
+async function crowded(client, s) {
+  const id = `${s.channel}:${s.thread_ts}`;
+  if (CROWDED.has(id)) return true;
+  const r = await client.conversations.replies({ channel: s.channel, ts: s.thread_ts, limit: 200 }).catch(() => null);
+  if (othersIn(r?.messages ?? [], s.owner, botUserId)) CROWDED.add(id);
+  return CROWDED.has(id);
+}
+const untaggedOwner = (m, s) => m.user === s.owner && STEER_MODE === 'mention' && botUserId && !String(m.text ?? '').includes(`<@${botUserId}`);
 const LIVE = ['queued', 'starting', 'active', 'wrapping'];
 app.message(async ({ message, client }) => {
   // Deleting the thread's first message closes its session, as in Claude Tag.
@@ -475,14 +489,17 @@ app.message(async ({ message, client }) => {
   if (text.startsWith('!')) { await bang(s, text, { user: message.user, channel: message.channel, thread_ts: message.thread_ts, ts: message.ts }, client); return; }
   // A message to someone else (it tags a person, not the bot) gets no reply; the
   // agent sees it with the next message it does get.
-  if (toSomeoneElse(message.text, botUserId)) { keepAside(s, message); return; }
-  // Someone else talking without tagging the bot: context for its next turn, not a turn.
-  if (STEER_ANYONE && !forBotFromOthers(message, s, botUserId, STEER_MODE)) {
+  if (toSomeoneElse(message.text, botUserId)) { CROWDED.add(`${s.channel}:${s.thread_ts}`); keepAside(s, message); return; }
+  // Someone talking without tagging the bot, when it may be to a person: context for its next turn, not a turn.
+  const crowd = untaggedOwner(message, s) && await crowded(client, s);
+  if (STEER_ANYONE && !forBotFromOthers(message, s, botUserId, STEER_MODE, crowd)) {
     keepAside(s, message);
     if (!(s.tipped ?? []).includes(message.user)) {
       sessions.patch(s.key, { tipped: [...(fresh(s.key).tipped ?? []), message.user] });
+      const why = message.user !== s.owner ? `This is <@${s.owner}>'s session. I answer others here when they tag me`
+        : crowd ? 'Others are in this thread now, so I act only when you tag me' : 'You stopped this session, so I pick it up only when you tag me';
       await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: message.user,
-        text: `This is <@${s.owner}>'s session. I answer others here when they tag me, so I kept your message as context. Tag <@${botUserId}> to ask me something.` }).catch(() => {});
+        text: `${why}. I kept your message as context. Tag <@${botUserId}> to ask me something.` }).catch(() => {});
     }
     return;
   }
@@ -552,7 +569,7 @@ async function steerEdit(message, client) {
   if (!m.thread_ts || fromBot(m) || !after || after === before || after.startsWith('!') || toSomeoneElse(m.text, botUserId)) return;
   const s = sessions.get(message.channel, m.thread_ts);
   if (!s || !(allowed(message.channel, m.user) && (m.user === s.owner || STEER_ANYONE))) return;
-  if (!forBotFromOthers(m, s, botUserId, STEER_MODE)) return; // someone else's untagged edit: not for the agent
+  if (!forBotFromOthers(m, s, botUserId, STEER_MODE, untaggedOwner(m, s) && await crowded(client, s))) return; // an untagged edit that may be to a person
   // Only a message the agent received: one sent after the session started.
   if (Number(m.ts) * 1000 < (s.started_at ?? Infinity) - 60_000) return;
   const from = m.user === s.owner ? '' : '(From someone else in the thread, not the person who started this session.)\n';
@@ -672,6 +689,7 @@ async function bang(s, text, m, client) {
     await say(s, 'Interrupted. The work so far is kept. Tell me what to do instead.');
   } else if (cmd === 'stop') {
     if (ownerOnly()) return;
+    sessions.patch(s.key, { hand_stopped: true });
     await sayWhile(s, 'Stopping… saving the work first.', () => stoppedText(s.key));
   } else if (cmd === 'new' || cmd === 'restart') {
     if (ownerOnly()) return;
@@ -1440,6 +1458,7 @@ ownerAction('stop', async (s, client, action, body) => {
   // Checked before any await: two fast taps both passed a later check.
   if (stopping.has(s.key) || !LIVE.includes(fresh(s.key)?.state)) return;
   stopping.add(s.key);
+  sessions.patch(s.key, { hand_stopped: true });
   await client.chat.update({ channel: s.channel, ts: body.message.ts, text: body.message.text,
     blocks: (body.message.blocks ?? []).filter((x) => x.type !== 'actions') }).catch(() => {});
   if (fresh(s.key)?.buttons_msg?.ts === body.message.ts) sessions.patch(s.key, { buttons_msg: null });
