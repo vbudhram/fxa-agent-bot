@@ -164,7 +164,8 @@ app.event('app_mention', async ({ event, body, client }) => {
   const { ts } = START_DELAY_S ? await client.chat.postMessage({ channel: event.channel, thread_ts,
     text: resume_from ? 'Picking up where we left off.' : 'Starting.',
     blocks: startCard(key, prompt, START_DELAY_S, Boolean(resume_from), runtime, CODEX) }).catch((e) => { pending.delete(key); throw e; }) : {};
-  if (event.thread_ts) prompt += await threadContext(client, event, { withBot: cur?.state === 'answered' });
+  // user: whose lines are labelled "owner", the session's owner, not whoever tagged.
+  if (event.thread_ts) prompt += await threadContext(client, { ...event, user: pending.get(key)?.owner ?? event.user }, { withBot: cur?.state === 'answered' });
   if (!pending.has(key)) return;
   // Spread the current entry: a Switch click while the thread was read changed its runtime.
   pending.set(key, { ...pending.get(key), prompt, card_ts: ts, acks: [event.ts],
@@ -217,7 +218,7 @@ async function followUp(s, message, text, client, route = text) {
   const key = sessions.newKey();
   pending.set(key, { prompt: text, request: text, route, owner: await ownerOf(client, s.channel, s.thread_ts, message.user), team: message.team ?? s.team, channel: s.channel,
     thread_ts: s.thread_ts, runtime: 'claude', deadline: Date.now(), acks: message.ts ? [message.ts] : [] }); // a tap has no message to mark
-  const ctx = await threadContext(client, { channel: s.channel, thread_ts: s.thread_ts, ts: message.ts, user: message.user }, { withBot: true });
+  const ctx = await threadContext(client, { channel: s.channel, thread_ts: s.thread_ts, ts: message.ts, user: pending.get(key).owner }, { withBot: true });
   pending.set(key, { ...pending.get(key), prompt: text + ctx });
   await begin(key, client).catch((e) => { pending.delete(key); console.error('begin', key, e.message); });
 }
