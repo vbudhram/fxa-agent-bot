@@ -429,6 +429,11 @@ export function planLines(plan) {
     + (i.level === 'ci' && i.why ? ` _(CI: ${esc(String(i.why).slice(0, 80))})_` : '')).join('\n');
 }
 
+// The rows to DM: a new signature once, a reopened one once after each resolve, never the
+// dev bot's. seen: sig → the last occurrence already looked at; null on the first look.
+export const errorsToDm = (rows, seen) => !seen ? [] : rows.filter((e) => e.status !== 'resolved' && e.source !== 'bot-dev'
+  && (!seen[e.sig] || (e.status === 'reopened' && seen[e.sig] < e.resolved?.at)));
+
 // 6: new or reopened error signatures, as one DM for the operator.
 export function errorDigest(rows) {
   if (!rows?.length) return '';

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { threadStarter, endWord, prCardMessage, render, operatorProblem, summaryLine, closestCommand, watchUrl, threadLine, draftSplit, toSomeoneElse, asideBlock } from '../src/render.js';
+import { threadStarter, endWord, prCardMessage, render, operatorProblem, summaryLine, closestCommand, watchUrl, threadLine, draftSplit, toSomeoneElse, asideBlock, errorsToDm } from '../src/render.js';
 
 test('operator problems are named, other errors are not', () => {
   assert.equal(operatorProblem('ERROR: (gcloud.compute.ssh) Reauthentication failed. cannot prompt').kind, 'gcloud');
@@ -328,4 +328,22 @@ test('the PR card is a small grey line under its note, with plain text for notif
   assert.equal(m.text, 'Draft PR is up: <https://x/pull/1>.\nPR #1 · draft · ⏳ CI running');
   assert.deepEqual(m.blocks.map((b) => b.type), ['section', 'context']);
   assert.deepEqual(prCardMessage('', 'PR #1 · open').blocks.map((b) => b.type), ['context']);
+});
+
+test('errorsToDm: new once, reopened once per resolve, never the dev bot', () => {
+  const resolved = { at: '2026-10-04T16:05:38Z' };
+  const row = (sig, last, extra = {}) => ({ sig, last, source: 'bot', status: 'open', resolved: null, ...extra });
+  // The first look sends nothing.
+  assert.deepEqual(errorsToDm([row('a', '2026-10-07T05:00:00Z')], null), []);
+  // A new signature: once.
+  assert.deepEqual(errorsToDm([row('a', '2026-10-07T05:00:00Z')], {}).map((e) => e.sig), ['a']);
+  assert.deepEqual(errorsToDm([row('a', '2026-10-07T06:00:00Z')], { a: '2026-10-07T05:00:00Z' }), []);
+  // Reopened after a resolve: the first occurrence DMs, the next ones do not.
+  const re = (last) => row('b', last, { status: 'reopened', resolved });
+  assert.deepEqual(errorsToDm([re('2026-10-07T05:11:03Z')], { b: '2026-09-30T14:37:54Z' }).map((e) => e.sig), ['b']);
+  assert.deepEqual(errorsToDm([re('2026-10-07T05:59:25Z')], { b: '2026-10-07T05:11:03Z' }), []);
+  // The dev bot's errors show on the dashboard, but are not DMed.
+  assert.deepEqual(errorsToDm([row('c', '2026-10-07T05:00:00Z', { source: 'bot-dev' })], {}), []);
+  // A resolved signature: nothing.
+  assert.deepEqual(errorsToDm([row('d', '2026-10-01T00:00:00Z', { status: 'resolved', resolved })], {}), []);
 });

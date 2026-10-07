@@ -24,9 +24,15 @@ export function toRecord(args, now = new Date()) {
   let key = rest.find((a) => KEY.test(a) && a.match(KEY)[0] === a) ?? null;
   if (!key && KEY.test(where) && where.match(KEY)[0] === where) { key = where; where = 'bot action'; }
   const message = rest.filter((a) => a !== key).join(' ').trim().slice(0, 600) || where;
-  return { at: now.toISOString().replace(/\.\d+Z$/, 'Z'), source: 'bot', kind: String(where).split(/[ (:]/)[0],
-    key, where: String(where).slice(0, 120), message, log: null, sig: signature(where, message) };
+  // ERROR_DMS=0 is the dev bot: it shares the store, so its errors get their own rows that the live bot does not DM.
+  const dev = process.env.ERROR_DMS === '0';
+  return { at: now.toISOString().replace(/\.\d+Z$/, 'Z'), source: dev ? 'bot-dev' : 'bot', kind: String(where).split(/[ (:]/)[0],
+    key, where: String(where).slice(0, 120), message, log: null, sig: signature(dev ? `dev ${where}` : where, message) };
 }
+
+// Socket Mode logs each dropped connection as two errors, then reconnects in seconds.
+// The watchdog records a connection that stays down, so these only go to the log.
+export const socketNoise = (args) => args[1] === 'bolt-app' && /^WebSocket error/.test(String(args[2] ?? ''));
 
 export function installErrorLog(push) {
   const orig = console.error.bind(console);
@@ -34,6 +40,7 @@ export function installErrorLog(push) {
   try { mkdirSync(dirname(FILE), { recursive: true }); } catch {}
   console.error = (...args) => {
     orig(...args);
+    if (socketNoise(args)) return;
     const rec = toRecord(args);
     try { appendFileSync(FILE, `${JSON.stringify(rec)}\n`); } catch {}
     ingest('errors', rec);   // the store; the file stays while the store proves itself

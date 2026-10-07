@@ -14,7 +14,7 @@ import * as unfurl from './unfurl.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, prCardMessage } from './render.js';
 import { forBotFromOthers, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
-import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, prEndedNote, ciNote, prCard, homeView, planLines, errorDigest, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT } from './render.js';
+import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, prEndedNote, ciNote, prCard, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT } from './render.js';
 
 const { App } = bolt;
 installErrorLog(ctl.errorsPush);
@@ -2012,7 +2012,7 @@ async function watchErrors() {
   let seen = null;
   try { seen = JSON.parse(readFileSync(SEEN_FILE, 'utf8')); } catch {}
   const live = rows.filter((e) => e.status !== 'resolved');
-  const fresh_ = seen ? live.filter((e) => !seen[e.sig] || seen[e.sig] < e.last && e.status === 'reopened') : [];
+  const fresh_ = errorsToDm(rows, seen);
   const next = { ...(seen ?? {}) };
   for (const e of live) next[e.sig] = e.last;
   try { writeFileSync(SEEN_FILE, JSON.stringify(next), { mode: 0o600 }); } catch {}
