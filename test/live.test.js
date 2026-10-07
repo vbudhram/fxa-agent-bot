@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { start, reduce, todoRows, currentRow, changedRows, facts, summary, todoLine, closingLine, advanceRows, lineRows, lostContact, LOST_MS, GIVE_UP_MS, MAX_ROWS } from '../src/live.js';
+import { start, reduce, todoRows, currentRow, changedRows, facts, summary, todoLine, closingLine, advanceRows, lineRows, lostContact, LOST_MS, GIVE_UP_MS, MAX_ROWS, lastNote } from '../src/live.js';
 
 const feed = (evs) => evs.reduce(reduce, start());
 const todos = (...s) => ({ type: 'todos', items: s.map(([content, status, active]) => ({ content, status, active })) });
@@ -124,4 +124,21 @@ test('lost contact: one warning, a recovery, one give-up, and quiet for a short 
   assert.equal(lostContact(r.st, false, GIVE_UP_MS + 60_000).show, null);
   assert.equal(lostContact(r.st, true, GIVE_UP_MS + 70_000).show, null);
   assert.equal(lostContact({ since: 0, warned: false }, true, 30_000).show, null);
+});
+
+test('the git diffstat replaces the files that Edit calls added up', () => {
+  let st = reduce(start(), { type: 'edit', file: 'a.ts', added: 5, removed: 0 });
+  st = reduce(st, { type: 'diffstat', files: [{ file: 'a.ts', added: 3, removed: 1 }, { file: 'b.ts', added: 7, removed: 2 }, { file: 'c.ts', added: 1, removed: 0 }] });
+  assert.equal(facts(st), '3 files (+11 −3)');
+  // An edit after it adds on top, until the next diffstat corrects it.
+  st = reduce(st, { type: 'edit', file: 'd.ts', added: 2, removed: 0 });
+  assert.equal(facts(st), '4 files (+13 −3)');
+  st = reduce(st, { type: 'diffstat', files: [] });
+  assert.equal(facts(st), '');
+});
+
+test('the last note is the last sentence of what the agent said', () => {
+  assert.equal(lastNote('The spec passes now. The Storybook build takes about 3 to 6 minutes.'), 'The Storybook build takes about 3 to 6 minutes.');
+  assert.equal(lastNote(''), '');
+  assert.equal(lastNote(undefined), '');
 });

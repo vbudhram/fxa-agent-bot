@@ -16,6 +16,9 @@ export function reduce(st, ev) {
       const f = st.files[ev.file] ?? { added: 0, removed: 0 };
       return { ...st, files: { ...st.files, [ev.file]: { added: f.added + (Number(ev.added) || 0), removed: f.removed + (Number(ev.removed) || 0) } } };
     }
+    // The runner's git diff, every 15 s: the real count, also for edits made with a script.
+    case 'diffstat':
+      return { ...st, files: Object.fromEntries((ev.files ?? []).map((f) => [String(f.file), { added: Number(f.added) || 0, removed: Number(f.removed) || 0 }])) };
     case 'subagent_start':
       return { ...st, subagents: { ...st.subagents, [ev.id]: { agent: String(ev.agent ?? ''), description: String(ev.description ?? ''), done: false } } };
     case 'tool_done':
@@ -137,13 +140,16 @@ export const isStatusAsk = (text) => {
   return t.length <= 60 && parts.length > 0 && parts.every((p) => STATUS_ASKS.some((r) => r.test(p)));
 };
 
+// The last sentence of the agent's latest text block: the status reply's and a new stream's note.
+export const lastNote = (said) => clip(said ?? '').split(/(?<=[.!?])\s+/).filter(Boolean).at(-1) ?? '';
+
 // The status reply: time, todo progress, the current todo, the last step and when it started.
 export function statusReply(st, { elapsedMs = 0, lastStep = '', stepAgoMs = 0, said = '' } = {}) {
   const m = (ms) => `${Math.max(0, Math.round(ms / 60_000))}m`;
   const rows = todoRows(st), cur = rows.find((r) => r.id === currentRow(rows));
   const done = rows.filter((r) => r.status === 'complete').length;
   const head = [`⏳ Still working · ${m(elapsedMs)}`, ...(rows.length ? [`${done}/${rows.length} todos`] : []), facts(st)].filter(Boolean).join(' · ');
-  const note = clip(said).split(/(?<=[.!?])\s+/).filter(Boolean).at(-1) ?? '';
+  const note = lastNote(said);
   return [head,
     ...(cur && cur.status !== 'complete' ? [`› Now: ${cur.title}`] : []),
     ...(lastStep ? [`› Last step, ${m(stepAgoMs)} ago: \`${clip(lastStep).replace(/`/g, "'").slice(0, 120)}\``] : []),

@@ -1130,7 +1130,7 @@ const watchers = new Map(), steps = new Map(), editTimers = new Map(), lastEdit 
 // header (src/live.js). In memory only; after a restart it fills in again from
 // the next events. LIVE_STATUS=0 turns it off.
 const LIVE_ON = process.env.LIVE_STATUS !== '0';
-const LIVE_EVENTS = new Set(['todos', 'edit', 'subagent_start', 'tool_done', 'tests', 'lint', 'types']);
+const LIVE_EVENTS = new Set(['todos', 'edit', 'diffstat', 'subagent_start', 'tool_done', 'tests', 'lint', 'types']);
 const liveTurn = new Map();
 const newLive = (title0 = 'Working on it') => ({ st: live.start(), sent: {}, lines: {}, header: '', headerAt: 0, todo: false, title0 });
 const liveOf = (key) => { if (!liveTurn.has(key)) liveTurn.set(key, newLive()); return liveTurn.get(key); };
@@ -1241,6 +1241,9 @@ async function restartStream(key) {
         { type: 'task_update', id: 't0', title: 'Still working', status: 'in_progress' }],
     });
     await app.client.chat.delete({ channel: s.channel, ts: s.status_ts }).catch(() => {});
+    // The deleted stream held the agent's notes: carry the last one, so the new card is not bare.
+    const note = streamText ? live.lastNote(said.get(key)) : '';
+    if (note) await app.client.apiCall('chat.appendStream', { channel: s.channel, ts, chunks: [{ type: 'markdown_text', text: `_${note.replace(/_/g, ' ')}_` }] }).catch(() => {});
     // The new stream starts its rows again; the counts and rows_done stay for the closing line.
     if (L) { L.sent = {}; L.lines = {}; L.header = ''; L.headerAt = 0; L.title0 = 'Still working'; }
     sessions.patch(key, { status_ts: ts, status_kind: 'stream', cur_kind: null, cur_count: 0, cur_lines: 0, task_n: 0, cur_label: 'Still working', last_act: 'Still working', title_at: Date.now() });
