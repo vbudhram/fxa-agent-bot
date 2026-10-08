@@ -11,7 +11,7 @@ import * as sessions from './sessions.js';
 import * as live from './live.js';
 import { pollEvery, reachable } from './poll.js';
 import * as unfurl from './unfurl.js';
-import { defuse, watchUrl, threadLine, threadStarter, endWord, prCardMessage } from './render.js';
+import { defuse, watchUrl, threadLine, threadStarter, endWord, prCardMessage, appText, appLabel } from './render.js';
 import { forBotFromOthers, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, prCard, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT } from './render.js';
@@ -424,10 +424,15 @@ async function threadContext(client, event, { withBot = false } = {}) {
       if (!cursor) break;
     }
     const mine = (m) => withBot && m.user === botUserId && !/^(On it!|Starting|Picking up|(Done|Looked into it|Stopped|Interrupted|Paused|Failed) · )/.test(m.text);
-    const lines = msgs.filter((m) => m.ts !== event.ts && m.text && (!fromBot(m) || mine(m)))
-      .map((m) => { const who = fromBot(m) ? 'you (an earlier answer)' : m.user === event.user ? 'owner' : 'someone else';
+    // Another app's post (an alert the thread is about) is context too; this bot's own, only as mine() says.
+    const app = (m) => fromBot(m) && m.user !== botUserId;
+    const lines = msgs.filter((m) => m.ts !== event.ts && (!fromBot(m) || mine(m) || app(m)))
+      .map((m) => {
+        const who = app(m) ? appLabel(m) : fromBot(m) ? 'you (an earlier answer)' : m.user === event.user ? 'owner' : 'someone else';
+        const text = app(m) ? appText(m) : m.text;
         // Label every line, so a line cannot pose as another speaker.
-        return m.text.replace(/<@[A-Z0-9]+>/g, '@someone').split('\n').map((l) => `${who}: ${l}`).join('\n'); });
+        return text ? text.replace(/<@[A-Z0-9]+>/g, '@someone').split('\n').map((l) => `${who}: ${l}`).join('\n') : '';
+      }).filter(Boolean);
     if (!lines.length) return '';
     let t = lines.join('\n');
     if (t.length > 6000) t = `...${t.slice(-6000)}`;

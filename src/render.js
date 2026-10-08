@@ -470,6 +470,24 @@ export const endWord = (s, state) => {
 // The session owner is the person who started the thread: its first message's author.
 // A thread a bot started, or one Slack did not return, falls back to whoever asked.
 export const threadStarter = (root, fallback) => (root?.user && !root.bot_id ? root.user : fallback);
+// Another app's post in a thread (a Sentry, Grafana or Argo CD alert) keeps most of its
+// words in attachments and blocks, not text: all of them, once each, for the thread context.
+export function appText(m) {
+  const parts = [m?.text];
+  for (const a of m?.attachments ?? []) parts.push(a.pretext, a.title, a.text, ...(a.fields ?? []).map((f) => `${f.title}: ${f.value}`));
+  const walk = (b) => {
+    if (!b || typeof b !== 'object') return;
+    if (typeof b.text === 'string') parts.push(b.text); else walk(b.text);
+    for (const k of ['fields', 'elements']) (b[k] ?? []).forEach(walk);
+  };
+  (m?.blocks ?? []).forEach(walk);
+  return [...new Set(parts.map((p) => String(p ?? '').trim()).filter(Boolean))].join('\n');
+}
+// Its speaker label: the app's name, with nothing that could start a new labelled line.
+export function appLabel(m) {
+  const name = String(m?.bot_profile?.name ?? m?.username ?? '').replace(/[^\w .-]/g, '').trim().slice(0, 40);
+  return name ? `an app (${name})` : 'an app';
+}
 export function toSomeoneElse(raw, botId) {
   if (!botId) return false;
   const ids = [...String(raw ?? '').matchAll(/<@([A-Z0-9]+)(?:\|[^>]*)?>/g)].map((m) => m[1]);
