@@ -11,6 +11,7 @@ import * as sessions from './sessions.js';
 import * as live from './live.js';
 import { pollEvery, reachable } from './poll.js';
 import * as unfurl from './unfurl.js';
+import { parseGates, gateAllows, loadMembers } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, prCardMessage, appText, appLabel, lostChannel } from './render.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
@@ -21,6 +22,8 @@ installErrorLog(ctl.errorsPush);
 const list = (v) => (v || '').split(',').map((s) => s.trim()).filter(Boolean);
 const CHANNELS = list(process.env.ALLOWED_CHANNELS);
 const USERS = list(process.env.ALLOWED_USERS); // ponytail: static allowlist, Google group check later
+const GATES = parseGates(process.env.CHANNEL_GATES);
+const gateMembers = new Map(); // source channel → member ids
 
 // SLACK_CALL_LOG=<file>: each Slack call the bot makes, one JSON line, to test a change
 // (the dev bot). Patched before the App: a client binds its methods when it is made.
@@ -72,7 +75,7 @@ const busy = new Set();    // sessions with a poll in flight
 // posts with a person's token are that person's, so a test can talk to the bot.
 // The dev bot is that app too: its own posts carry its bot user, a person's carry the person.
 const fromBot = (m) => Boolean(m?.bot_id) && !(process.env.DRIVER_APP_ID && m.app_id === process.env.DRIVER_APP_ID && botUserId && m.user && m.user !== botUserId);
-const allowed = (channel, user) => CHANNELS.includes(channel) && (USERS.includes('*') || USERS.includes(user));
+const allowed = (channel, user) => CHANNELS.includes(channel) && (USERS.includes('*') || USERS.includes(user)) && gateAllows(GATES, gateMembers, channel, user);
 const here = (s) => reachable(s, CHANNELS);
 
 // A pause to switch runtime or cancel. With Codex off there is nothing to switch, so start at once.
@@ -2089,6 +2092,8 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { for (const w of
 
 await app.start();
 { const me = await app.client.auth.test(); teamId = me.team_id; botUserId = me.user_id; }
+// ponytail: polled, so a person who joins the source channel waits up to 10 minutes.
+if (GATES.size) { await loadMembers(app.client, GATES, gateMembers); setInterval(() => loadMembers(app.client, GATES, gateMembers), 600_000).unref(); }
 // A request waiting for capacity lived only in a timer; pick it up again.
 for (const s of sessions.all()) if (s.state === 'queued') launch(s.key, app.client).catch((e) => console.error('launch', s.key, e.message));
 console.log('fxa-agent is running (Socket Mode)');
