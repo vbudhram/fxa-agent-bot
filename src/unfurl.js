@@ -10,6 +10,9 @@ const ISSUE_STATUS = { unresolved: ['Unresolved', 'red'], resolved: ['Resolved',
 const LEVEL_COLOR = { fatal: 'red', error: 'red', warning: 'yellow', info: 'blue', debug: 'gray' };
 
 const host = (u) => { try { return new URL(u).host; } catch { return ''; } };
+// The product logos (assets/), public so Slack can fetch them; WO_ICON_BASE moves them.
+const ICONS = process.env.WO_ICON_BASE || 'https://raw.githubusercontent.com/vbudhram/fxa-agent-bot/main/assets';
+const icon = (base, name, alt) => ({ url: `${base}/${name}.png`, alt_text: alt });
 
 // The links a card can be made for: { kind: 'watch', url, channel, ts }, { kind: 'jira', url, key }
 // or { kind: 'sentry', url, ref } (an issue id or short id).
@@ -46,41 +49,35 @@ export function watchPayload(link, s) {
     product_name: 'fxa-agent' }, fields };
 }
 
-export function jiraPayload(card) {
+export function jiraPayload(card, icons = ICONS) {
   const fields = { status: { value: card.status ?? 'unknown', tag_color: CATEGORY_COLOR[card.category] ?? 'gray' } };
   if (card.assignee) fields.assignee = { user: { text: card.assignee }, type: 'slack#/types/user' };
-  if (card.priority) fields.priority = { value: card.priority };
+  if (card.priority && !/^\(?none\)?$/i.test(card.priority)) fields.priority = { value: card.priority };
   return { attributes: { title: { text: card.summary ?? card.key }, display_id: card.key, display_type: card.type ?? 'Ticket',
-    product_name: 'Jira' }, fields };
-}
-
-// The last 24 hourly counts as a text sparkline: a trend that renders anywhere Slack shows text.
-export function sparkline(counts) {
-  const c = (counts ?? []).slice(-24), max = Math.max(0, ...c), bars = '▁▂▃▄▅▆▇█';
-  return c.map((v) => bars[max ? Math.round((v / max) * 7) : 0]).join('');
+    product_name: 'Jira', product_icon: icon(icons, 'jira', 'Jira') }, fields };
 }
 
 const unix = (iso) => (iso ? Math.floor(Date.parse(iso) / 1000) : undefined);
 
-// A Sentry issue as an incident: what, how bad, since when, the trend, and a button that sends the agent.
-export function sentryPayload(card) {
+// A Sentry issue as a compact incident: how bad, how big, how recent, and a button that sends the agent.
+// Two columns, few rows: Slack clips a tall card. The level is a tagged custom field: severity does not show.
+export function sentryPayload(card, icons = ICONS) {
   const [status, color] = ISSUE_STATUS[card.status] ?? [String(card.status ?? 'unknown'), 'gray'];
-  const fields = { status: { value: status, tag_color: color },
-    severity: { value: card.level ?? 'unknown', tag_color: LEVEL_COLOR[card.level] ?? 'gray' },
-    service: { value: card.project ?? 'unknown' } };
-  if (card.culprit) fields.description = { value: card.culprit };
-  if (card.firstSeen) fields.date_created = { value: unix(card.firstSeen), type: 'slack#/types/timestamp' };
+  const n = (v) => Number(v ?? 0).toLocaleString('en-US');
+  const fields = { status: { value: status, tag_color: color }, service: { value: card.project ?? 'unknown' } };
   if (card.lastSeen) fields.date_updated = { value: unix(card.lastSeen), type: 'slack#/types/timestamp' };
-  const day = (card.hourly ?? []).slice(-24);
+  if (card.culprit) fields.description = { value: card.culprit };
+  const day = (card.hourly ?? []).slice(-24), total = day.reduce((a, b) => a + b, 0);
   const custom = [
-    ...(day.length ? [{ key: 'trend', label: 'Last 24 h', value: `${sparkline(day)} ${day.reduce((a, b) => a + b, 0)} events`, type: 'string' }] : []),
-    { key: 'events', label: 'Events', value: String(card.count ?? 0), type: 'string' },
-    { key: 'users', label: 'Users affected', value: String(card.userCount ?? 0), type: 'string' },
-    ...(card.release ? [{ key: 'release', label: 'Last release', value: card.release, type: 'string' }] : []),
+    { key: 'level', label: 'Level', value: card.level ?? 'unknown', type: 'string', tag_color: LEVEL_COLOR[card.level] ?? 'gray' },
+    { key: 'impact', label: 'Impact', value: `${n(card.count)} events · ${n(card.userCount)} users`, type: 'string' },
+    { key: 'day', label: 'Last 24 h', value: total ? `${n(total)} events · peak ${n(Math.max(...day))} an hour` : 'No events', type: 'string' },
   ];
   return {
-    attributes: { title: { text: firstLine(card.title) || card.shortId }, display_id: card.shortId, display_type: 'Issue', product_name: 'Sentry' },
+    attributes: { title: { text: firstLine(card.title) || card.shortId }, display_id: card.shortId, display_type: 'Issue',
+      product_name: 'Sentry', product_icon: icon(icons, 'sentry', 'Sentry') },
     fields, custom_fields: custom,
+    display_order: ['status', 'level', 'date_updated', 'service', 'description', 'impact', 'day'],
     actions: { primary_actions: [
       { text: 'Investigate', action_id: 'wo_investigate', value: card.shortId, style: 'primary' },
       { text: 'Open in Sentry', action_id: 'wo_open', url: card.permalink },

@@ -1636,7 +1636,7 @@ app.event('link_shared', async ({ event, client }) => {
   if (!entities.length) return;
   const where = event.unfurl_id ? { unfurl_id: event.unfurl_id, source: event.source } : { channel: event.channel, ts: event.message_ts };
   await client.apiCall('chat.unfurl', { ...where, metadata: JSON.stringify({ entities }) })
-    .catch((e) => console.error('unfurl', e.data?.error ?? e.message));
+    .catch((e) => console.error('unfurl', e.data?.error ?? e.message, JSON.stringify(e.data?.response_metadata?.messages ?? [])));
 });
 app.event('entity_details_requested', async ({ event, client }) => {
   if (!WORK_OBJECTS) return;
@@ -1645,7 +1645,7 @@ app.event('entity_details_requested', async ({ event, client }) => {
   const body = payload ? { metadata: JSON.stringify({ entity_type: unfurl.entity(link, payload).entity_type, entity_payload: payload }) }
     : { error: JSON.stringify({ status: 'custom_partial_view', custom_title: 'Not available', custom_message: 'This item cannot be shown here.' }) };
   await client.apiCall('entity.presentDetails', { trigger_id: event.trigger_id, ...body })
-    .catch((e) => console.error('entity details', e.data?.error ?? e.message));
+    .catch((e) => console.error('entity details', e.data?.error ?? e.message, JSON.stringify(e.data?.response_metadata?.messages ?? [])));
 });
 
 // The card's Investigate button sends the agent: a tag of the bot in the card's thread, from the
