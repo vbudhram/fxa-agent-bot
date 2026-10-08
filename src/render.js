@@ -455,6 +455,10 @@ export function draftSplit(buf) {
   return { out, keep };
 }
 
+// The tag reminder goes to each person once per thread: a resume starts a new
+// session in the same thread, and the reminder must not come back with it.
+export const tippedInThread = (all, s, user) => all.some((x) => x.channel === s.channel && x.thread_ts === s.thread_ts && (x.tipped ?? []).includes(user));
+
 // A thread message for someone else: it tags a person and not the bot.
 // How a status line reads when it closes: a failure must not say Done. A wrap-up has no
 // Slack reply (its output is the PR), so it says what it did. wrap_done: the pr or pushed

@@ -12,7 +12,7 @@ import * as live from './live.js';
 import { pollEvery, reachable } from './poll.js';
 import * as unfurl from './unfurl.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, prCardMessage, appText, appLabel, lostChannel } from './render.js';
-import { forBotFromOthers, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
+import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, prCard, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT } from './render.js';
 
@@ -509,7 +509,7 @@ app.message(async ({ message, client }) => {
   const crowd = untaggedOwner(message, s) && await crowded(client, s);
   if (STEER_ANYONE && !forBotFromOthers(message, s, botUserId, STEER_MODE, crowd)) {
     keepAside(s, message);
-    if (!(s.tipped ?? []).includes(message.user)) {
+    if (!tippedInThread(sessions.all(), s, message.user)) {
       sessions.patch(s.key, { tipped: [...(fresh(s.key).tipped ?? []), message.user] });
       const why = message.user !== s.owner ? `This is <@${s.owner}>'s session. I answer others here when they tag me`
         : crowd ? 'Others are in this thread now, so I act only when you tag me' : 'You stopped this session, so I pick it up only when you tag me';
