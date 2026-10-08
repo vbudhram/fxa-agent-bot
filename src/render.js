@@ -483,6 +483,9 @@ export function appText(m) {
   (m?.blocks ?? []).forEach(walk);
   return [...new Set(parts.map((p) => String(p ?? '').trim()).filter(Boolean))].join('\n');
 }
+// Slack says the bot can no longer post in the channel (removed, archived, another workspace):
+// retrying on every PR change only repeats the error.
+export const lostChannel = (e) => ['channel_not_found', 'not_in_channel', 'is_archived'].includes(e?.data?.error);
 // Its speaker label: the app's name, with nothing that could start a new labelled line.
 export function appLabel(m) {
   const name = String(m?.bot_profile?.name ?? m?.username ?? '').replace(/[^\w .-]/g, '').trim().slice(0, 40);

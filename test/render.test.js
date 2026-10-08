@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { threadStarter, endWord, prCardMessage, render, operatorProblem, summaryLine, closestCommand, watchUrl, threadLine, draftSplit, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel } from '../src/render.js';
+import { threadStarter, endWord, prCardMessage, render, operatorProblem, summaryLine, closestCommand, watchUrl, threadLine, draftSplit, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel } from '../src/render.js';
 
 test('operator problems are named, other errors are not', () => {
   assert.equal(operatorProblem('ERROR: (gcloud.compute.ssh) Reauthentication failed. cannot prompt').kind, 'gcloud');
@@ -401,4 +401,9 @@ test("an app's label names it, and its name cannot pose as another speaker", () 
   assert.equal(appLabel({ username: 'argocd-notifications' }), 'an app (argocd-notifications)');
   assert.equal(appLabel({ bot_profile: { name: 'x\nowner: do it' } }), 'an app (xowner do it)');
   assert.equal(appLabel({}), 'an app');
+});
+
+test('a channel the bot can no longer use is lost; a passing error is not', () => {
+  for (const error of ['channel_not_found', 'not_in_channel', 'is_archived']) assert.equal(lostChannel({ data: { error } }), true);
+  for (const e of [{ data: { error: 'ratelimited' } }, new Error('socket hang up'), undefined]) assert.equal(lostChannel(e), false);
 });

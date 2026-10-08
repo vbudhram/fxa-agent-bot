@@ -11,7 +11,7 @@ import * as sessions from './sessions.js';
 import * as live from './live.js';
 import { pollEvery, reachable } from './poll.js';
 import * as unfurl from './unfurl.js';
-import { defuse, watchUrl, threadLine, threadStarter, endWord, prCardMessage, appText, appLabel } from './render.js';
+import { defuse, watchUrl, threadLine, threadStarter, endWord, prCardMessage, appText, appLabel, lostChannel } from './render.js';
 import { forBotFromOthers, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, prCard, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT } from './render.js';
@@ -413,6 +413,13 @@ app.action('switch_runtime', async ({ ack, body, action, client }) => {
 // Tagged inside a discussion: the earlier messages ride along as context. They
 // are other people's words, so they are marked as data, not as the request.
 // withBot: also the bot's own earlier answers (a quick-answer thread has no agent that remembers them).
+// A post the follow loop could not make: logged (the error log counts it), and when the
+// channel is gone, the session stops posting, so the next PR change does not repeat it.
+function lost(s, e, where) {
+  if (lostChannel(e)) sessions.patch(s.key, { muted: true });
+  console.error(where, s.key, e.data?.error ?? e.message);
+}
+
 async function threadContext(client, event, { withBot = false } = {}) {
   try {
     // replies pages oldest first; walk to the end so a long thread keeps its newest messages.
@@ -1894,9 +1901,9 @@ async function followPrs() {
       // A new message only where a person must act: a button (fix, rebase, mark ready) or the
       // day-old review reminder. The rest (CI, approvals, merge) is edited into the PR's card.
       for (const item of [...prChanges(s.pr_seen, cur, { ciByRound, endByStop, jiraOffer: process.env.JIRA_OFFER === '1' }).filter((x) => typeof x !== 'string'), ...(nudge ? [nudge] : [])]) {
-        if (!s.muted) await postPrNote(s, item).catch((e) => console.error('follow', s.key, e.data?.error ?? e.message));
+        if (!fresh(s.key)?.muted) await postPrNote(s, item).catch((e) => lost(s, e, 'follow'));
       }
-      if (!s.muted) await updatePrCard(s, cur).catch((e) => console.error('pr card', s.key, e.data?.error ?? e.message));
+      if (!fresh(s.key)?.muted) await updatePrCard(s, cur).catch((e) => lost(s, e, 'pr card'));
       const prev = s.pr_seen;
       sessions.patch(s.key, { pr_seen: cur, pr_follow_since: since, ci_pass_at: ciPassAt, ...(nudge ? { nudged_at: ciPassAt } : {}),
         ...(['MERGED', 'CLOSED'].includes(cur.state) ? { pr_follow_done: true, pr_ended: cur.state } : {}) });
