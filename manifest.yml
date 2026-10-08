@@ -11,6 +11,11 @@ features:
     # Read-only: the bot DMs the operator about new errors; nobody chats with it there.
     messages_tab_enabled: true
     messages_tab_read_only_enabled: true
+  # Work Object cards (WORK_OBJECTS=1): the links whose hosts are listed here unfurl as
+  # cards. Also turn on Work Object Previews (Task, Incident) in the app settings.
+  unfurl_domains:
+    - mozilla-hub.atlassian.net
+    - mozilla.sentry.io
   slash_commands:
     - command: /fxa-agent
       description: The agent sessions in this channel, or the commands
@@ -30,6 +35,8 @@ oauth_config:
       - reactions:write
       - users:read
       - users:read.email
+      - links:read
+      - links:write
 settings:
   event_subscriptions:
     bot_events:
@@ -38,6 +45,8 @@ settings:
       - message.channels
       - message.groups
       - reaction_added
+      - link_shared
+      - entity_details_requested
   interactivity:
     is_enabled: true
   socket_mode_enabled: true

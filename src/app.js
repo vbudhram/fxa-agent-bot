@@ -110,7 +110,8 @@ async function settle(s, ok = true) {
 const strip = (t) => (t ?? '').replace(/<@[A-Z0-9]+>/g, '').trim();
 
 // A mention starts at once, after a short window to cancel a mistaken tag.
-app.event('app_mention', async ({ event, body, client }) => {
+// A tag of the bot, and the Investigate button on a Work Object card, which makes one (wo_investigate).
+async function onMention({ event, body, client }) {
   if (fromBot(event)) return; // another app's post, as for thread replies
   if (!allowed(event.channel, event.user)) {
     if (CHANNELS.includes(event.channel)) await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts,
@@ -170,7 +171,8 @@ app.event('app_mention', async ({ event, body, client }) => {
   // Spread the current entry: a Switch click while the thread was read changed its runtime.
   pending.set(key, { ...pending.get(key), prompt, card_ts: ts, acks: [event.ts],
     timer: setTimeout(() => begin(key, client).catch((e) => console.error('begin', key, e.message)), START_DELAY_S * 1000) });
-});
+}
+app.event('app_mention', onMention);
 
 async function begin(key, client) {
   let p = pending.get(key);
@@ -1613,9 +1615,16 @@ async function statusList(client, channel) {
 // Work Object cards (WORK_OBJECTS=1, with the app's Work Object Previews on): a watch
 // link or an FXA Jira link posted in an allowed channel unfurls as a card.
 const WORK_OBJECTS = process.env.WORK_OBJECTS === '1';
-const LINK_HOSTS = { gateway: process.env.DESKTOP_GATEWAY, jira: process.env.JIRA_URL || 'https://mozilla-hub.atlassian.net' };
+const LINK_HOSTS = { gateway: process.env.DESKTOP_GATEWAY, jira: process.env.JIRA_URL || 'https://mozilla-hub.atlassian.net',
+  sentry: process.env.SENTRY_URL || 'https://mozilla.sentry.io' };
 async function cardPayload(link) {
   if (link.kind === 'watch') return unfurl.watchPayload(link, sessions.get(link.channel, link.ts));
+  if (link.kind === 'sentry') {
+    const issue = await ctl.sentryCard(link.ref);
+    if (!issue) return null;
+    link.id = issue.id; // the same issue by id or short id: one external_ref
+    return unfurl.sentryPayload(issue);
+  }
   const card = await ctl.jiraCard(link.key);
   return card ? unfurl.jiraPayload(card) : null; // hidden or unreadable: no card
 }
@@ -1633,11 +1642,26 @@ app.event('entity_details_requested', async ({ event, client }) => {
   if (!WORK_OBJECTS) return;
   const [link] = unfurl.parseLinks([event.app_unfurl_url ?? event.entity_url], LINK_HOSTS);
   const payload = link && await cardPayload(link);
-  const body = payload ? { metadata: JSON.stringify({ entity_type: unfurl.TASK, entity_payload: payload }) }
+  const body = payload ? { metadata: JSON.stringify({ entity_type: unfurl.entity(link, payload).entity_type, entity_payload: payload }) }
     : { error: JSON.stringify({ status: 'custom_partial_view', custom_title: 'Not available', custom_message: 'This item cannot be shown here.' }) };
   await client.apiCall('entity.presentDetails', { trigger_id: event.trigger_id, ...body })
     .catch((e) => console.error('entity details', e.data?.error ?? e.message));
 });
+
+// The card's Investigate button sends the agent: a tag of the bot in the card's thread, from the
+// person who clicked, so the usual rules apply (allowed channel and user, owner, quick answer first).
+app.action('wo_investigate', async ({ ack, body, client }) => {
+  await ack();
+  const c = body.container ?? {}, a = body.actions?.[0] ?? {};
+  const channel = c.channel_id ?? body.channel?.id, ts = c.message_ts;
+  if (!channel || !ts || !botUserId) return; // the details panel has no thread to work in
+  const ref = String(a.value ?? '').replace(/[^\w-]/g, '').slice(0, 40);
+  const link = String(c.app_unfurl_url ?? '').slice(0, 300);
+  await onMention({ client, body, event: { type: 'app_mention', channel, ts, thread_ts: c.thread_ts ?? ts, user: body.user?.id,
+    team: body.team?.id, text: `<@${botUserId}> Investigate Sentry issue ${ref} ${link}: what fails, since when, how many users, `
+      + 'and the likely cause in the code. Do not change code.' } }).catch((e) => console.error('investigate', e.data?.error ?? e.message));
+});
+app.action('wo_open', async ({ ack }) => { await ack(); }); // a link button: Slack opens the URL
 
 // 8: the App Home tab lists the viewer's own sessions each time they open it.
 app.event('app_home_opened', async ({ event, client }) => {

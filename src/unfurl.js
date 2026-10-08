@@ -1,15 +1,19 @@
 // Work Object cards for links the bot knows: a watch link shows its thread's session,
-// a Jira link its ticket. Pure: app.js fetches the session or ticket and posts the card.
+// a Jira link its ticket, a Sentry link its issue. Pure: app.js fetches them and posts the card.
 
 const TASK = 'slack#/entities/task';
+const INCIDENT = 'slack#/entities/incident';
 const STATE_COLOR = { active: 'blue', starting: 'blue', wrapping: 'blue', queued: 'gray', paused: 'yellow',
   pr_open: 'green', answered: 'green', stopped: 'gray', failed: 'red' };
 const CATEGORY_COLOR = { new: 'gray', indeterminate: 'blue', done: 'green' };
+const ISSUE_STATUS = { unresolved: ['Unresolved', 'red'], resolved: ['Resolved', 'green'], ignored: ['Ignored', 'gray'] };
+const LEVEL_COLOR = { fatal: 'red', error: 'red', warning: 'yellow', info: 'blue', debug: 'gray' };
 
 const host = (u) => { try { return new URL(u).host; } catch { return ''; } };
 
-// The links a card can be made for: { kind: 'watch', url, channel, ts } or { kind: 'jira', url, key }.
-export function parseLinks(urls, { gateway, jira }) {
+// The links a card can be made for: { kind: 'watch', url, channel, ts }, { kind: 'jira', url, key }
+// or { kind: 'sentry', url, ref } (an issue id or short id).
+export function parseLinks(urls, { gateway, jira, sentry }) {
   const out = [];
   for (const url of urls) {
     let u; try { u = new URL(url); } catch { continue; }
@@ -18,6 +22,8 @@ export function parseLinks(urls, { gateway, jira }) {
       out.push({ kind: 'watch', url, channel: m[1], ts: m[2] });
     } else if (jira && u.host === host(jira) && (m = u.pathname.match(/^\/browse\/(FXA-\d+)\/?$/))) {
       out.push({ kind: 'jira', url, key: m[1] });
+    } else if (sentry && u.host === host(sentry) && (m = u.pathname.match(/^\/issues\/(\d+|[A-Z0-9]+(?:-[A-Z0-9]+)+)\/?$/i))) {
+      out.push({ kind: 'sentry', url, ref: m[1] });
     }
   }
   return out;
@@ -48,11 +54,46 @@ export function jiraPayload(card) {
     product_name: 'Jira' }, fields };
 }
 
+// The last 24 hourly counts as a text sparkline: a trend that renders anywhere Slack shows text.
+export function sparkline(counts) {
+  const c = (counts ?? []).slice(-24), max = Math.max(0, ...c), bars = '▁▂▃▄▅▆▇█';
+  return c.map((v) => bars[max ? Math.round((v / max) * 7) : 0]).join('');
+}
+
+const unix = (iso) => (iso ? Math.floor(Date.parse(iso) / 1000) : undefined);
+
+// A Sentry issue as an incident: what, how bad, since when, the trend, and a button that sends the agent.
+export function sentryPayload(card) {
+  const [status, color] = ISSUE_STATUS[card.status] ?? [String(card.status ?? 'unknown'), 'gray'];
+  const fields = { status: { value: status, tag_color: color },
+    severity: { value: card.level ?? 'unknown', tag_color: LEVEL_COLOR[card.level] ?? 'gray' },
+    service: { value: card.project ?? 'unknown' } };
+  if (card.culprit) fields.description = { value: card.culprit };
+  if (card.firstSeen) fields.date_created = { value: unix(card.firstSeen), type: 'slack#/types/timestamp' };
+  if (card.lastSeen) fields.date_updated = { value: unix(card.lastSeen), type: 'slack#/types/timestamp' };
+  const day = (card.hourly ?? []).slice(-24);
+  const custom = [
+    ...(day.length ? [{ key: 'trend', label: 'Last 24 h', value: `${sparkline(day)} ${day.reduce((a, b) => a + b, 0)} events`, type: 'string' }] : []),
+    { key: 'events', label: 'Events', value: String(card.count ?? 0), type: 'string' },
+    { key: 'users', label: 'Users affected', value: String(card.userCount ?? 0), type: 'string' },
+    ...(card.release ? [{ key: 'release', label: 'Last release', value: card.release, type: 'string' }] : []),
+  ];
+  return {
+    attributes: { title: { text: firstLine(card.title) || card.shortId }, display_id: card.shortId, display_type: 'Issue', product_name: 'Sentry' },
+    fields, custom_fields: custom,
+    actions: { primary_actions: [
+      { text: 'Investigate', action_id: 'wo_investigate', value: card.shortId, style: 'primary' },
+      { text: 'Open in Sentry', action_id: 'wo_open', url: card.permalink },
+    ] },
+  };
+}
+
 // One entity for chat.unfurl's metadata.
 export const entity = (link, payload) => ({
   app_unfurl_url: link.url, url: link.url,
-  external_ref: link.kind === 'watch' ? { id: `${link.channel}:${link.ts}`, type: 'watch' } : { id: link.key, type: 'jira' },
-  entity_type: TASK, entity_payload: payload,
+  external_ref: link.kind === 'watch' ? { id: `${link.channel}:${link.ts}`, type: 'watch' }
+    : link.kind === 'sentry' ? { id: link.id ?? link.ref, type: 'sentry' } : { id: link.key, type: 'jira' },
+  entity_type: link.kind === 'sentry' ? INCIDENT : TASK, entity_payload: payload,
 });
 
-export { TASK };
+export { TASK, INCIDENT };
