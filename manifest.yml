@@ -12,10 +12,12 @@ features:
     messages_tab_enabled: true
     messages_tab_read_only_enabled: true
   # Work Object cards (WORK_OBJECTS=1): the links whose hosts are listed here unfurl as
-  # cards. Also turn on Work Object Previews (Task, Incident) in the app settings.
+  # cards. Also turn on Work Object Previews and add the Task and
+  # Incident entity types in the app settings (the toggle alone serves nothing).
   unfurl_domains:
     - mozilla-hub.atlassian.net
     - mozilla.sentry.io
+    - github.com
   slash_commands:
     - command: /fxa-agent
       description: The agent sessions in this channel, or the commands

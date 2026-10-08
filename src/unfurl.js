@@ -15,8 +15,8 @@ const ICONS = process.env.WO_ICON_BASE || 'https://raw.githubusercontent.com/vbu
 const icon = (base, name, alt) => ({ url: `${base}/${name}.png`, alt_text: alt });
 
 // The links a card can be made for: { kind: 'watch', url, channel, ts }, { kind: 'jira', url, key }
-// or { kind: 'sentry', url, ref } (an issue id or short id).
-export function parseLinks(urls, { gateway, jira, sentry }) {
+// or { kind: 'sentry', url, ref } (an issue id or short id), or { kind: 'pr', url, number } on github (owner/repo).
+export function parseLinks(urls, { gateway, jira, sentry, github }) {
   const out = [];
   for (const url of urls) {
     let u; try { u = new URL(url); } catch { continue; }
@@ -27,6 +27,9 @@ export function parseLinks(urls, { gateway, jira, sentry }) {
       out.push({ kind: 'jira', url, key: m[1] });
     } else if (sentry && u.host === host(sentry) && (m = u.pathname.match(/^\/issues\/(\d+|[A-Z0-9]+(?:-[A-Z0-9]+)+)\/?$/i))) {
       out.push({ kind: 'sentry', url, ref: m[1] });
+    } else if (github && u.host === 'github.com' && u.pathname.toLowerCase().startsWith(`/${github.toLowerCase()}/pull/`)
+      && (m = u.pathname.match(/\/pull\/(\d+)(?:\/[a-z]*)?\/?$/))) {
+      out.push({ kind: 'pr', url, number: m[1], repo: github });
     }
   }
   return out;
@@ -85,11 +88,46 @@ export function sentryPayload(card, icons = ICONS) {
   };
 }
 
+const PR_STATE = { OPEN: ['Open', 'green'], MERGED: ['Merged', 'blue'], CLOSED: ['Closed', 'red'] };
+const who = (names) => names.slice(0, 2).join(', ') + (names.length > 2 ? ` +${names.length - 2}` : '');
+
+// A pull request: its state, CI and reviews at a glance, and an Investigate button when CI fails.
+export function prPayload(pr, icons = ICONS) {
+  const n = (v) => Number(v ?? 0).toLocaleString('en-US');
+  const [state, color] = pr.draft && pr.state === 'OPEN' ? ['Draft', 'gray'] : PR_STATE[pr.state] ?? [String(pr.state ?? 'unknown'), 'gray'];
+  const ci = { pass: [`Passing · ${n(pr.checks)} checks`, 'green'], none: ['No checks', 'gray'],
+    fail: [`Failing · ${n(pr.failed)} of ${n(pr.checks)}${pr.failing?.length ? `: ${pr.failing.join(', ')}` : ''}`, 'red'],
+    running: [`Running · ${n(pr.running)} of ${n(pr.checks)} left`, 'yellow'] }[pr.ci] ?? ['Unknown', 'gray'];
+  const review = pr.changers?.length ? [`Changes requested by ${who(pr.changers)}`, 'red']
+    : pr.review === 'APPROVED' ? [pr.approvers?.length ? `Approved by ${who(pr.approvers)}` : 'Approved', 'green']
+      : pr.review === 'REVIEW_REQUIRED' ? ['Review required', 'yellow'] : ['No review needed', 'gray'];
+  const fields = { status: { value: state, tag_color: color } };
+  if (pr.author) fields.assignee = { user: { text: pr.author }, type: 'slack#/types/user' };
+  if (pr.updated) fields.date_updated = { value: unix(pr.updated), type: 'slack#/types/timestamp' };
+  const custom = [
+    { key: 'ci', label: 'CI', value: ci[0], type: 'string', tag_color: ci[1] },
+    { key: 'review', label: 'Reviews', value: review[0], type: 'string', tag_color: review[1] },
+    { key: 'size', label: 'Size', value: `+${n(pr.additions)} −${n(pr.deletions)} · ${n(pr.files)} files`, type: 'string' },
+    ...(pr.jira ? [{ key: 'jira', label: 'Jira', value: pr.jira, type: 'string' }] : []),
+  ];
+  return {
+    attributes: { title: { text: firstLine(pr.title) || `#${pr.number}` }, display_id: `#${pr.number}`, display_type: 'Pull request',
+      product_name: 'GitHub', product_icon: icon(icons, 'github', 'GitHub') },
+    fields, custom_fields: custom,
+    display_order: ['status', 'assignee', 'ci', 'review', 'size', 'date_updated', 'jira'],
+    actions: { primary_actions: [
+      ...(pr.ci === 'fail' && pr.state === 'OPEN' ? [{ text: 'Investigate CI', action_id: 'wo_investigate', value: `pr:${pr.number}`, style: 'primary' }] : []),
+      { text: 'Open on GitHub', action_id: 'wo_open', url: pr.url },
+    ] },
+  };
+}
+
 // One entity for chat.unfurl's metadata.
 export const entity = (link, payload) => ({
   app_unfurl_url: link.url, url: link.url,
   external_ref: link.kind === 'watch' ? { id: `${link.channel}:${link.ts}`, type: 'watch' }
-    : link.kind === 'sentry' ? { id: link.id ?? link.ref, type: 'sentry' } : { id: link.key, type: 'jira' },
+    : link.kind === 'sentry' ? { id: link.id ?? link.ref, type: 'sentry' }
+      : link.kind === 'pr' ? { id: `${link.repo}#${link.number}`, type: 'github_pr' } : { id: link.key, type: 'jira' },
   entity_type: link.kind === 'sentry' ? INCIDENT : TASK, entity_payload: payload,
 });
 

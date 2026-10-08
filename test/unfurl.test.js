@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseLinks, watchPayload, jiraPayload, sentryPayload, entity, TASK, INCIDENT } from '../src/unfurl.js';
+import { parseLinks, watchPayload, jiraPayload, sentryPayload, prPayload, entity, TASK, INCIDENT } from '../src/unfurl.js';
 
 const hosts = { gateway: 'https://gw.example.run.app', jira: 'https://example.atlassian.net' };
 
@@ -84,4 +84,39 @@ test('a Sentry entity is an incident keyed by the issue id', () => {
   const e = entity(link, { attributes: {} });
   assert.equal(e.entity_type, INCIDENT);
   assert.deepEqual(e.external_ref, { id: '7771266201', type: 'sentry' });
+});
+
+test('only mozilla/fxa pull request links get PR cards', () => {
+  const got = parseLinks(['https://github.com/mozilla/fxa/pull/21423', 'https://github.com/mozilla/fxa/pull/21423/files',
+    'https://github.com/evil/fxa/pull/1', 'https://github.com/mozilla/fxa/issues/3'], { ...hosts, github: 'mozilla/fxa' });
+  assert.deepEqual(got.map((l) => [l.kind, l.number, l.url]), [['pr', '21423', 'https://github.com/mozilla/fxa/pull/21423'],
+    ['pr', '21423', 'https://github.com/mozilla/fxa/pull/21423/files']]);
+  const e = entity(got[0], { attributes: {} });
+  assert.deepEqual([e.entity_type, e.external_ref], [TASK, { id: 'mozilla/fxa#21423', type: 'github_pr' }]);
+});
+
+test('a PR card tags state, CI and reviews, sizes the change, and offers to investigate a failing CI', () => {
+  const pr = { number: 21423, title: 'feat(auth): emit passkey wrap_invalidated', url: 'https://github.com/mozilla/fxa/pull/21423',
+    state: 'OPEN', draft: false, author: 'fxa-agent', review: 'REVIEW_REQUIRED', approvers: [], changers: [], ci: 'pass',
+    checks: 20, failed: 0, running: 0, failing: [], additions: 1157, deletions: 21, files: 7, updated: '2026-10-08T01:48:46Z', jira: 'FXA-14687' };
+  const p = prPayload(pr, 'https://icons.example');
+  assert.equal(p.attributes.title.text, 'feat(auth): emit passkey wrap_invalidated');
+  assert.equal(p.attributes.display_id, '#21423');
+  assert.deepEqual(p.attributes.product_icon, { url: 'https://icons.example/github.png', alt_text: 'GitHub' });
+  assert.deepEqual(p.fields.status, { value: 'Open', tag_color: 'green' });
+  assert.deepEqual(p.fields.assignee, { user: { text: 'fxa-agent' }, type: 'slack#/types/user' });
+  const cf = (q) => Object.fromEntries(q.custom_fields.map((f) => [f.key, [f.value, f.tag_color]]));
+  assert.deepEqual(cf(p).ci, ['Passing · 20 checks', 'green']);
+  assert.deepEqual(cf(p).review, ['Review required', 'yellow']);
+  assert.deepEqual(cf(p).size, ['+1,157 −21 · 7 files', undefined]);
+  assert.deepEqual(cf(p).jira, ['FXA-14687', undefined]);
+  assert.deepEqual(p.actions.primary_actions.map((a) => a.action_id), ['wo_open']);
+  const bad = prPayload({ ...pr, ci: 'fail', failed: 2, failing: ['unit-test', 'lint'], review: 'CHANGES_REQUESTED', changers: ['bob'] });
+  assert.deepEqual(cf(bad).ci, ['Failing · 2 of 20: unit-test, lint', 'red']);
+  assert.deepEqual(cf(bad).review, ['Changes requested by bob', 'red']);
+  assert.deepEqual(bad.actions.primary_actions.map((a) => [a.action_id, a.value]), [['wo_investigate', 'pr:21423'], ['wo_open', undefined]]);
+  assert.deepEqual(cf(prPayload({ ...pr, review: 'APPROVED', approvers: ['alice'] })).review, ['Approved by alice', 'green']);
+  assert.deepEqual(prPayload({ ...pr, state: 'MERGED' }).fields.status, { value: 'Merged', tag_color: 'blue' });
+  assert.deepEqual(prPayload({ ...pr, draft: true }).fields.status, { value: 'Draft', tag_color: 'gray' });
+  assert.deepEqual(cf(prPayload({ ...pr, ci: 'running', running: 3 })).ci, ['Running · 3 of 20 left', 'yellow']);
 });

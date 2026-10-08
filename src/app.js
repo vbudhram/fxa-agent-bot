@@ -1616,9 +1616,13 @@ async function statusList(client, channel) {
 // link or an FXA Jira link posted in an allowed channel unfurls as a card.
 const WORK_OBJECTS = process.env.WORK_OBJECTS === '1';
 const LINK_HOSTS = { gateway: process.env.DESKTOP_GATEWAY, jira: process.env.JIRA_URL || 'https://mozilla-hub.atlassian.net',
-  sentry: process.env.SENTRY_URL || 'https://mozilla.sentry.io' };
+  sentry: process.env.SENTRY_URL || 'https://mozilla.sentry.io', github: process.env.GITHUB_REPO || 'mozilla/fxa' };
 async function cardPayload(link) {
   if (link.kind === 'watch') return unfurl.watchPayload(link, sessions.get(link.channel, link.ts));
+  if (link.kind === 'pr') {
+    const pr = await ctl.prCard(`https://github.com/${link.repo}/pull/${link.number}`);
+    return pr ? unfurl.prPayload(pr) : null;
+  }
   if (link.kind === 'sentry') {
     const issue = await ctl.sentryCard(link.ref);
     if (!issue) return null;
@@ -1655,11 +1659,13 @@ app.action('wo_investigate', async ({ ack, body, client }) => {
   const c = body.container ?? {}, a = body.actions?.[0] ?? {};
   const channel = c.channel_id ?? body.channel?.id, ts = c.message_ts;
   if (!channel || !ts || !botUserId) return; // the details panel has no thread to work in
-  const ref = String(a.value ?? '').replace(/[^\w-]/g, '').slice(0, 40);
+  const ref = String(a.value ?? '').replace(/[^\w:-]/g, '').slice(0, 40);
   const link = String(c.app_unfurl_url ?? '').slice(0, 300);
+  const ask = ref.startsWith('pr:')
+    ? `Investigate why CI fails on pull request #${ref.slice(3)} ${link}: which checks fail, the error, and the likely cause. Do not change code.`
+    : `Investigate Sentry issue ${ref} ${link}: what fails, since when, how many users, and the likely cause in the code. Do not change code.`;
   await onMention({ client, body, event: { type: 'app_mention', channel, ts, thread_ts: c.thread_ts ?? ts, user: body.user?.id,
-    team: body.team?.id, text: `<@${botUserId}> Investigate Sentry issue ${ref} ${link}: what fails, since when, how many users, `
-      + 'and the likely cause in the code. Do not change code.' } }).catch((e) => console.error('investigate', e.data?.error ?? e.message));
+    team: body.team?.id, text: `<@${botUserId}> ${ask}` } }).catch((e) => console.error('investigate', e.data?.error ?? e.message));
 });
 app.action('wo_open', async ({ ack }) => { await ack(); }); // a link button: Slack opens the URL
 

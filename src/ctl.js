@@ -92,6 +92,7 @@ export const stop = (key) => run(['stop', key]);
 export const cost = async (key) => { try { return JSON.parse((await run(['session', 'cost', key], { timeout: 60_000 })).trim() || 'null'); } catch { return null; } };
 export const jiraCard = async (key) => { try { return JSON.parse((await run(['jira-card', key], { timeout: 30_000 })).trim() || 'null'); } catch { return null; } };
 export const sentryCard = async (ref) => { try { return JSON.parse((await run(['sentry-card', ref], { timeout: 30_000 })).trim() || 'null'); } catch { return null; } };
+export const prCard = async (url) => { try { return JSON.parse((await run(['pr-card', url], { timeout: 30_000 })).trim() || 'null'); } catch { return null; } };
 export const threadUsage = async (key) => { try { return JSON.parse((await run(['session', 'thread-usage', key], { timeout: 30_000 })).trim() || 'null'); } catch { return null; } };
 export const pause = (key) => run(['session', 'pause', key], { timeout: 5 * 60_000 });
 export const plan = async (key) => { try { return JSON.parse((await run(['session', 'plan', key], { timeout: 60_000 })).trim() || 'null'); } catch { return null; } };
