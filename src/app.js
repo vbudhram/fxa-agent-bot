@@ -13,7 +13,7 @@ import { pollEvery, reachable } from './poll.js';
 import * as unfurl from './unfurl.js';
 import { resolveProfile } from './profile.js';
 import { parseGates, gateAllows, loadMembers } from './access.js';
-import { defuse, watchUrl, threadLine, threadStarter, endWord, prCardMessage, appText, appLabel, lostChannel } from './render.js';
+import { defuse, watchUrl, threadLine, threadStarter, endWord, prCardMessage, appText, appLabel, lostChannel, teamCard } from './render.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, prCard, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT } from './render.js';
@@ -166,13 +166,20 @@ async function onMention({ event, body, client }) {
   if (resume_from) runtime = cur.runtime || 'claude'; // ctl resumes with the session's own agent
   const deadline = Date.now() + START_DELAY_S * 1000;
   // team: the workspace the person wrote from. In an org-wide install the bot's own team (auth.test) is not it.
-  pending.set(key, { prompt, request: resume_from ? requestOf(cur) : prompt, owner: await ownerOf(client, event.channel, event.thread_ts, event.user), team: event.team ?? body?.team_id ?? cur?.team, channel: event.channel, thread_ts, resume_from, runtime, profile: resume_from ? undefined : prof.profile, deadline });
+  pending.set(key, { prompt, request: resume_from ? requestOf(cur) : prompt, owner: await ownerOf(client, event.channel, event.thread_ts, event.user), team: event.team ?? body?.team_id ?? cur?.team, channel: event.channel, thread_ts, resume_from, runtime, profile: resume_from ? undefined : prof.profile, read_only: resume_from ? cur.read_only : undefined, deadline });
   // The card goes up first; reading a long thread for context can take seconds.
   // A failed post must release the thread, or it stays reserved until a restart.
   // With no delay there is nothing to cancel: 👀 is the acknowledgement, and the status follows.
   const { ts } = START_DELAY_S ? await client.chat.postMessage({ channel: event.channel, thread_ts,
     text: resume_from ? 'Picking up where we left off.' : 'Starting.',
     blocks: startCard(key, prompt, START_DELAY_S, Boolean(resume_from), runtime, CODEX) }).catch((e) => { pending.delete(key); throw e; }) : {};
+  // Another team's session: say which repos it can touch, and how, before it starts.
+  if (prof.profile && prof.profile !== 'fxa' && !resume_from) {
+    const info = await ctl.profileInfo(prof.profile).catch((e) => { console.error('profile_show', prof.profile, e.message); return null; });
+    if (info) await client.chat.postMessage({ channel: event.channel, thread_ts, ...teamCard(info) }).catch(() => {});
+    // Fail closed: with no answer, the session shows no PR buttons; the controller refuses a read-only push anyway.
+    if (pending.has(key)) pending.set(key, { ...pending.get(key), read_only: info ? info.read_only : true });
+  }
   // user: whose lines are labelled "owner", the session's owner, not whoever tagged.
   if (event.thread_ts) prompt += await threadContext(client, { ...event, user: pending.get(key)?.owner ?? event.user }, { withBot: cur?.state === 'answered' });
   if (!pending.has(key)) return;
@@ -1840,7 +1847,7 @@ async function pollOne(key) {
       if (ev.type === 'pr' && ev.url) sessions.patch(key, { pr_url: ev.url, pr_follow_since: fresh(key)?.pr_follow_since ?? Date.now(), pr_pushed_at: Date.now() });
       // The wrap-up's status line closes later in this poll; it says what the wrap-up did.
       if ((ev.type === 'pr' || ev.type === 'pushed') && fresh(key)?.status_ts) sessions.patch(key, { wrap_done: ev.type });
-      const msg = render(s.key, { ...ev, desktop: Boolean(process.env.DESKTOP_GATEWAY) });
+      const msg = render(s.key, { ...ev, desktop: Boolean(process.env.DESKTOP_GATEWAY), read_only: Boolean(s.read_only) });
       // A session resumed by Open PR or Push, or an automatic round, ships after the turn closes.
       const ship = () => {
         const tw = i === endAt && fresh(key)?.then_wrap;

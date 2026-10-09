@@ -62,6 +62,15 @@ export function startCard(key, prompt, seconds, resuming = false, runtime = 'cla
     resuming || !switchable ? buttons(key, ['Cancel', 'cancel']) : buttons(key, ['Cancel', 'cancel'], [`Switch to ${RUNTIMES[other].name}`, 'switch_runtime']),
   ];
 }
+// The team card for a session with a profile other than FxA: each repo and what the
+// session may do there (the controller's `profile show`).
+export function teamCard({ profile, read_only, repos = [] }) {
+  const name = `${profile.charAt(0).toUpperCase()}${profile.slice(1)} session${read_only ? ' (read-only)' : ''}`;
+  const line = (r) => r.role === 'dep' ? `👁 \`${r.slug}\` runs locally beside it; read-only`
+    : r.write ? `✏️ \`${r.slug}\` works here; opens a draft PR`
+    : `👁 \`${r.slug}\` reads and runs the code; no push, no PR${r.why ? ` (${r.why})` : ''}`;
+  return { text: name, blocks: [md(`*${name}*`), { type: 'context', elements: repos.map((r) => ({ type: 'mrkdwn', text: line(r) })) }] };
+}
 export { md, buttons, defuse };
 
 // Problems only the operator can fix, told plainly: a raw gcloud or auth error in
@@ -282,7 +291,8 @@ export function render(key, ev) {
       const [head, more] = ev.status === 'ready' ? splitReply(full) : [full, ''];
       const row = [...(more ? [['Show more', 'more']] : []),
         // No changed file: nothing to diff or ship. Push branch only before a PR; after it, Update PR pushes.
-        ...(ev.status === 'ready' && ev.changes !== 0 ? [['Diff', 'diff'], ...(ev.pr ? [['Update PR', 'open_pr']] : [['Open PR', 'open_pr'], ['Push branch', 'push_branch']]),
+        // A read-only profile ships nothing: Diff only.
+        ...(ev.status === 'ready' && ev.changes !== 0 ? [['Diff', 'diff'], ...(ev.read_only ? [] : ev.pr ? [['Update PR', 'open_pr']] : [['Open PR', 'open_pr'], ['Push branch', 'push_branch']]),
           ...(ev.desktop ? [['Try it in Firefox', 'desktop']] : [])] : [])];
       return { text: plain(full), blocks: [md(head), ...(row.length ? [buttons(key, ...row)] : [])], ...(more ? { more } : {}) };
     }

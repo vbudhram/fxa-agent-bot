@@ -43,6 +43,9 @@ export const task = ({ key, owner, prompt, resumeFrom, fresh, thread, isNew, run
     ...(MCP !== undefined ? ['--mcp', MCP.replace(/\s+/g, '')] : []),
     ...(who?.name ? ['--owner-name', who.name] : []), ...(who?.image ? ['--owner-image', who.image] : [])])));
 
+// A profile's repos and the write access of each, for the team card.
+export const profileInfo = async (profile) => JSON.parse(await run(['--pipeline', profile, 'profile', 'show'], { timeout: 30_000 }));
+
 // A quick, read-only answer: {id, answer, upgrade, secs, cost_usd, turns, error}.
 // Rejects when the answer runner is busy (exit 3) or down; the caller starts a session then.
 export const ask = ({ id, prompt, thread }) => withFile(prompt, async (f) =>

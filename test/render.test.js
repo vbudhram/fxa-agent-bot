@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { threadStarter, endWord, prCardMessage, render, operatorProblem, summaryLine, closestCommand, watchUrl, threadLine, draftSplit, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread } from '../src/render.js';
+import { threadStarter, endWord, prCardMessage, render, operatorProblem, summaryLine, closestCommand, watchUrl, threadLine, draftSplit, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard } from '../src/render.js';
 
 test('operator problems are named, other errors are not', () => {
   assert.equal(operatorProblem('ERROR: (gcloud.compute.ssh) Reauthentication failed. cannot prompt').kind, 'gcloud');
@@ -414,4 +414,20 @@ test('the tag reminder shows once per person per thread, across the thread sessi
   const other = { key: 'agent-c3', channel: 'C1', thread_ts: '2.2', tipped: ['U2'] };
   assert.equal(tippedInThread([old, cur, other], cur, 'U1'), true);
   assert.equal(tippedInThread([old, cur, other], cur, 'U2'), false);
+});
+
+test('a read-only session has no PR or push buttons, only Diff', () => {
+  const ids = (m) => m.blocks.flatMap((b) => b.elements ?? []).map((e) => e.action_id);
+  assert.deepEqual(ids(render('agent-x', { type: 'turn_end', status: 'ready', text: 'Done.', changes: 3, read_only: true })), ['diff']);
+});
+
+test('the team card shows each repo with its write access and the reason', () => {
+  const card = teamCard({ profile: 'monitor', read_only: true, repos: [
+    { slug: 'mozilla/blurts-server', role: 'work', write: false, why: 'the profile is read-only' },
+    { slug: 'mozilla/fxa', role: 'dep', write: false } ] });
+  const text = JSON.stringify(card.blocks);
+  assert.match(card.text, /Monitor session \(read-only\)/);
+  assert.match(text, /👁 `mozilla\/blurts-server` reads and runs the code; no push, no PR \(the profile is read-only\)/);
+  assert.match(text, /👁 `mozilla\/fxa` runs locally beside it; read-only/);
+  assert.match(JSON.stringify(teamCard({ profile: 'x', read_only: false, repos: [{ slug: 'a/b', role: 'work', write: true }] }).blocks), /✏️ `a\/b` works here; opens a draft PR/);
 });
