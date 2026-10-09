@@ -35,11 +35,11 @@ const MCP = process.env.MCP_CONNECTORS;
 // findings: what a quick answer found before it asked for a sandbox. It goes in a
 // second file, deleted with the first; an empty one means none.
 // profile: the team profile, passed only for a new session; later calls take it from the record.
-export const task = ({ key, owner, prompt, resumeFrom, fresh, thread, isNew, runtime, profile, link, who, queuedS, findings }) => withFile(prompt, (f) =>
+export const task = ({ key, owner, prompt, resumeFrom, fresh, thread, isNew, runtime, profile, link, who, queuedS, findings, inboxDir }) => withFile(prompt, (f) =>
   withFile(findings ?? '', (ff) => run([...(profile ? ['--pipeline', profile] : []), 'task', '--source', 'slack', '--id', key, '--owner', owner, '--prompt-file', f,
     ...(thread ? ['--thread', thread, ...(isNew ? ['--new'] : [])] : []),
     ...(resumeFrom ? ['--resume-from', resumeFrom, ...(fresh ? ['--fresh'] : [])] : []), ...(runtime ? ['--runtime', runtime] : []),
-    ...(link ? ['--link', link] : []), ...(queuedS ? ['--queued-s', String(queuedS)] : []), ...(findings ? ['--findings-file', ff] : []),
+    ...(link ? ['--link', link] : []), ...(queuedS ? ['--queued-s', String(queuedS)] : []), ...(findings ? ['--findings-file', ff] : []), ...(inboxDir ? ['--inbox-dir', inboxDir] : []),
     ...(MCP !== undefined ? ['--mcp', MCP.replace(/\s+/g, '')] : []),
     ...(who?.name ? ['--owner-name', who.name] : []), ...(who?.image ? ['--owner-image', who.image] : [])])));
 

@@ -344,13 +344,28 @@ async function launch(key, client, since = Date.now()) {
   if (!s || s.state !== 'queued') return; // stopped or restarted while waiting
   // The dashboard links each session to its thread; a lookup failure only drops the link.
   const linkP = app.client.chat.getPermalink({ channel: s.channel, message_ts: s.thread_ts }).then((r) => r.permalink, () => undefined);
+  let inbox;
   try {
     // Together, not one after the other: both are on the path to the first status.
     const [link, who] = await Promise.all([linkP, whoIs(app.client, s.owner)]);
     // A request that waited at the cap reports the wait, for the dashboard's load card.
     const queuedS = s.queued_note ? Math.round((Date.now() - since) / 1000) : undefined;
-    await ctl.task({ key, owner: s.owner, prompt: s.prompt, resumeFrom: s.resume_from, fresh: s.fresh, thread: `${s.channel}:${s.thread_ts}`, isNew: s.is_new, runtime: s.resume_from ? undefined : s.runtime, profile: s.profile, link, who, queuedS, findings: s.findings });
+    // Files from the tag, or from a queued or paused session, ship with the boot: the first turn has them.
+    let note = '';
+    if (s.held_files?.length) {
+      inbox = await mkdtemp(join(tmpdir(), 'fxa-agent-inbox-'));
+      note = await fetchFiles(key, s.held_files, inbox).then((ps) => inboxNote(ps.map((p) => basename(p))), (e) => {
+        console.error('files', key, e.message);
+        sessions.patch(key, { held_files: null }); // a retry at the cap must not say this again
+        say(s, 'I could not get the files from this thread, so I started without them. Send them again.').catch(() => {});
+        return '';
+      });
+    }
+    await ctl.task({ key, owner: s.owner, prompt: s.prompt + note, inboxDir: note ? inbox : undefined, resumeFrom: s.resume_from, fresh: s.fresh, thread: `${s.channel}:${s.thread_ts}`, isNew: s.is_new, runtime: s.resume_from ? undefined : s.runtime, profile: s.profile, link, who, queuedS, findings: s.findings });
+    sessions.patch(key, { held_files: null });
+    if (inbox) await rm(inbox, { recursive: true, force: true }); // task copied them
   } catch (e) {
+    if (inbox) await rm(inbox, { recursive: true, force: true });
     if (!/cap \d+ \(FXA_SESSION_MAX\)/.test(e.stderr ?? '')) { sessions.patch(key, { state: 'failed' }); await fail(client, s, e); return; }
     if (Date.now() - since > QUEUE_GIVE_UP_MS) {
       console.error('queue_dropped', key, 'no session freed up in 30 minutes');   // counted on the dashboard
@@ -648,24 +663,29 @@ const inboxNote = (names) => `\n\nAttached from the thread, in /workspace/.fxa-i
 // Downloads the files and puts them in the runner. Returns the names it attached.
 async function attachFiles(key, refs) {
   const dir = await mkdtemp(join(tmpdir(), 'fxa-agent-files-'));
-  const paths = [];
   try {
-    for (const f of refs) {
-      const r = await fetch(f.url, { headers: { Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}` } });
-      if (!r.ok) { console.error('file', key, f.name, r.status); continue; }
-      // Without files:read Slack answers with its sign-in page, not the file.
-      if ((r.headers.get('content-type') || '').startsWith('text/html')) { console.error('file', key, 'files:read missing'); continue; }
-      const p = join(dir, f.name);
-      await writeFile(p, Buffer.from(await r.arrayBuffer()), { mode: 0o600 });
-      paths.push(p);
-    }
-    if (!paths.length) throw new Error('no file downloaded');
+    const paths = await fetchFiles(key, refs, dir);
     await ctl.attach(key, paths);
+    return paths.map((p) => basename(p));
   } finally { await rm(dir, { recursive: true, force: true }); }
-  return paths.map((p) => basename(p));
+}
+// Downloads the files into dir. Returns their paths; throws when none came.
+async function fetchFiles(key, refs, dir) {
+  const paths = [];
+  for (const f of refs) {
+    const r = await fetch(f.url, { headers: { Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}` } });
+    if (!r.ok) { console.error('file', key, f.name, r.status); continue; }
+    // Without files:read Slack answers with its sign-in page, not the file.
+    if ((r.headers.get('content-type') || '').startsWith('text/html')) { console.error('file', key, 'files:read missing'); continue; }
+    const p = join(dir, f.name);
+    await writeFile(p, Buffer.from(await r.arrayBuffer()), { mode: 0o600 });
+    paths.push(p);
+  }
+  if (!paths.length) throw new Error('no file downloaded');
+  return paths;
 }
 
-// Files sent before the sandbox ran (with the tag, or while queued or paused): attach them now.
+// Files sent while the sandbox started: attach them once it runs. (Earlier ones ship with the boot.)
 async function deliverHeld(key) {
   const refs = fresh(key).held_files;
   sessions.patch(key, { held_files: null }); // before the awaits: the next poll must not attach them again
