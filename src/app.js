@@ -185,8 +185,11 @@ async function onMention({ event, body, client }) {
     if (pending.has(key)) pending.set(key, { ...pending.get(key), read_only: info ? info.read_only : true });
   }
   // user: whose lines are labelled "owner", the session's owner, not whoever tagged.
-  if (event.thread_ts) prompt += await threadContext(client, { ...event, user: pending.get(key)?.owner ?? event.user }, { withBot: cur?.state === 'answered' });
+  const earlier = [];
+  if (event.thread_ts) prompt += await threadContext(client, { ...event, user: pending.get(key)?.owner ?? event.user }, { withBot: cur?.state === 'answered', files: earlier });
   if (!pending.has(key)) return;
+  // Files posted earlier in the thread ship with the boot too, beside the tag's own.
+  if (earlier.length) pending.set(key, { ...pending.get(key), held_files: [...earlier, ...pending.get(key).held_files] });
   // Spread the current entry: a Switch click while the thread was read changed its runtime.
   pending.set(key, { ...pending.get(key), prompt, card_ts: ts, acks: [event.ts],
     timer: setTimeout(() => begin(key, client).catch((e) => console.error('begin', key, e.message)), START_DELAY_S * 1000) });
@@ -457,7 +460,8 @@ function lost(s, e, where) {
   console.error(where, s.key, e.data?.error ?? e.message);
 }
 
-async function threadContext(client, event, { withBot = false } = {}) {
+// files: an array that gets the files people attached earlier in the thread, the 5 newest.
+async function threadContext(client, event, { withBot = false, files } = {}) {
   try {
     // replies pages oldest first; walk to the end so a long thread keeps its newest messages.
     let msgs = [], cursor;
@@ -470,6 +474,7 @@ async function threadContext(client, event, { withBot = false } = {}) {
     const mine = (m) => withBot && m.user === botUserId && !/^(On it!|Starting|Picking up|(Done|Looked into it|Stopped|Interrupted|Paused|Failed) · )/.test(m.text);
     // Another app's post (an alert the thread is about) is context too; this bot's own, only as mine() says.
     const app = (m) => fromBot(m) && m.user !== botUserId;
+    if (files) files.push(...msgs.filter((m) => m.ts !== event.ts && !fromBot(m)).flatMap((m) => fileRefs(m.files)).slice(-5));
     const lines = msgs.filter((m) => m.ts !== event.ts && (!fromBot(m) || mine(m) || app(m)))
       .map((m) => {
         const who = app(m) ? appLabel(m) : fromBot(m) ? 'you (an earlier answer)' : m.user === event.user ? 'owner' : 'someone else';
