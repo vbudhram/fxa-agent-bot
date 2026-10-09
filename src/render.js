@@ -531,3 +531,16 @@ const FILE_OK = /\.(png|jpe?g|gif|webp|svg|pdf|txt|log|md|html|css|scss|json|jso
 export const fileRefs = (files) => (files ?? []).filter((f) => f.url_private_download && f.size <= 25 * 1024 * 1024)
   .map((f) => ({ name: String(f.name || f.id).replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[^A-Za-z0-9]+/, '').slice(0, 100), url: f.url_private_download, size: f.size }))
   .filter((f) => FILE_OK.test(f.name)).slice(0, 5);
+// Each file once, each name once: Slack names every pasted screenshot image.png, so a second one gets a number.
+export function distinctFiles(refs) {
+  const urls = new Set(), names = new Set(), out = [];
+  for (const f of refs) {
+    if (urls.has(f.url)) continue;
+    urls.add(f.url);
+    let name = f.name;
+    for (let i = 2; names.has(name); i++) name = `${i}-${f.name}`;
+    names.add(name);
+    out.push({ ...f, name });
+  }
+  return out;
+}

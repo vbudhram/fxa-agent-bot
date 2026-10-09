@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { threadStarter, endWord, prCardMessage, render, operatorProblem, summaryLine, closestCommand, watchUrl, threadLine, draftSplit, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs } from '../src/render.js';
+import { threadStarter, endWord, prCardMessage, render, operatorProblem, summaryLine, closestCommand, watchUrl, threadLine, draftSplit, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles } from '../src/render.js';
 
 test('operator problems are named, other errors are not', () => {
   assert.equal(operatorProblem('ERROR: (gcloud.compute.ssh) Reauthentication failed. cannot prompt').kind, 'gcloud');
@@ -439,4 +439,9 @@ test('files from a message: safe names, allowed types, 25 MB, five at most', () 
   assert.equal(fileRefs(Array.from({ length: 7 }, (_, i) => f(`${i}.txt`))).length, 5);
   assert.equal(fileRefs([f('D332361.1791638999.diff'), f('fix.patch'), f('app.tsx'), f('notes.zip')]).length, 3);
   assert.deepEqual(fileRefs(undefined), []);
+});
+
+test('files: one copy of each, and a second image.png gets a number', () => {
+  const a = { name: 'image.png', url: 'u1' }, b = { name: 'image.png', url: 'u2' };
+  assert.deepEqual(distinctFiles([a, b, a]).map((f) => f.name), ['image.png', '2-image.png']);
 });

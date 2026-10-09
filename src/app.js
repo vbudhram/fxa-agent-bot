@@ -16,7 +16,7 @@ import { parseGates, gateAllows, loadMembers } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, prCardMessage, appText, appLabel, lostChannel, teamCard } from './render.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
-import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, prCard, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT, fileRefs } from './render.js';
+import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, prCard, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT, fileRefs, distinctFiles } from './render.js';
 
 const { App } = bolt;
 installErrorLog(ctl.errorsPush);
@@ -168,7 +168,7 @@ async function onMention({ event, body, client }) {
   const tagFiles = fileRefs(event.files);
   // team: the workspace the person wrote from. In an org-wide install the bot's own team (auth.test) is not it.
   pending.set(key, { prompt, request: resume_from ? requestOf(cur) : prompt, owner: await ownerOf(client, event.channel, event.thread_ts, event.user), team: event.team ?? body?.team_id ?? cur?.team, channel: event.channel, thread_ts, resume_from, runtime, profile: resume_from ? undefined : prof.profile, read_only: resume_from ? cur.read_only : undefined, deadline,
-    held_files: [...(resume_from ? cur.held_files ?? [] : []), ...tagFiles] });
+    held_files: [...(resume_from ? cur.held_files ?? [] : []), ...tagFiles], own_files: tagFiles.length > 0 });
   if (event.files?.length > tagFiles.length)
     await client.chat.postEphemeral({ channel: event.channel, thread_ts, user: event.user, text: FILES_REFUSED }).catch(() => {});
   // The card goes up first; reading a long thread for context can take seconds.
@@ -202,7 +202,7 @@ async function begin(key, client) {
   // route: the person's own words. A tap's prompt quotes the agent's question, whose options
   // ("Fix both bugs with tests") must not send "File a Jira ticket" to a sandbox.
   // Quick answers know only FxA: another profile goes straight to its sandbox.
-  if (quickFirst(p.route ?? p.prompt, { resuming: Boolean(p.resume_from), runtime: p.runtime, on: QUICK && !p.held_files?.length && (!p.profile || p.profile === 'fxa') })) {
+  if (quickFirst(p.route ?? p.prompt, { resuming: Boolean(p.resume_from), runtime: p.runtime, on: QUICK && !p.own_files && (!p.profile || p.profile === 'fxa') })) {
     const r = await quick(key, p, client);
     if (r === 'answered' || !(p = pending.get(key))) return;
     if (r?.findings) pending.set(key, p = { ...p, findings: r.findings });
@@ -241,10 +241,12 @@ async function ownerOf(client, channel, thread_ts, asker) {
 async function followUp(s, message, text, client, route = text) {
   if ([...pending.values()].some((p) => p.channel === s.channel && p.thread_ts === s.thread_ts)) return;
   const key = sessions.newKey();
+  const own = fileRefs(message.files), earlier = [];
+  if (own.length && !text) text = route = 'See the attached files.';
   pending.set(key, { prompt: text, request: text, route, owner: await ownerOf(client, s.channel, s.thread_ts, message.user), team: message.team ?? s.team, channel: s.channel,
     thread_ts: s.thread_ts, runtime: 'claude', deadline: Date.now(), acks: message.ts ? [message.ts] : [] }); // a tap has no message to mark
-  const ctx = await threadContext(client, { channel: s.channel, thread_ts: s.thread_ts, ts: message.ts, user: pending.get(key).owner }, { withBot: true });
-  pending.set(key, { ...pending.get(key), prompt: text + ctx });
+  const ctx = await threadContext(client, { channel: s.channel, thread_ts: s.thread_ts, ts: message.ts, user: pending.get(key).owner }, { withBot: true, files: earlier });
+  pending.set(key, { ...pending.get(key), prompt: text + ctx, held_files: [...earlier, ...own], own_files: own.length > 0 });
   await begin(key, client).catch((e) => { pending.delete(key); console.error('begin', key, e.message); });
 }
 
@@ -342,9 +344,20 @@ async function quick(key, p, client) {
 // At the session cap the request waits in line, as Claude Tag's does, instead
 // of failing. It retries every 30 s and gives up after 30 min.
 const QUEUE_RETRY_MS = 30_000, QUEUE_GIVE_UP_MS = 30 * 60_000;
+// The files a launch downloaded, kept across its retries at the session cap: key -> {dir, note, urls}.
+const inboxes = new Map();
+// Done with a launch's files: remove them, and keep only the held files it did not take.
+function dropInbox(key, box) {
+  if (!box) return;
+  inboxes.delete(key);
+  rm(box.dir, { recursive: true, force: true }).catch(() => {});
+  if (!fresh(key)) return;
+  const left = (fresh(key).held_files ?? []).filter((f) => !box.urls.includes(f.url));
+  sessions.patch(key, { held_files: left.length ? left : null });
+}
 async function launch(key, client, since = Date.now()) {
   const s = fresh(key);
-  if (!s || s.state !== 'queued') return; // stopped or restarted while waiting
+  if (!s || s.state !== 'queued') { dropInbox(key, inboxes.get(key)); return; } // stopped or restarted while waiting
   // The dashboard links each session to its thread; a lookup failure only drops the link.
   const linkP = app.client.chat.getPermalink({ channel: s.channel, message_ts: s.thread_ts }).then((r) => r.permalink, () => undefined);
   let inbox;
@@ -354,25 +367,25 @@ async function launch(key, client, since = Date.now()) {
     // A request that waited at the cap reports the wait, for the dashboard's load card.
     const queuedS = s.queued_note ? Math.round((Date.now() - since) / 1000) : undefined;
     // Files from the tag, or from a queued or paused session, ship with the boot: the first turn has them.
-    let note = '';
-    if (s.held_files?.length) {
-      inbox = await mkdtemp(join(tmpdir(), 'fxa-agent-inbox-'));
-      note = await fetchFiles(key, s.held_files, inbox).then((ps) => inboxNote(ps.map((p) => basename(p))), (e) => {
+    if (s.held_files?.length && !inboxes.has(key)) {
+      const dir = await mkdtemp(join(tmpdir(), 'fxa-agent-inbox-'));
+      const note = await fetchFiles(key, s.held_files, dir).then((ps) => inboxNote(ps.map((p) => basename(p))), (e) => {
         console.error('files', key, e.message);
-        sessions.patch(key, { held_files: null }); // a retry at the cap must not say this again
         say(s, 'I could not get the files from this thread, so I started without them. Send them again.').catch(() => {});
         return '';
       });
+      inboxes.set(key, { dir, note, urls: s.held_files.map((f) => f.url) });
     }
-    await ctl.task({ key, owner: s.owner, prompt: s.prompt + note, inboxDir: note ? inbox : undefined, resumeFrom: s.resume_from, fresh: s.fresh, thread: `${s.channel}:${s.thread_ts}`, isNew: s.is_new, runtime: s.resume_from ? undefined : s.runtime, profile: s.profile, link, who, queuedS, findings: s.findings });
-    sessions.patch(key, { held_files: null });
-    if (inbox) await rm(inbox, { recursive: true, force: true }); // task copied them
+    inbox = inboxes.get(key);
+    await ctl.task({ key, owner: s.owner, prompt: s.prompt + (inbox?.note ?? ''), inboxDir: inbox?.note ? inbox.dir : undefined, resumeFrom: s.resume_from, fresh: s.fresh, thread: `${s.channel}:${s.thread_ts}`, isNew: s.is_new, runtime: s.resume_from ? undefined : s.runtime, profile: s.profile, link, who, queuedS, findings: s.findings });
+    dropInbox(key, inbox); // task copied them
   } catch (e) {
-    if (inbox) await rm(inbox, { recursive: true, force: true });
+    if (!/cap \d+ \(FXA_SESSION_MAX\)/.test(e.stderr ?? '')) dropInbox(key, inbox);
     if (!/cap \d+ \(FXA_SESSION_MAX\)/.test(e.stderr ?? '')) { sessions.patch(key, { state: 'failed' }); await fail(client, s, e); return; }
     if (Date.now() - since > QUEUE_GIVE_UP_MS) {
       console.error('queue_dropped', key, 'no session freed up in 30 minutes');   // counted on the dashboard
       sessions.patch(key, { state: 'stopped' });
+      dropInbox(key, inbox);
       await say(s, 'I waited 30 minutes and no session freed up, so I dropped this request. Tag me again to retry.');
       return;
     }
@@ -677,7 +690,7 @@ async function attachFiles(key, refs) {
 // Downloads the files into dir. Returns their paths; throws when none came.
 async function fetchFiles(key, refs, dir) {
   const paths = [];
-  for (const f of refs) {
+  for (const f of distinctFiles(refs)) {
     const r = await fetch(f.url, { headers: { Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}` } });
     if (!r.ok) { console.error('file', key, f.name, r.status); continue; }
     // Without files:read Slack answers with its sign-in page, not the file.
@@ -830,8 +843,13 @@ async function resumePaused(s, text, client, extra = {}) {
   if ([...pending.values()].some((p) => p.channel === s.channel && p.thread_ts === s.thread_ts)) return;
   text = takeAside(s.key) + text;
   const key = sessions.newKey();
+  // Reserve the thread before any await, as onMention does.
   pending.set(key, { prompt: text, request: requestOf(s), owner: s.owner, team: s.team, channel: s.channel, thread_ts: s.thread_ts, resume_from: s.key, acks: ackList(fresh(s.key)), ...extra,
     held_files: [...(fresh(s.key)?.held_files ?? []), ...(extra.held_files ?? [])] });
+  // The new runner starts empty: the thread's files go again, whichever handler took the reply.
+  const earlier = [];
+  await threadContext(app.client, { channel: s.channel, thread_ts: s.thread_ts, user: s.owner }, { files: earlier });
+  if (earlier.length && pending.has(key)) pending.set(key, { ...pending.get(key), held_files: [...earlier, ...pending.get(key).held_files] });
   // No note before the status: its first row says it picks up where it left off.
   await begin(key, client);
 }
