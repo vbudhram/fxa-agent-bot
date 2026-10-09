@@ -11,6 +11,7 @@ import * as sessions from './sessions.js';
 import * as live from './live.js';
 import { pollEvery, reachable } from './poll.js';
 import * as unfurl from './unfurl.js';
+import { resolveProfile } from './profile.js';
 import { parseGates, gateAllows, loadMembers } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, prCardMessage, appText, appLabel, lostChannel } from './render.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
@@ -131,6 +132,10 @@ async function onMention({ event, body, client }) {
   let runtime = flag ? flag[2].toLowerCase() : (process.env.AGENT_RUNTIME || 'claude');
   if (!CODEX) runtime = 'claude'; // Codex is off: --codex is ignored
   if (flag) prompt = prompt.replace(flag[0], ' ').trim();
+  // The team profile: profile:<name>, a Jira key's prefix, or the channel. A resume keeps its own.
+  const prof = resolveProfile({ text: prompt, channel: event.channel, user: event.user });
+  if (prof.error) { await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts, text: prof.error }).catch(() => {}); return; }
+  prompt = prof.text;
   if (!prompt) return;
   const thread_ts = thread;
   // In a thread with a session, the message handler runs the bang; answer once.
@@ -161,7 +166,7 @@ async function onMention({ event, body, client }) {
   if (resume_from) runtime = cur.runtime || 'claude'; // ctl resumes with the session's own agent
   const deadline = Date.now() + START_DELAY_S * 1000;
   // team: the workspace the person wrote from. In an org-wide install the bot's own team (auth.test) is not it.
-  pending.set(key, { prompt, request: resume_from ? requestOf(cur) : prompt, owner: await ownerOf(client, event.channel, event.thread_ts, event.user), team: event.team ?? body?.team_id ?? cur?.team, channel: event.channel, thread_ts, resume_from, runtime, deadline });
+  pending.set(key, { prompt, request: resume_from ? requestOf(cur) : prompt, owner: await ownerOf(client, event.channel, event.thread_ts, event.user), team: event.team ?? body?.team_id ?? cur?.team, channel: event.channel, thread_ts, resume_from, runtime, profile: resume_from ? undefined : prof.profile, deadline });
   // The card goes up first; reading a long thread for context can take seconds.
   // A failed post must release the thread, or it stays reserved until a restart.
   // With no delay there is nothing to cancel: 👀 is the acknowledgement, and the status follows.
@@ -182,7 +187,8 @@ async function begin(key, client) {
   if (!p) return;
   // route: the person's own words. A tap's prompt quotes the agent's question, whose options
   // ("Fix both bugs with tests") must not send "File a Jira ticket" to a sandbox.
-  if (quickFirst(p.route ?? p.prompt, { resuming: Boolean(p.resume_from), runtime: p.runtime, on: QUICK })) {
+  // Quick answers know only FxA: another profile goes straight to its sandbox.
+  if (quickFirst(p.route ?? p.prompt, { resuming: Boolean(p.resume_from), runtime: p.runtime, on: QUICK && (!p.profile || p.profile === 'fxa') })) {
     const r = await quick(key, p, client);
     if (r === 'answered' || !(p = pending.get(key))) return;
     if (r?.findings) pending.set(key, p = { ...p, findings: r.findings });
@@ -332,7 +338,7 @@ async function launch(key, client, since = Date.now()) {
     const [link, who] = await Promise.all([linkP, whoIs(app.client, s.owner)]);
     // A request that waited at the cap reports the wait, for the dashboard's load card.
     const queuedS = s.queued_note ? Math.round((Date.now() - since) / 1000) : undefined;
-    await ctl.task({ key, owner: s.owner, prompt: s.prompt, resumeFrom: s.resume_from, fresh: s.fresh, thread: `${s.channel}:${s.thread_ts}`, isNew: s.is_new, runtime: s.resume_from ? undefined : s.runtime, link, who, queuedS, findings: s.findings });
+    await ctl.task({ key, owner: s.owner, prompt: s.prompt, resumeFrom: s.resume_from, fresh: s.fresh, thread: `${s.channel}:${s.thread_ts}`, isNew: s.is_new, runtime: s.resume_from ? undefined : s.runtime, profile: s.profile, link, who, queuedS, findings: s.findings });
   } catch (e) {
     if (!/cap \d+ \(FXA_SESSION_MAX\)/.test(e.stderr ?? '')) { sessions.patch(key, { state: 'failed' }); await fail(client, s, e); return; }
     if (Date.now() - since > QUEUE_GIVE_UP_MS) {
