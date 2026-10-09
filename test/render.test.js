@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { threadStarter, endWord, prCardMessage, render, operatorProblem, summaryLine, closestCommand, watchUrl, threadLine, draftSplit, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard } from '../src/render.js';
+import { threadStarter, endWord, prCardMessage, render, operatorProblem, summaryLine, closestCommand, watchUrl, threadLine, draftSplit, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs } from '../src/render.js';
 
 test('operator problems are named, other errors are not', () => {
   assert.equal(operatorProblem('ERROR: (gcloud.compute.ssh) Reauthentication failed. cannot prompt').kind, 'gcloud');
@@ -430,4 +430,13 @@ test('the team card shows each repo with its write access and the reason', () =>
   assert.match(text, /👁 `mozilla\/blurts-server` reads and runs the code; no push, no PR \(the profile is read-only\)/);
   assert.match(text, /👁 `mozilla\/fxa` runs locally beside it; read-only/);
   assert.match(JSON.stringify(teamCard({ profile: 'x', read_only: false, repos: [{ slug: 'a/b', role: 'work', write: true }] }).blocks), /✏️ `a\/b` works here; opens a draft PR/);
+});
+
+test('files from a message: safe names, allowed types, 25 MB, five at most', () => {
+  const f = (name, size = 10) => ({ id: 'F1', name, size, url_private_download: 'https://files.slack.com/x' });
+  assert.deepEqual(fileRefs([f('my shot (1).PNG')]), [{ name: 'my-shot-1-.PNG', url: 'https://files.slack.com/x', size: 10 }]);
+  assert.deepEqual(fileRefs([f('a.exe'), f('big.log', 26 * 1024 * 1024), { name: 'b.png', size: 1 }]), []);
+  assert.equal(fileRefs(Array.from({ length: 7 }, (_, i) => f(`${i}.txt`))).length, 5);
+  assert.equal(fileRefs([f('D332361.1791638999.diff'), f('fix.patch'), f('app.tsx'), f('notes.zip')]).length, 3);
+  assert.deepEqual(fileRefs(undefined), []);
 });
