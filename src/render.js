@@ -1,3 +1,5 @@
+import { treeRows } from './stack.js';
+
 // Event → Slack message. Templates only: the bot states facts from events and
 // never invents status.
 const buttons = (key, ...names) => ({
@@ -16,6 +18,8 @@ const MD_MAX = 11500;
 const defuse = (t) => String(t ?? '').replace(/<!(here|channel|everyone)[^>]*>/gi, '@$1').replace(/<!subteam\^[^>]*>/gi, '@group')
   .replace(/<@[A-Z0-9]+>/g, '@someone');
 const esc = (t) => defuse(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// " in owner/repo" for a team stack's event, which names its repo.
+const repoOf = (ev) => (/^[\w.-]+\/[\w.-]+$/.test(ev.repo ?? '') ? ` in ${ev.repo}` : '');
 const gh = (u) => (/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(pull\/\d+|compare\/[\w./%?=&-]+)$/.test(String(u ?? '')) ? u : '');
 // A bare FXA key links to its ticket; code blocks, code, links and URLs are left as written.
 const jiraLinks = (t) => {
@@ -289,20 +293,22 @@ export function render(key, ev) {
       const full = ev.text || (ev.status === 'ready' ? 'All set.' : 'Over to you.');
       // A needs-input reply is not split: its question is often last.
       const [head, more] = ev.status === 'ready' ? splitReply(full) : [full, ''];
+      // A team stack: a row for each changed repo (treeRows), each shipping on its own.
+      const trees = ev.status === 'ready' && Array.isArray(ev.trees) ? treeRows(key, ev.trees, { readOnly: Boolean(ev.read_only) }) : [];
       const row = [...(more ? [['Show more', 'more']] : []),
         // No changed file: nothing to diff or ship. Push branch only before a PR; after it, Update PR pushes.
         // A read-only profile ships nothing: Diff only.
-        ...(ev.status === 'ready' && ev.changes !== 0 ? [['Diff', 'diff'], ...(ev.read_only ? [] : ev.pr ? [['Update PR', 'open_pr']] : [['Open PR', 'open_pr'], ['Push branch', 'push_branch']]),
-          ...(ev.desktop ? [['Try it in Firefox', 'desktop']] : [])] : [])];
-      return { text: plain(full), blocks: [md(head), ...(row.length ? [buttons(key, ...row)] : [])], ...(more ? { more } : {}) };
+        ...(ev.status === 'ready' && ev.changes !== 0 && !Array.isArray(ev.trees) ? [['Diff', 'diff'], ...(ev.read_only ? [] : ev.pr ? [['Update PR', 'open_pr']] : [['Open PR', 'open_pr'], ['Push branch', 'push_branch']])] : []),
+        ...(ev.status === 'ready' && ev.changes !== 0 && ev.desktop ? [['Try it in Firefox', 'desktop']] : [])];
+      return { text: plain(full), blocks: [md(head), ...(row.length ? [buttons(key, ...row)] : []), ...trees], ...(more ? { more } : {}) };
     }
     case 'pr': {
       const head = !gh(ev.url) ? 'The PR is up; its link did not look like a GitHub PR, so check the repo.'
-        : ev.updated ? `Updated the PR: ${gh(ev.url)}` : `Draft PR is up: ${gh(ev.url)}. I am still here: reply to change it or to ask about the review.`;
+        : ev.updated ? `Updated the PR: ${gh(ev.url)}` : `Draft PR is up${repoOf(ev)}: ${gh(ev.url)}. I am still here: reply to change it or to ask about the review.`;
       // The session's totals are in the stop message and !usage, not here.
       return { text: `${head}${noteLines(ev.notes)}` };
     }
-    case 'pushed': return { text: `Pushed \`${esc(ev.branch).replace(/`/g, '')}\`.${gh(ev.url) ? ` <${gh(ev.url)}|Open a PR from it> when you are ready, or keep steering here.` : ' Keep steering here, or open a PR from it on GitHub.'}${noteLines(ev.notes)}` };
+    case 'pushed': return { text: `Pushed \`${esc(ev.branch).replace(/`/g, '')}\`${repoOf(ev)}.${gh(ev.url) ? ` <${gh(ev.url)}|Open a PR from it> when you are ready, or keep steering here.` : ' Keep steering here, or open a PR from it on GitHub.'}${noteLines(ev.notes)}` };
     case 'error': {
       const op = operatorProblem(ev.text);
       return op ? { text: op.text, operator: op.kind } : { text: `Something went wrong: ${esc(ev.text)} Try again, or \`!restart\` to start fresh.` };
@@ -374,7 +380,7 @@ two cannot coexist, stop with 'git rebase --abort' and say why. If yarn.lock cha
 conflicted and how you resolved it, and what you checked. '!pr' then updates the PR.`;
 // The gateway's read-only page for a thread: one link for all the thread's sessions.
 export const watchUrl = (gateway, channel, threadTs) => `${gateway.replace(/\/+$/, '')}/w/${channel}:${threadTs}`;
-export const COMMANDS = ['status', 'plan', 'interrupt', 'watch', 'desktop', 'diff', 'pr', 'push', 'rebase', 'pause', 'stop', 'new', 'restart', 'usage', 'mute', 'unmute', 'help'];
+export const COMMANDS = ['status', 'plan', 'interrupt', 'watch', 'desktop', 'diff', 'pr', 'push', 'rebase', 'pause', 'stop', 'new', 'restart', 'usage', 'mute', 'unmute', 'stack', 'help'];
 export const HELP = [
   '*While I work*',
   '`!status` what I am doing, the PR, and how long setup took',
@@ -394,6 +400,9 @@ export const HELP = [
   '`!new` start over from main, rereading this thread, with no PR',
   '`!usage` how long this session has run, its turns and changes',
   '`!mute` / `!unmute` stop or resume my replies here (👎 on my message mutes too)',
+  '*Several repos*',
+  '`!stack` pick a team and its repos for this thread; the next tag here starts with them',
+  '`!stack checkout <PR link>` continue that PR here: its branch, its head, and its PR card move to this thread',
   '`!help` this list',
   '',
   'A reply in the thread steers me. Once others join the thread, tag me so I know a reply is for me. After a pause, a reply or a tag picks the work up again; after a stop, a tag does. Once the PR merges or closes, a tag starts something new.',

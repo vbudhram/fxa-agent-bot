@@ -445,3 +445,11 @@ test('files: one copy of each, and a second image.png gets a number', () => {
   const a = { name: 'image.png', url: 'u1' }, b = { name: 'image.png', url: 'u2' };
   assert.deepEqual(distinctFiles([a, b, a]).map((f) => f.name), ['image.png', '2-image.png']);
 });
+
+test('turn_end in a team stack: a row for each changed repo, no single Open PR row', () => {
+  const m = render('agent-1', { type: 'turn_end', status: 'ready', text: 'Done.', changes: 3,
+    trees: [{ name: 'fxa', slug: 'mozilla/fxa', out: 'pr', changes: 2, pr: null }, { name: 'pyfxa', slug: 'mozilla/PyFxA', out: 'diff', changes: 1 }] });
+  const rows = m.blocks.filter((b) => b.type === 'actions').map((b) => b.elements.map((e) => `${e.action_id}:${e.value}`));
+  assert.deepEqual(rows, [['diff:agent-1|mozilla/fxa', 'open_pr:agent-1|mozilla/fxa', 'push_branch:agent-1|mozilla/fxa'], ['diff:agent-1|mozilla/PyFxA']]);
+  assert.match(render('agent-1', { type: 'pr', url: 'https://github.com/mozilla/PyFxA/pull/3', repo: 'mozilla/PyFxA' }).text, /^Draft PR is up in mozilla\/PyFxA: /);
+});

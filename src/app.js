@@ -12,6 +12,7 @@ import * as live from './live.js';
 import { pollEvery, reachable } from './poll.js';
 import * as unfurl from './unfurl.js';
 import { resolveProfile } from './profile.js';
+import { parseStack, teamsFor, stackTeamCard, stackRepoCard, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
 import { parseGates, gateAllows, loadMembers } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, prCardMessage, appText, appLabel, lostChannel, teamCard } from './render.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
@@ -113,6 +114,12 @@ async function settle(s, ok = true) {
 }
 const strip = (t) => (t ?? '').replace(/<@[A-Z0-9]+>/g, '').trim();
 
+// !stack: the team and repos a thread's next session starts with, "<channel>:<thread_ts>" →
+// {profile, repos, user}. In memory: a restart loses a pick nobody used yet, and the person picks again.
+const stackChoice = new Map();
+// The open pickers, by message ts: who asked, and what they picked so far.
+const stackPicks = new Map();
+
 // A mention starts at once, after a short window to cancel a mistaken tag.
 // A tag of the bot, and the Investigate button on a Work Object card, which makes one (wo_investigate).
 async function onMention({ event, body, client }) {
@@ -134,12 +141,21 @@ async function onMention({ event, body, client }) {
   if (flag) prompt = prompt.replace(flag[0], ' ').trim();
   // The team profile: profile:<name>, a Jira key's prefix, or the channel. A resume keeps its own.
   const prof = resolveProfile({ text: prompt, channel: event.channel, user: event.user });
+  // !stack in this thread picked a team and its repos: the next tag starts with them (stackChoice).
+  const choice = stackChoice.get(`${event.channel}:${thread}`);
+  if (choice?.user === event.user) { prof.profile = choice.profile; delete prof.error; }
   if (prof.error) { await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts, text: prof.error }).catch(() => {}); return; }
   prompt = prof.text;
   if (!prompt) return;
   const thread_ts = thread;
   // In a thread with a session, the message handler runs the bang; answer once.
   if (prompt.startsWith('!')) { if (!cur) await bang(null, prompt, { user: event.user, channel: event.channel, thread_ts, ts: event.ts }, client); return; }
+  // The work moved to another thread (!stack checkout): it continues there, not here.
+  if (cur?.moved_to) {
+    await client.chat.postEphemeral({ channel: event.channel, thread_ts: thread, user: event.user,
+      text: `This work moved to ${cur.moved_to}. Continue it there, or tag me in a new thread to start something else.` }).catch(() => {});
+    return;
+  }
   if (cur?.stop_failed) {
     await client.chat.postEphemeral({ channel: event.channel, thread_ts, user: event.user,
       text: 'The last session here did not stop cleanly. `@fxa-agent !stop` first, so its sandbox is not left running.' }).catch(() => {});
@@ -155,7 +171,9 @@ async function onMention({ event, body, client }) {
   // as context: the old changes are in main already, or were turned down.
   const prDone = ['MERGED', 'CLOSED'].includes(cur?.pr_seen?.state);
   const prOpen = cur?.state === 'pr_open' && !prDone;
-  const resume_from = cur && !prDone && (['stopped', 'failed', 'paused'].includes(cur.state) || prOpen) ? cur.key : undefined;
+  // A !stack pick of another team starts a new session: the old one's repos are another team's.
+  const sameTeam = choice?.user !== event.user || choice.profile === (cur?.profile || 'fxa');
+  const resume_from = sameTeam && cur && !prDone && (['stopped', 'failed', 'paused'].includes(cur.state) || prOpen) ? cur.key : undefined;
   // Someone else's tag must not take the session over: the message handler resumes it for the owner.
   if (resume_from && event.user !== cur.owner) {
     if (!STEER_ANYONE) await client.chat.postEphemeral({ channel: event.channel, thread_ts, user: event.user,
@@ -168,6 +186,7 @@ async function onMention({ event, body, client }) {
   const tagFiles = fileRefs(event.files);
   // team: the workspace the person wrote from. In an org-wide install the bot's own team (auth.test) is not it.
   pending.set(key, { prompt, request: resume_from ? requestOf(cur) : prompt, owner: await ownerOf(client, event.channel, event.thread_ts, event.user), team: event.team ?? body?.team_id ?? cur?.team, channel: event.channel, thread_ts, resume_from, runtime, profile: resume_from ? undefined : prof.profile, read_only: resume_from ? cur.read_only : undefined, deadline,
+    ...(choice?.user === event.user ? { repos: choice.repos, ...(resume_from ? {} : { is_new: true }) } : {}),
     held_files: [...(resume_from ? cur.held_files ?? [] : []), ...tagFiles], own_files: tagFiles.length > 0 });
   if (event.files?.length > tagFiles.length)
     await client.chat.postEphemeral({ channel: event.channel, thread_ts, user: event.user, text: FILES_REFUSED }).catch(() => {});
@@ -202,7 +221,7 @@ async function begin(key, client) {
   // route: the person's own words. A tap's prompt quotes the agent's question, whose options
   // ("Fix both bugs with tests") must not send "File a Jira ticket" to a sandbox.
   // Quick answers know only FxA: another profile goes straight to its sandbox.
-  if (quickFirst(p.route ?? p.prompt, { resuming: Boolean(p.resume_from), runtime: p.runtime, on: QUICK && !p.own_files && (!p.profile || p.profile === 'fxa') })) {
+  if (quickFirst(p.route ?? p.prompt, { resuming: Boolean(p.resume_from), runtime: p.runtime, on: QUICK && !p.own_files && !p.checkout && !p.repos && (!p.profile || p.profile === 'fxa') })) {
     const r = await quick(key, p, client);
     if (r === 'answered' || !(p = pending.get(key))) return;
     if (r?.findings) pending.set(key, p = { ...p, findings: r.findings });
@@ -215,8 +234,13 @@ async function begin(key, client) {
   const pr = from?.pr_seen || from?.pr_url ? { pr_seen: from.pr_seen, pr_follow_since: from.pr_follow_since, pr_url: from.pr_url,
     auto_rounds: from.auto_rounds, copilot_seen_at: from.copilot_seen_at, pr_pushed_at: from.pr_pushed_at, ci_seen: from.ci_seen, last_person_at: from.last_person_at, edited_at: from.edited_at,
     pr_card_ts: from.pr_card_ts, pr_card_head: from.pr_card_head, pr_card_text: from.pr_card_text } : {};
+  // A team stack's PRs, one set for each repo. A move (!stack checkout) leaves each card in the old thread.
+  if (from?.prs) pr.prs = carryPrs(from.prs, Boolean(rest.moved_from));
+  if (rest.moved_from) Object.assign(pr, { pr_card_ts: null, pr_card_head: null, pr_card_text: null });
+  if (from?.trees) pr.trees = from.trees;
   sessions.put({ key, ...rest, ...pr, cursor: 0, state: 'queued', started_at: Date.now() });
   pending.delete(key);
+  stackChoice.delete(`${rest.channel}:${rest.thread_ts}`);
   if (card_ts) await client.chat.update({ channel: p.channel, ts: card_ts, text: ON_IT, blocks: [] }).catch(() => {});
   await launch(key, client);
 }
@@ -377,7 +401,7 @@ async function launch(key, client, since = Date.now()) {
       inboxes.set(key, { dir, note, urls: s.held_files.map((f) => f.url) });
     }
     inbox = inboxes.get(key);
-    await ctl.task({ key, owner: s.owner, prompt: s.prompt + (inbox?.note ?? ''), inboxDir: inbox?.note ? inbox.dir : undefined, resumeFrom: s.resume_from, fresh: s.fresh, thread: `${s.channel}:${s.thread_ts}`, isNew: s.is_new, runtime: s.resume_from ? undefined : s.runtime, profile: s.profile, link, who, queuedS, findings: s.findings });
+    await ctl.task({ key, owner: s.owner, prompt: s.prompt + (inbox?.note ?? ''), inboxDir: inbox?.note ? inbox.dir : undefined, resumeFrom: s.resume_from, fresh: s.fresh, thread: `${s.channel}:${s.thread_ts}`, isNew: s.is_new, runtime: s.resume_from ? undefined : s.runtime, profile: s.profile, link, who, queuedS, findings: s.findings, repos: s.repos, checkout: s.checkout });
     dropInbox(key, inbox); // task copied them
   } catch (e) {
     if (!/cap \d+ \(FXA_SESSION_MAX\)/.test(e.stderr ?? '')) dropInbox(key, inbox);
@@ -715,6 +739,104 @@ async function deliverHeld(key) {
   }
 }
 
+// !stack: pick a team and its repos for the thread's next session, or continue a PR here.
+async function stackCmd(s, text, m, client, note) {
+  const p = parseStack(text);
+  if (p.error) { await note(p.error); return; }
+  if (s && LIVE.includes(fresh(s.key)?.state)) { await note('This thread has a running session. Use a new thread, or `!stop` first: the next session here then starts with your pick.'); return; }
+  const teams = teamsFor(await ctl.profileList().catch((e) => { console.error('profile list', e.message); return []; }), m.user);
+  if (!teams.length) { await note('I could not read the teams. Try again in a moment.'); return; }
+  if (p.sub === 'checkout') { await stackCheckout(s, p, text, m, client, note, teams); return; }
+  const team = p.team && teams.find((t) => t.profile === p.team);
+  if (p.team && !team) { await note(`There is no team \`${p.team}\` for you. Teams: ${teams.map((t) => `\`${t.profile}\``).join(', ')}.`); return; }
+  const { ts } = await client.chat.postMessage({ channel: m.channel, thread_ts: m.thread_ts, ...(team ? stackRepoCard(team) : stackTeamCard(teams)) });
+  stackPicks.set(ts, { user: m.user, channel: m.channel, thread_ts: m.thread_ts, teams, team: team?.profile,
+    repos: team ? (team.defaults?.length ? team.defaults : team.repos.filter((r) => r.role === 'work').slice(0, 1).map((r) => r.slug)) : null });
+}
+// A picker tap by anyone but its asker, or on a picker from before a restart, does nothing but say so.
+async function stackPickOf(body, client) {
+  const pick = stackPicks.get(body.message?.ts);
+  if (pick && pick.user === body.user.id) return pick;
+  await client.chat.postEphemeral({ channel: body.channel?.id, thread_ts: body.message?.thread_ts, user: body.user.id,
+    text: pick ? `Only <@${pick.user}> can use this picker.` : 'This picker is from before a restart. Send `!stack` again.' }).catch(() => {});
+  return null;
+}
+app.action('stack_team', async ({ ack, body, action, client }) => {
+  await ack();
+  const pick = await stackPickOf(body, client);
+  const team = pick?.teams.find((t) => t.profile === action.selected_option?.value);
+  if (!team) return;
+  Object.assign(pick, { team: team.profile, repos: team.defaults?.length ? team.defaults : team.repos.filter((r) => r.role === 'work').slice(0, 1).map((r) => r.slug) });
+  await client.chat.update({ channel: pick.channel, ts: body.message.ts, ...stackRepoCard(team, pick.repos) }).catch((e) => console.error('stack card', e.data?.error ?? e.message));
+});
+app.action('stack_repos', async ({ ack, body, action, client }) => {
+  await ack();
+  const pick = await stackPickOf(body, client);
+  if (pick) pick.repos = (action.selected_options ?? []).map((o) => o.value);
+});
+app.action('stack_go', async ({ ack, body, client }) => {
+  await ack();
+  const pick = await stackPickOf(body, client);
+  if (!pick) return;
+  if (!pick.team || !pick.repos?.length) {
+    await client.chat.postEphemeral({ channel: pick.channel, thread_ts: pick.thread_ts, user: pick.user, text: 'Pick at least one repo.' }).catch(() => {});
+    return;
+  }
+  stackChoice.set(`${pick.channel}:${pick.thread_ts}`, { profile: pick.team, repos: pick.repos, user: pick.user });
+  stackPicks.delete(body.message.ts);
+  const label = pick.teams.find((t) => t.profile === pick.team)?.label || pick.team;
+  const text = `*${label}*: ${pick.repos.map((r) => `\`${r}\``).join(', ')}. Tag me here with the task, and the session starts with these repos.`;
+  await client.chat.update({ channel: pick.channel, ts: body.message.ts, text, blocks: [md(text)] }).catch(() => {});
+});
+
+// !stack checkout <PR link>: continue a PR in this thread. The bot's own: its session resumes
+// here, and the old thread stops following it (a move). A person's: a new session on its branch,
+// which pushes only after the PR's author agrees (the controller checks).
+async function stackCheckout(s, p, text, m, client, note, teams) {
+  if ([...pending.values()].some((x) => x.channel === m.channel && x.thread_ts === m.thread_ts)) return;
+  const rest = text.replace(/^!stack\s+checkout\s+\S+/i, '').trim();
+  const prompt = rest || `Continue ${p.url}. Read the PR and its review, and say what is left to do.`;
+  const found = await ctl.findPr(p.url).catch((e) => { console.error('find-pr', e.message); return null; });
+  if (found) {
+    if (found.live) { await note(`That PR's session is still running in another thread. Stop it there first, then try again.`); return; }
+    if (found.owner !== m.user) { await note(`That PR is <@${found.owner}>'s work. Only they can move it here.`); return; }
+    const old = sessions.all().find((x) => x.key === found.key);
+    const key = sessions.newKey();
+    pending.set(key, { prompt, request: prompt, owner: m.user, team: old?.team ?? s?.team, channel: m.channel, thread_ts: m.thread_ts,
+      resume_from: found.key, moved_from: found.key, runtime: old?.runtime || 'claude' });
+    await say({ channel: m.channel, thread_ts: m.thread_ts }, `Moving ${p.url} here: its branch, its work so far, and its PR card. The old thread stops following it.`);
+    const link = await client.chat.getPermalink({ channel: m.channel, message_ts: m.thread_ts }).then((r) => r.permalink, () => null);
+    await begin(key, client);
+    if (old) {
+      sessions.patch(old.key, { pr_follow_done: true, moved_to: link || 'another thread',
+        ...(old.prs ? { prs: Object.fromEntries(Object.entries(old.prs).map(([r, x]) => [r, { ...x, pr_follow_done: true }])) } : {}) });
+      await client.chat.postMessage({ channel: old.channel, thread_ts: old.thread_ts, text: `Moved to ${link || 'another thread'}. The PR's notes go there now.` }).catch(() => {});
+    }
+    return;
+  }
+  // A PR no session made: the team that has its repo, FxA first for FxA's PRs.
+  const has = (t) => (t.repos ?? []).some((r) => r.role === 'work' && r.slug.toLowerCase() === p.slug.toLowerCase());
+  const team = teams.find((t) => t.profile === 'fxa' && has(t)) ?? teams.find(has);
+  if (!team) { await note(`None of your teams has \`${p.slug}\`.`); return; }
+  const slug = team.repos.find((r) => r.slug.toLowerCase() === p.slug.toLowerCase()).slug;
+  const repos = (team.defaults ?? []).length ? [...new Set([...(team.defaults ?? []), slug])] : undefined;
+  const key = sessions.newKey();
+  pending.set(key, { prompt, request: prompt, owner: m.user, team: s?.team, channel: m.channel, thread_ts: m.thread_ts,
+    profile: team.profile, repos, checkout: p.url, runtime: 'claude' });
+  await say({ channel: m.channel, thread_ts: m.thread_ts }, `Continuing ${p.url} here, on its own branch. If someone else made it, I push to it only after they comment \`push ok\` on the PR.`);
+  await begin(key, client);
+}
+
+// treeArg: the repo a stack command names ("!pr pyfxa", "!pr mozilla/PyFxA"). undefined for a
+// session with one repo; false for a stack with none named or none that matches.
+function treeArg(s, text) {
+  const trees = fresh(s.key)?.trees;
+  if (!trees?.length) return undefined;
+  const a = (text.trim().split(/\s+/)[1] ?? '').toLowerCase();
+  const t = trees.find((x) => x.name?.toLowerCase() === a || x.slug?.toLowerCase() === a);
+  return t ? t.slug : false;
+}
+
 // Bang commands, as in Claude Tag: @fxa-agent !status, !help, and so on. The
 // ones that change the session are for its owner.
 async function bang(s, text, m, client) {
@@ -725,6 +847,7 @@ async function bang(s, text, m, client) {
   // owner under STEER=owner.
   const steerOnly = () => { if (!STEER_ANYONE && s && m.user !== s.owner) { note(`Only <@${s.owner}> can do that in this session.`); return true; } return false; };
   const ownerOnly = () => { if (s && m.user !== s.owner) { note(`Only <@${s.owner}> can do that in this session.`); return true; } return false; };
+  if (cmd === 'stack') { await stackCmd(s, text, m, client, note); return; }
   if (cmd === 'help' || !s) {
     if (cmd === 'status' && !s) { await note(await statusList(client, m.channel)); return; }
     await note(`${s ? '' : 'There is no session in this thread. Tag me with a task to start one.\n\n'}${HELP}`);
@@ -743,18 +866,21 @@ async function bang(s, text, m, client) {
     const cur = fresh(s.key), mins = cur.started_at ? Math.round((Date.now() - cur.started_at) / 60_000) : 0;
     await say(s, [`*${STATE_WORD[cur.state] ?? cur.state}* · ${mins} min · started by <@${cur.owner}>`,
       cur.last_act ? `Now: ${defuse(String(cur.last_act)).slice(0, 200)}` : null,
-      cur.pr_url ? `PR: ${cur.pr_url}` : null,
+      ...(cur.prs ? Object.entries(cur.prs).filter(([, x]) => x.pr_url).map(([r, x]) => `PR in ${r}: ${x.pr_url}`) : [cur.pr_url ? `PR: ${cur.pr_url}` : null]),
       cur.boot_s ? `Setup took ${cur.boot_s}s.` : null,
       cur.state === 'active' && !cur.status_ts ? 'Waiting for you. I pause after 10 minutes without a message; a reply picks it up again.' : null,
       cur.muted ? 'Replies are muted here. `!unmute` to hear from me.' : null].filter(Boolean).join('\n'));
   } else if (cmd === 'pr' || cmd === 'push') {
     if (ownerOnly()) return;
-    if (ENDED.includes(fresh(s.key).state)) { await resumeToShip(fresh(s.key), client, cmd === 'push' ? 'push' : 'pr'); return; }
+    // A team stack ships one repo: !pr <name> or !pr <owner/repo>.
+    const repo = treeArg(s, text);
+    if (repo === false) { await note(`Name the repo: \`!${cmd} <repo>\`, one of ${(fresh(s.key).trees ?? []).map((t) => `\`${t.name}\``).join(', ')}.`); return; }
+    if (ENDED.includes(fresh(s.key).state)) { await resumeToShip(fresh(s.key), client, cmd === 'push' ? 'push' : 'pr', repo); return; }
     if (!readyToShip()) return;
-    const what = cmd === 'push' ? 'Push branch' : fresh(s.key).pr_url ? 'Update PR' : 'Open PR';
+    const what = cmd === 'push' ? 'Push branch' : prView(fresh(s.key), repo).pr_url ? 'Update PR' : 'Open PR';
     const busy = await startWrap(s, client, what, m.user);
     if (busy) { await note(busy); return; }
-    await (cmd === 'push' ? pushBranch(s, client) : openPr(s, client)).catch((e) => fail(client, s, e));
+    await (cmd === 'push' ? pushBranch(s, client, repo) : openPr(s, client, repo)).catch((e) => fail(client, s, e));
   } else if (cmd === 'rebase') {
     // The agent owns its git: it rebases and resolves; the host only pushes.
     if (ownerOnly() || !readyToShip()) return;
@@ -762,7 +888,8 @@ async function bang(s, text, m, client) {
   } else if (cmd === 'diff') {
     if (ownerOnly()) return;
     await note('Getting the diff…');
-    await postDiff(s, client).catch((e) => fail(client, s, e));
+    const repo = treeArg(s, text);
+    await postDiff(s, client, repo || undefined).catch((e) => fail(client, s, e));
   } else if (cmd === 'pause') {
     if (ownerOnly()) return;
     const cur = fresh(s.key);
@@ -1445,14 +1572,15 @@ ownerAction('desktop', async (s, client, action, body) => {
 });
 ownerAction('diff', async (s, client, action, body) => {
   working(s, body, 'Getting the diff…');
-  await postDiff(s, client);
+  await postDiff(s, client, valueRepo(action.value));
 });
-async function postDiff(s, client) {
-  const d = await ctl.diff(s.key);
-  if (!d.trim()) { await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'No changes yet.' }); return; }
+// repo: one repo of a team stack; without it, every repo (each under its own name).
+async function postDiff(s, client, repo) {
+  const d = await ctl.diff(s.key, repo);
+  if (!d.trim()) { await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: `No changes yet${repo ? ` in ${repo}` : ''}.` }); return; }
   const files = (d.match(/^diff --git /gm) ?? []).length;
   const add = (d.match(/^\+(?!\+\+ )/gm) ?? []).length, del = (d.match(/^-(?!-- )/gm) ?? []).length;
-  await client.files.uploadV2({ channel_id: s.channel, thread_ts: s.thread_ts, filename: `${s.key}.diff`, content: d,
+  await client.files.uploadV2({ channel_id: s.channel, thread_ts: s.thread_ts, filename: `${s.key}${repo ? `-${repo.split('/')[1]}` : ''}.diff`, content: d,
     snippet_type: 'diff', initial_comment: `${files} file${files === 1 ? '' : 's'} changed, +${add} −${del}` });
 }
 
@@ -1504,29 +1632,33 @@ async function startWrap(s, client, what, user, msg) {
   }
   return null;
 }
-async function openPr(s, client) {
+// repo: the one repo of a team stack to ship; the controller refuses a stack's ship without it.
+async function openPr(s, client, repo) {
   // No note first: the tapped row already says what started, and the wrap-up's own status
   // shows its steps. The poll posts the PR link. A second Open PR updates that PR.
-  await ctl.finish(s.key);
+  await ctl.finish(s.key, false, repo);
 }
-async function pushBranch(s, client) {
-  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Pushing the branch: a commit title, the safety checks, then the push. No PR, and the session stays open. The review runs when you open the PR.' });
-  await ctl.finish(s.key, true);
+async function pushBranch(s, client, repo) {
+  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: `Pushing the branch${repo ? ` of ${repo}` : ''}: a commit title, the safety checks, then the push. No PR, and the session stays open. The review runs when you open the PR.` });
+  await ctl.finish(s.key, true, repo);
 }
 ownerAction('open_pr', async (s, client, action, body) => {
-  if (!(await wrapTap(s, client, body, fresh(s.key)?.pr_url ? 'Update PR' : 'Open PR'))) return;
-  await (ENDED.includes(fresh(s.key)?.state) ? resumeToShip(fresh(s.key), client, 'pr') : openPr(s, client));
+  const repo = valueRepo(action.value);
+  if (!(await wrapTap(s, client, body, `${prView(fresh(s.key), repo)?.pr_url ? 'Update PR' : 'Open PR'}${repo ? ` · ${repo}` : ''}`))) return;
+  await (ENDED.includes(fresh(s.key)?.state) ? resumeToShip(fresh(s.key), client, 'pr', repo) : openPr(s, client, repo));
 });
 ownerAction('push_branch', async (s, client, action, body) => {
-  if (!(await wrapTap(s, client, body, 'Push branch'))) return;
-  await (ENDED.includes(fresh(s.key)?.state) ? resumeToShip(fresh(s.key), client, 'push') : pushBranch(s, client));
+  const repo = valueRepo(action.value);
+  if (!(await wrapTap(s, client, body, `Push branch${repo ? ` · ${repo}` : ''}`))) return;
+  await (ENDED.includes(fresh(s.key)?.state) ? resumeToShip(fresh(s.key), client, 'push', repo) : pushBranch(s, client, repo));
 });
 // Open PR or Push on a paused or stopped session: resume it on a new runner, and
 // ship once its first turn says the work carried over (shipAfterResume).
 const ENDED = ['paused', 'stopped', 'failed'];
-async function resumeToShip(s, client, what) {
+async function resumeToShip(s, client, what, repo) {
   // The PR's state now, not the follower's last look, which can be minutes or days old.
-  const st = s.pr_url ? (await ctl.prStatus(s.key))?.state ?? s.pr_seen?.state : null;
+  const v = prView(s, repo);
+  const st = v.pr_url ? (await ctl.prStatus(s.key, repo))?.state ?? v.pr_seen?.state : null;
   if (['MERGED', 'CLOSED'].includes(st)) {
     await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: `This PR is ${st === 'MERGED' ? 'merged' : 'closed'}. Tag me with what to do next, and I will start fresh from main.` });
     return;
@@ -1536,7 +1668,7 @@ async function resumeToShip(s, client, what) {
     return;
   }
   await resumePaused(s, `The engineer tapped ${what === 'push' ? 'Push branch' : 'Open PR'}. Run git status and check that your work carried over. Say so in one line, and end with 'status: ready' if it did. The host then ships it.`,
-    client, { then_wrap: what, then_wrap_at: Date.now() });
+    client, { then_wrap: what, then_wrap_at: Date.now(), then_wrap_repo: repo ?? null });
 }
 async function shipAfterResume(key, what, ev) {
   const s = fresh(key);
@@ -1552,8 +1684,9 @@ async function shipAfterResume(key, what, ev) {
     await postMsg(key, { text: `I did not ${what === 'push' ? 'push' : 'open the PR'}: my reply above says why. Tap the button again when it is ready.` });
     return;
   }
-  if (await startWrap(s, app.client, what === 'push' ? 'Push branch' : s.pr_url ? 'Update PR' : 'Open PR', s.owner)) return;
-  await (what === 'push' ? pushBranch(s, app.client) : openPr(s, app.client)).catch((e) => fail(app.client, s, e));
+  const repo = s.then_wrap_repo ?? undefined;
+  if (await startWrap(s, app.client, what === 'push' ? 'Push branch' : prView(s, repo).pr_url ? 'Update PR' : 'Open PR', s.owner)) return;
+  await (what === 'push' ? pushBranch(s, app.client, repo) : openPr(s, app.client, repo)).catch((e) => fail(app.client, s, e));
 }
 const stopping = new Set();
 ownerAction('stop', async (s, client, action, body) => {
@@ -1915,7 +2048,15 @@ async function pollOne(key) {
     // batch, so a failed post is logged and skipped, never re-sent every 5 s.
     for (const [i, ev] of events.entries()) {
       // The PR outlives the session's state: the thread follows it from here.
-      if (ev.type === 'pr' && ev.url) sessions.patch(key, { pr_url: ev.url, pr_follow_since: fresh(key)?.pr_follow_since ?? Date.now(), pr_pushed_at: Date.now() });
+      // A team stack's PR names its repo, and its follow state is that repo's (prPatch). pr_url at
+      // the top too: "this thread has a PR" reads it.
+      if (ev.type === 'pr' && ev.url) {
+        const r = ev.repo ?? null;
+        sessions.patch(key, prPatch(fresh(key), r, { pr_url: ev.url, pr_follow_since: prView(fresh(key), r)?.pr_follow_since ?? Date.now(), pr_pushed_at: Date.now(), pr_follow_done: false }));
+        if (r) sessions.patch(key, { pr_url: ev.url });
+      }
+      // The repos of a stack, for !pr <repo> and the buttons.
+      if (ev.type === 'turn_end' && Array.isArray(ev.trees)) sessions.patch(key, { trees: ev.trees.map(({ name, slug, out }) => ({ name, slug, out })) });
       // The wrap-up's status line closes later in this poll; it says what the wrap-up did.
       if ((ev.type === 'pr' || ev.type === 'pushed') && fresh(key)?.status_ts) sessions.patch(key, { wrap_done: ev.type });
       const msg = render(s.key, { ...ev, desktop: Boolean(process.env.DESKTOP_GATEWAY), read_only: Boolean(s.read_only) });
@@ -1931,7 +2072,7 @@ async function pollOne(key) {
       // The PR link's message becomes the PR's card: the follower edits its state into it.
       if (ev.type === 'pr' && i !== endAt) {
         const ts = await postMsg(key, msg).catch((e) => console.error('post', key, ev.type, e.data?.error ?? e.message));
-        if (ts) sessions.patch(key, { pr_card_ts: ts, pr_card_head: msg.text, pr_card_text: null });
+        if (ts) sessions.patch(key, prPatch(fresh(key), ev.repo ?? null, { pr_card_ts: ts, pr_card_head: msg.text, pr_card_text: null }));
       } else await (i === endAt ? finishTurn(key, msg, ev) : postMsg(key, msg))
         .catch((e) => console.error('post', key, ev.type, e.data?.error ?? e.message));
       ship();
@@ -1990,11 +2131,13 @@ async function followPrs() {
   if (following) return;
   following = true;
   try {
-    for (const s of sessions.all()) {
-      if (!here(s)) continue;
+    // A team stack follows each repo's PR (followTargets): s is that repo's view, and its
+    // PR fields are written back to that repo (pp).
+    for (const s of sessions.all().filter(here).flatMap(followTargets)) {
+      const pp = (fields) => sessions.patch(s.key, prPatch(fresh(s.key), s.repo, fields));
       // The PR merged or closed while its session still runs: the work is done,
-      // so stop it and free the sandbox, once no turn is running.
-      if (s.pr_ended && s.state === 'active' && !s.status_ts && !busy.has(s.key) && sessions.get(s.channel, s.thread_ts)?.key === s.key) {
+      // so stop it and free the sandbox, once no turn is running. Not a stack's: its other repos may still be at work.
+      if (!s.repo && s.pr_ended && s.state === 'active' && !s.status_ts && !busy.has(s.key) && sessions.get(s.channel, s.thread_ts)?.key === s.key) {
         const ok = await stopSession(s.key);
         if (!s.muted) await say(s, prEndedNote({ ...s.pr_seen, state: s.pr_ended }, ok)).catch(() => {});
         continue;
@@ -2003,12 +2146,13 @@ async function followPrs() {
       // session inherits the PR, and two followers would post each review twice.
       if (!(s.state === 'pr_open' || s.pr_url) || s.pr_follow_done || sessions.get(s.channel, s.thread_ts)?.key !== s.key) continue;
       const since = s.pr_follow_since ?? Date.now();
-      if (Date.now() - since > FOLLOW_MS) { sessions.patch(s.key, { pr_follow_done: true }); continue; }
+      if (Date.now() - since > FOLLOW_MS) { pp({ pr_follow_done: true }); continue; }
       // Every 30 s for 20 min after a push, when Copilot and CI answer; every 2 min after that.
       const every = Date.now() - (s.pr_pushed_at ?? 0) < 20 * 60_000 ? 30_000 : 120_000;
-      if (Date.now() - (lastFollow.get(s.key) ?? 0) < every) continue;
-      lastFollow.set(s.key, Date.now());
-      const cur = settleMergeable(s.pr_seen, await ctl.prStatus(s.key));
+      const lf = `${s.key}|${s.repo ?? ''}`;
+      if (Date.now() - (lastFollow.get(lf) ?? 0) < every) continue;
+      lastFollow.set(lf, Date.now());
+      const cur = settleMergeable(s.pr_seen, await ctl.prStatus(s.key, s.repo));
       if (!cur) continue;
       const ciPassAt = cur.ci !== 'pass' ? null : s.pr_seen?.ci === 'pass' ? s.ci_pass_at ?? Date.now() : Date.now();
       const nudge = reviewNudge(cur, ciPassAt, s.nudged_at, Date.now());
@@ -2023,9 +2167,9 @@ async function followPrs() {
       }
       if (!fresh(s.key)?.muted) await updatePrCard(s, cur).catch((e) => lost(s, e, 'pr card'));
       const prev = s.pr_seen;
-      sessions.patch(s.key, { pr_seen: cur, pr_follow_since: since, ci_pass_at: ciPassAt, ...(nudge ? { nudged_at: ciPassAt } : {}),
+      pp({ pr_seen: cur, pr_follow_since: since, ci_pass_at: ciPassAt, ...(nudge ? { nudged_at: ciPassAt } : {}),
         ...(['MERGED', 'CLOSED'].includes(cur.state) ? { pr_follow_done: true, pr_ended: cur.state } : {}) });
-      if (cur.state === 'OPEN') await autoRound(fresh(s.key), prev, cur).catch((e) => console.error('auto round', s.key, e.message));
+      if (cur.state === 'OPEN') await autoRound(prView(fresh(s.key), s.repo), prev, cur).catch((e) => console.error('auto round', s.key, e.message));
     }
   } finally { following = false; }
 }
@@ -2035,21 +2179,24 @@ setInterval(followPrs, 30_000);
 // changes. A session with no card (older, or one continued from another) gets one, once.
 async function updatePrCard(s, cur) {
   const line = prCard(cur);
-  if (!line || line === fresh(s.key)?.pr_card_text) return;
+  if (!line || line === prView(fresh(s.key), s.repo)?.pr_card_text) return;
   const head = s.pr_card_ts ? (s.pr_card_head ?? '') : '';
   const msg = prCardMessage(head, line);
+  const pp = (fields) => sessions.patch(s.key, prPatch(fresh(s.key), s.repo, fields));
   if (s.pr_card_ts) {
     const ok = await app.client.chat.update({ channel: s.channel, ts: s.pr_card_ts, ...msg }).then(() => true, () => false);
-    if (ok) { sessions.patch(s.key, { pr_card_text: line }); return; }
+    if (ok) { pp({ pr_card_text: line }); return; }
   }
-  const { ts } = await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...prCardMessage('', line) });
-  sessions.patch(s.key, { pr_card_ts: ts, pr_card_head: '', pr_card_text: line });
+  // A new card names its repo in a team stack: there is one card for each.
+  const { ts } = await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...prCardMessage(s.repo ? `*${s.repo}*` : '', line) });
+  pp({ pr_card_ts: ts, pr_card_head: s.repo ? `*${s.repo}*` : '', pr_card_text: line });
 }
 // A PR note: plain text, or text with the owner's buttons. Their value carries the reviewer for Fix these.
 function postPrNote(s, item) {
   if (typeof item === 'string') return app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: item });
   const row = buttons(s.key, ...item.buttons);
-  if (item.login) row.elements.forEach((b) => { b.value = `${s.key}|${item.login}`; });
+  // "<key>|<login>|<repo>": the reviewer for Fix these, and a stack's repo (valueRepo).
+  if (item.login || s.repo) row.elements.forEach((b) => { b.value = `${s.key}|${item.login ?? ''}${s.repo ? `|${s.repo}` : ''}`; });
   return app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: item.text,
     blocks: [{ type: 'section', text: { type: 'mrkdwn', text: item.text } }, row] });
 }
@@ -2058,7 +2205,7 @@ const tapped = (client, s, body, what) => client.chat.update({ channel: s.channe
   blocks: [...(body.message.blocks ?? []).filter((b) => b.type !== 'actions'), { type: 'context', elements: [{ type: 'mrkdwn', text: `${what} · <@${body.user.id}>` }] }] }).catch(() => {});
 ownerAction('create_jira', async (s, client, action, body) => {
   await tapped(client, s, body, 'Creating a Jira ticket');
-  const key = await ctl.createJira(s.key);
+  const key = await ctl.createJira(s.key, valueRepo(action.value));
   sessions.patch(s.key, { jira: key });
   const url = process.env.JIRA_URL ? `${process.env.JIRA_URL}/browse/${key}` : '';
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts,
@@ -2066,12 +2213,12 @@ ownerAction('create_jira', async (s, client, action, body) => {
 });
 ownerAction('pr_ready', async (s, client, action, body) => {
   await tapped(client, s, body, 'Marking the PR ready');
-  const ok = await ctl.prReady(s.key).then(() => true, (e) => { console.error('pr-ready', s.key, e.stderr || e.message); return false; });
+  const ok = await ctl.prReady(s.key, valueRepo(action.value)).then(() => true, (e) => { console.error('pr-ready', s.key, e.stderr || e.message); return false; });
   await say(s, ok ? 'The PR is ready for review. GitHub asks the code owners for review.' : 'I could not mark the PR ready. Do it on GitHub: *Ready for review* at the bottom of the PR.');
 });
 // Fix these and Rebase start work: not on an ended PR, and not while a launch or a wrap-up runs (the button stays).
-function prBusy(s, body) {
-  const cur = fresh(s.key);
+function prBusy(s, body, repo) {
+  const cur = prView(fresh(s.key), repo);
   if (cur.pr_ended) { working(s, body, `The PR is ${cur.pr_ended === 'MERGED' ? 'merged' : 'closed'}. Tag me with what to do next.`); return true; }
   if (['starting', 'wrapping', 'queued'].includes(cur.state) || wrapping.has(s.key)) { working(s, body, 'I am busy with a launch or a wrap-up. Tap again when it is done.'); return true; }
   return false;
@@ -2079,17 +2226,19 @@ function prBusy(s, body) {
 // Fix these, Rebase: a round like Copilot's. It updates the PR only when there are no unpushed edits of the owner's.
 const shipRound = (s) => !((s.edited_at ?? 0) > (s.pr_pushed_at ?? 0));
 ownerAction('fix_review', async (s, client, action, body) => {
-  const login = action.value.split('|')[1] ?? '';
-  if (prBusy(s, body)) return;
+  const login = action.value.split('|')[1] ?? '', repo = valueRepo(action.value);
+  if (prBusy(s, body, repo)) return;
   await tapped(client, s, body, 'Fixing the review');
-  const comments = await ctl.reviewComments(s.key, login);
+  const comments = await ctl.reviewComments(s.key, login, repo);
   if (!comments.length) { await say(s, `I found no comments from ${login} on the current code.`); return; }
-  await startRound(fresh(s.key), reviewRound(login, comments, randomBytes(6).toString('hex')), shipRound(fresh(s.key)));
+  const v = prView(fresh(s.key), repo);
+  await startRound(v, `${repo ? `This is about ${repo}, in /workspace/${repo.split('/')[1].toLowerCase()}.\n\n` : ''}${reviewRound(login, comments, randomBytes(6).toString('hex'))}`, shipRound(v));
 });
 ownerAction('rebase_pr', async (s, client, action, body) => {
-  if (prBusy(s, body)) return;
+  const repo = valueRepo(action.value);
+  if (prBusy(s, body, repo)) return;
   await tapped(client, s, body, 'Rebasing onto main');
-  await startRound(fresh(s.key), REBASE_PROMPT, false);
+  await startRound(prView(fresh(s.key), repo), `${repo ? `This is about ${repo} only.\n\n` : ''}${REBASE_PROMPT}`, false);
 });
 
 // A new Copilot review with comments, or CI failing for the change, starts a round
@@ -2111,47 +2260,53 @@ async function autoRound(s, prev, cur) {
   if (cp?.at && cp.at !== s.copilot_seen_at) {
     seen = { copilot_seen_at: cp.at };
     // A review from before the last push is about code that is gone.
-    const comments = Date.parse(cp.at) > s.pr_pushed_at ? await ctl.copilotComments(s.key) : [];
+    const comments = Date.parse(cp.at) > s.pr_pushed_at ? await ctl.copilotComments(s.key, s.repo) : [];
     if (comments.length) job = { note: (why) => copilotNote(comments, why), text: copilotRound(comments, randomBytes(6).toString('hex')) };
   } else if (ciKey && ciKey !== s.ci_seen) {
     seen = { ci_seen: ciKey };
     job = { note: (why) => ciNote(cur, why), text: ciRound(cur) };
   }
-  if (!job) { if (seen) sessions.patch(s.key, seen); return; }
+  const pp = (fields) => sessions.patch(s.key, prPatch(fresh(s.key), s.repo, fields));
+  if (!job) { if (seen) pp(seen); return; }
   // Ask, and count nothing, when an automatic round could mix with work the owner has in hand.
   const why = (s.auto_rounds ?? 0) >= AUTO_MAX ? `I already ran ${AUTO_MAX} automatic rounds on this PR.`
     : (s.edited_at ?? 0) > s.pr_pushed_at ? 'Files changed since the last push, so I will fix it without pushing; you push with Update PR.'
     : ['stopped', 'failed'].includes(s.state) ? 'This session was stopped.' : '';
-  sessions.patch(s.key, seen);
+  pp(seen);
+  // A stack's round names its repo, so the agent works in that tree.
+  const text = `${s.repo ? `This is about ${s.repo}, in /workspace/${s.repo.split('/')[1].toLowerCase()}.\n\n` : ''}${job.text}`;
   if (why) {
-    sessions.patch(s.key, { round_text: job.text, round_ship: !((s.edited_at ?? 0) > s.pr_pushed_at) });
-    await postMsg(s.key, { text: job.note(why), blocks: [md(job.note(why)), buttons(s.key, ['Run a round', 'auto_round'])] });
+    pp({ round_text: text, round_ship: !((s.edited_at ?? 0) > s.pr_pushed_at) });
+    const row = buttons(s.repo ? `${s.key}||${s.repo}` : s.key, ['Run a round', 'auto_round']);
+    await postMsg(s.key, { text: job.note(why), blocks: [md(job.note(why)), row] });
     return;
   }
-  sessions.patch(s.key, { auto_rounds: (s.auto_rounds ?? 0) + 1 });
+  pp({ auto_rounds: (s.auto_rounds ?? 0) + 1 });
   await postMsg(s.key, { text: job.note('') });
-  await startRound(s, job.text);
+  await startRound(s, text);
 }
 // ship false: the owner has unpushed edits, so the round fixes and the owner pushes with Update PR.
+// s may be a stack repo's view (s.repo): the PR update after the round goes to that repo.
 async function startRound(s, text, ship = true) {
-  const cur = fresh(s.key);
+  const cur = fresh(s.key), wrap = { then_wrap: 'pr_auto', then_wrap_at: Date.now(), then_wrap_repo: s.repo ?? null };
   if (['paused', 'stopped', 'failed', 'pr_open'].includes(cur.state)) {
     if (sessions.get(cur.channel, cur.thread_ts)?.key !== cur.key || cur.stop_failed) return;
-    await resumePaused(cur, text, app.client, ship ? { then_wrap: 'pr_auto', then_wrap_at: Date.now() } : {});
+    await resumePaused(cur, text, app.client, ship ? wrap : {});
     return;
   }
-  if (ship) sessions.patch(cur.key, { then_wrap: 'pr_auto', then_wrap_at: Date.now() });
+  if (ship) sessions.patch(cur.key, wrap);
   await steerAndAck(cur, text, app.client, null, null);
 }
 ownerAction('auto_round', async (s, client, action, body) => {
-  const text = fresh(s.key)?.round_text;
+  const repo = valueRepo(action.value), v = prView(fresh(s.key), repo);
+  const text = v?.round_text;
   if (!text) return;
-  const ship = fresh(s.key)?.round_ship !== false;
-  sessions.patch(s.key, { round_text: null, round_ship: null });
+  const ship = v.round_ship !== false;
+  sessions.patch(s.key, prPatch(fresh(s.key), repo, { round_text: null, round_ship: null }));
   // Not wrapTap: its 30 s lock would refuse the PR update after a short round.
   await client.chat.update({ channel: s.channel, ts: body.message.ts, text: body.message.text,
     blocks: [...(body.message.blocks ?? []).filter((b) => b.type !== 'actions'), { type: 'context', elements: [{ type: 'mrkdwn', text: `Round started by <@${body.user.id}>` }] }] }).catch(() => {});
-  await startRound(fresh(s.key), text, ship);
+  await startRound(prView(fresh(s.key), repo), text, ship);
 });
 
 // 6: DM the operator once for each new or reopened error signature. The first

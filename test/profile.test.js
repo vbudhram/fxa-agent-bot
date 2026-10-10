@@ -29,3 +29,9 @@ test('fxa needs no listing, and a bad name is refused', () => {
   assert.equal(r('profile:fxa hi', 'CFXA', 'UOTHER').profile, 'fxa');
   assert.match(r('profile:../x hi').error, /profile/);
 });
+
+test('PROFILE_OPEN: an open team needs no PROFILE_USERS entry', () => {
+  const env = { PROFILE_OPEN: 'pyfxa-team', PROFILE_USERS: 'monitor:U1' };
+  assert.equal(resolveProfile({ text: 'profile:pyfxa-team fix it', user: 'U9', env }).profile, 'pyfxa-team');
+  assert.match(resolveProfile({ text: 'profile:monitor fix it', user: 'U9', env }).error, /can't start/);
+});

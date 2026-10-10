@@ -35,16 +35,22 @@ const MCP = process.env.MCP_CONNECTORS;
 // findings: what a quick answer found before it asked for a sandbox. It goes in a
 // second file, deleted with the first; an empty one means none.
 // profile: the team profile, passed only for a new session; later calls take it from the record.
-export const task = ({ key, owner, prompt, resumeFrom, fresh, thread, isNew, runtime, profile, link, who, queuedS, findings, inboxDir }) => withFile(prompt, (f) =>
+// repos: a team stack's picked repos (owner/name); checkout: an open PR to start on.
+export const task = ({ key, owner, prompt, resumeFrom, fresh, thread, isNew, runtime, profile, link, who, queuedS, findings, inboxDir, repos, checkout }) => withFile(prompt, (f) =>
   withFile(findings ?? '', (ff) => run([...(profile ? ['--pipeline', profile] : []), 'task', '--source', 'slack', '--id', key, '--owner', owner, '--prompt-file', f,
     ...(thread ? ['--thread', thread, ...(isNew ? ['--new'] : [])] : []),
     ...(resumeFrom ? ['--resume-from', resumeFrom, ...(fresh ? ['--fresh'] : [])] : []), ...(runtime ? ['--runtime', runtime] : []),
+    ...(repos?.length ? ['--repos', repos.join(',')] : []), ...(checkout ? ['--checkout', checkout] : []),
     ...(link ? ['--link', link] : []), ...(queuedS ? ['--queued-s', String(queuedS)] : []), ...(findings ? ['--findings-file', ff] : []), ...(inboxDir ? ['--inbox-dir', inboxDir] : []),
     ...(MCP !== undefined ? ['--mcp', MCP.replace(/\s+/g, '')] : []),
     ...(who?.name ? ['--owner-name', who.name] : []), ...(who?.image ? ['--owner-image', who.image] : [])])));
 
 // A profile's repos and the write access of each, for the team card.
 export const profileInfo = async (profile) => JSON.parse(await run(['--pipeline', profile, 'profile', 'show'], { timeout: 30_000 }));
+// Every team with its repos, for the !stack picker.
+export const profileList = async () => JSON.parse(await run(['profile', 'list'], { timeout: 60_000 }));
+// The newest session that made or worked on a PR: {key, state, profile, thread, owner, live}, or null.
+export const findPr = async (url) => JSON.parse((await run(['session', 'find-pr', url], { timeout: 30_000 })).trim() || 'null');
 
 // A quick, read-only answer: {id, answer, upgrade, secs, cost_usd, turns, error}.
 // Rejects when the answer runner is busy (exit 3) or down; the caller starts a session then.
@@ -81,7 +87,8 @@ export async function events(key, since) {
   return JSON.parse(out);
 }
 
-export const diff = (key) => run(['diff', key], { timeout: 60_000 });
+// repo: one repo of a team stack; without it, every repo.
+export const diff = (key, repo) => run(['diff', key, ...(repo ? ['--repo', repo] : [])], { timeout: 60_000 });
 // Copies the agent's screenshots and videos off the runner; returns local paths.
 // The caller deletes the returned dir once it has uploaded what it needs.
 export async function media(key) {
@@ -91,7 +98,7 @@ export async function media(key) {
 }
 export const cleanup = (dir) => rm(dir, { recursive: true, force: true });
 // Starts the wrap-up in the background; events reports the PR or the failure.
-export const finish = (key, noPr = false) => run(['finish', '--session', key, ...(noPr ? ['--no-pr'] : [])], { timeout: 60_000 });
+export const finish = (key, noPr = false, repo) => run(['finish', '--session', key, ...(noPr ? ['--no-pr'] : []), ...(repo ? ['--repo', repo] : [])], { timeout: 60_000 });
 export const stop = (key) => run(['stop', key]);
 export const cost = async (key) => { try { return JSON.parse((await run(['session', 'cost', key], { timeout: 60_000 })).trim() || 'null'); } catch { return null; } };
 export const jiraCard = async (key) => { try { return JSON.parse((await run(['jira-card', key], { timeout: 30_000 })).trim() || 'null'); } catch { return null; } };
@@ -104,10 +111,10 @@ export const history = async (key) => { try { return JSON.parse((await run(['ses
 export const errorsList = async () => { try { return JSON.parse((await run(['errors', '--json'], { timeout: 60_000 })).trim() || '[]'); } catch { return null; } };
 export const attach = (key, paths) => run(['session', 'attach', key, ...paths], { timeout: 5 * 60_000 });
 export const errorsPush = () => run(['errors', 'push', '--now'], { timeout: 120_000 });
-export const copilotComments = async (key) => { try { return JSON.parse((await run(['session', 'copilot-comments', key], { timeout: 60_000 })).trim() || '[]'); } catch { return []; } };
-export const reviewComments = async (key, login) => { try { return JSON.parse((await run(['session', 'review-comments', key, login], { timeout: 60_000 })).trim() || '[]'); } catch { return []; } };
-export const createJira = async (key) => (await run(['session', 'create-jira', key], { timeout: 60_000 })).trim();
-export const prReady = (key) => run(['session', 'pr-ready', key], { timeout: 60_000 });
+export const copilotComments = async (key, repo) => { try { return JSON.parse((await run(['session', 'copilot-comments', key, ...(repo ? ['--repo', repo] : [])], { timeout: 60_000 })).trim() || '[]'); } catch { return []; } };
+export const reviewComments = async (key, login, repo) => { try { return JSON.parse((await run(['session', 'review-comments', key, login, ...(repo ? ['--repo', repo] : [])], { timeout: 60_000 })).trim() || '[]'); } catch { return []; } };
+export const createJira = async (key, repo) => (await run(['session', 'create-jira', key, ...(repo ? ['--repo', repo] : [])], { timeout: 60_000 })).trim();
+export const prReady = (key, repo) => run(['session', 'pr-ready', key, ...(repo ? ['--repo', repo] : [])], { timeout: 60_000 });
 // The STE lint the handoff check runs, on a reply's text: its problem lines, [] on any failure.
 const STE = join(dirname(CTL), 'skills/fxa-vm-handoff/ste.sh');
 export const ste = (text) => new Promise((resolve) => {
@@ -119,7 +126,7 @@ export const ste = (text) => new Promise((resolve) => {
   c.stdin.on('error', () => {});
   c.stdin.end(String(text ?? ''));
 });
-export const prStatus = async (key) => { try { return JSON.parse((await run(['session', 'pr-status', key], { timeout: 60_000 })).trim() || 'null'); } catch { return null; } };
+export const prStatus = async (key, repo) => { try { return JSON.parse((await run(['session', 'pr-status', key, ...(repo ? ['--repo', repo] : [])], { timeout: 60_000 })).trim() || 'null'); } catch { return null; } };
 // The desktop's gateway link when the ctl has one (FXA_DESKTOP_GATEWAY), else null.
 export const desktop = async (key, email) => {
   const out = await run(['session', 'desktop', key, ...(email ? [email] : [])], { timeout: 300_000 });
