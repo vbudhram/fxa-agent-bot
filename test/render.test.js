@@ -453,3 +453,10 @@ test('turn_end in a team stack: a row for each changed repo, no single Open PR r
   assert.deepEqual(rows, [['diff:agent-1|mozilla/fxa', 'open_pr:agent-1|mozilla/fxa', 'push_branch:agent-1|mozilla/fxa'], ['diff:agent-1|mozilla/PyFxA']]);
   assert.match(render('agent-1', { type: 'pr', url: 'https://github.com/mozilla/PyFxA/pull/3', repo: 'mozilla/PyFxA' }).text, /^Draft PR is up in mozilla\/PyFxA: /);
 });
+
+test('teamCard for a team stack: its label, and a repo the App cannot push to ships as a diff', () => {
+  const t = JSON.stringify(teamCard({ profile: 'pyfxa-team', label: 'PyFxA team', read_only: false, repos: [
+    { slug: 'mozilla/PyFxA', role: 'work', write: false, why: 'no App' }, { slug: 'mozilla/fxa', role: 'work', write: true }] }));
+  assert.match(t, /PyFxA team session/);
+  assert.match(t, /✏️ `mozilla\/PyFxA` works here; ships as a diff in this thread \(no App\)/);
+});

@@ -68,10 +68,14 @@ export function startCard(key, prompt, seconds, resuming = false, runtime = 'cla
 }
 // The team card for a session with a profile other than FxA: each repo and what the
 // session may do there (the controller's `profile show`).
-export function teamCard({ profile, read_only, repos = [] }) {
-  const name = `${profile.charAt(0).toUpperCase()}${profile.slice(1)} session${read_only ? ' (read-only)' : ''}`;
+// A team stack (more than one work repo): every repo can be changed, and one the App cannot
+// push to ships as a diff in the thread instead of a PR.
+export function teamCard({ profile, label, read_only, repos = [] }) {
+  const stack = repos.filter((r) => r.role === 'work').length > 1;
+  const name = `${label && label !== profile ? label : `${profile.charAt(0).toUpperCase()}${profile.slice(1)}`} session${read_only ? ' (read-only)' : ''}`;
   const line = (r) => r.role === 'dep' ? `👁 \`${r.slug}\` runs locally beside it; read-only`
     : r.write ? `✏️ \`${r.slug}\` works here; opens a draft PR`
+    : stack ? `✏️ \`${r.slug}\` works here; ships as a diff in this thread${r.why ? ` (${r.why})` : ''}`
     : `👁 \`${r.slug}\` reads and runs the code; no push, no PR${r.why ? ` (${r.why})` : ''}`;
   return { text: name, blocks: [md(`*${name}*`), { type: 'context', elements: repos.map((r) => ({ type: 'mrkdwn', text: line(r) })) }] };
 }
