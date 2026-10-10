@@ -110,6 +110,7 @@ export function createView({ names = {} } = {}) {
 }
 
 const richText = (x) => (!x || typeof x !== 'object' ? '' : Array.isArray(x) ? x.map(richText).join('')
+  : x.type === 'rich_text_list' ? x.elements.map((e) => `• ${richText(e)}`).join('\n')
   : (typeof x.text === 'string' ? x.text : x.type === 'user' ? `<@${x.user_id}>` : '') + richText(x.elements));
 
 // Block Kit to plain lines: text of each block, and the button labels.
@@ -125,6 +126,20 @@ export function blockText(blocks = []) {
     else if (b.type === 'header') lines.push(`# ${txt(b.text)}`);
     else if (b.type === 'actions') for (const e of b.elements ?? []) buttons.push(e.type === 'button' ? txt(e.text) : `<${e.type}>`);
     else if (b.type === 'rich_text') lines.push(richText(b.elements));
+    // Cards: title, subtitle, body, subtext, and the card buttons.
+    else if (b.type === 'card') { lines.push(`*${txt(b.title)}*`, txt(b.subtitle), txt(b.body), txt(b.subtext));
+      for (const e of b.actions ?? []) buttons.push(txt(e.text)); }
+    else if (b.type === 'carousel' || b.type === 'container') {
+      const inner = blockText(b.type === 'carousel' ? b.elements : b.child_blocks);
+      if (b.title) lines.push(`*${txt(b.title)}*${b.subtitle ? ` · ${txt(b.subtitle)}` : ''}${b.is_collapsible ? ' (collapsible)' : ''}`);
+      lines.push(...inner.lines); buttons.push(...inner.buttons); }
+    // Table rows as "| a | b |" lines; html.mjs draws them as a grid.
+    else if (b.type === 'table' || b.type === 'data_table') {
+      if (b.caption) lines.push(`*${b.caption}*`);
+      for (const r of b.rows ?? []) lines.push(`| ${r.map((c) => (c.type === 'action_cell' ? `[${txt(c.element?.text)}]` : c.text ?? richText(c.elements))).join(' | ')} |`); }
+    else if (b.type === 'alert') lines.push(`:warning: [${b.level ?? 'default'}] ${txt(b.text)}`);
+    else if (b.type === 'data_visualization') lines.push(`<chart ${b.chart?.type}: ${b.title ?? ''}>`);
+    else if (b.type === 'context_actions') for (const e of b.elements ?? []) buttons.push(e.type === 'feedback_buttons' ? `${txt(e.positive_button?.text)} / ${txt(e.negative_button?.text)}` : txt(e.text) || `<${e.type}>`);
     else if (b.type !== 'divider') lines.push(`<${b.type}>`);
   }
   return { lines: lines.filter(Boolean), buttons };

@@ -17,7 +17,14 @@ function mrkdwn(t, who) {
 
 function message(m, who) {
   const { lines, buttons } = blockText(m.blocks);
-  const body = (lines.length ? lines : [m.text]).map((l) => `<div>${mrkdwn(l, who)}</div>`).join('');
+  // A run of "| a | b |" lines from blockText is a table block.
+  let body = '', trs = [];
+  const flush = () => { if (trs.length) body += `<table>${trs.join('')}</table>`; trs = []; };
+  for (const l of lines.length ? lines : [m.text]) {
+    if (/^\| .* \|$/.test(l)) trs.push(`<tr>${l.slice(2, -2).split(' | ').map((c) => `<td>${mrkdwn(c, who)}</td>`).join('')}</tr>`);
+    else { flush(); body += `<div>${mrkdwn(l, who)}</div>`; }
+  }
+  flush();
   const rows = (m.chunks ?? []).map((c) => (c.type === 'task_update'
     ? `<div class="row ${c.status}">${c.status === 'complete' ? '✓' : c.status === 'in_progress' ? '◌' : '○'} ${esc(c.title)}${c.details ? `<span class="det"> ${esc(c.details)}</span>` : ''}</div>`
     : `<div>${mrkdwn(c.text ?? '', who)}</div>`)).join('');
@@ -51,6 +58,7 @@ h2{font-size:13px;color:#616061;border-bottom:1px solid #ddd;padding-bottom:4px}
 .btns{margin-top:4px;display:flex;gap:6px;flex-wrap:wrap}.gone-btns .btn{opacity:.4;text-decoration:line-through}.mute{color:#888;font-size:12px}.btn{border:1px solid #bbb;border-radius:4px;padding:2px 10px;font-weight:600;font-size:13px}
 .reacts{margin-top:3px;display:flex;gap:4px}.reacts span{background:#eef3f8;border:1px solid #d0e0ef;border-radius:12px;padding:0 6px;font-size:13px}
 .at{background:#e8f5fa;color:#1264a3}a{color:#1264a3}code{background:#f6f6f6;border:1px solid #ddd;padding:0 3px;font-size:13px}pre{background:#f6f6f6;padding:6px;white-space:pre-wrap}q{display:block;border-left:3px solid #ddd;padding-left:8px}q:before,q:after{content:none}
+table{border-collapse:collapse;margin:4px 0;font-size:13px}td{border:1px solid #ddd;padding:2px 6px}tr:first-child td{font-weight:700;background:#f6f6f6}
 .note{color:#9a6700;font:12px monospace;margin:2px 0 2px 48px}
 </style><body>${threads}</body>`;
 }
