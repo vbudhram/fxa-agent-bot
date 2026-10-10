@@ -150,12 +150,8 @@ async function onMention({ event, body, client }) {
   const thread_ts = thread;
   // In a thread with a session, the message handler runs the bang; answer once.
   if (prompt.startsWith('!')) { if (!cur) await bang(null, prompt, { user: event.user, channel: event.channel, thread_ts, ts: event.ts }, client); return; }
-  // The work moved to another thread (!stack checkout): it continues there, not here.
-  if (cur?.moved_to) {
-    await client.chat.postEphemeral({ channel: event.channel, thread_ts: thread, user: event.user,
-      text: `This work moved to ${cur.moved_to}. Continue it there, or tag me in a new thread to start something else.` }).catch(() => {});
-    return;
-  }
+  // The work moved to another thread (!stack checkout): the reply handler's resume says so.
+  if (cur?.moved_to) return;
   if (cur?.stop_failed) {
     await client.chat.postEphemeral({ channel: event.channel, thread_ts, user: event.user,
       text: 'The last session here did not stop cleanly. `@fxa-agent !stop` first, so its sandbox is not left running.' }).catch(() => {});
@@ -968,6 +964,12 @@ app.event('reaction_added', async ({ event, client }) => {
 // and conversation; the reply is the new session's first message.
 async function resumePaused(s, text, client, extra = {}) {
   if ([...pending.values()].some((p) => p.channel === s.channel && p.thread_ts === s.thread_ts)) return;
+  // Every resume comes here: a reply, a tag, a ship button, a tapped answer. A moved session continues in its new thread.
+  if (fresh(s.key)?.moved_to) {
+    await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts,
+      text: `This work moved to ${fresh(s.key).moved_to}. Continue it there, or tag me in a new thread to start something else.` }).catch(() => {});
+    return;
+  }
   text = takeAside(s.key) + text;
   const key = sessions.newKey();
   // Reserve the thread before any await, as onMention does.
