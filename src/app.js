@@ -291,8 +291,12 @@ async function followUp(s, message, text, client, route = text) {
   const key = sessions.newKey();
   const own = fileRefs(message.files), earlier = [];
   if (own.length && !text) text = route = 'See the attached files.';
-  pending.set(key, { prompt: text, request: text, route, owner: await ownerOf(client, s.channel, s.thread_ts, message.user), team: message.team ?? s.team, channel: s.channel,
-    thread_ts: s.thread_ts, runtime: 'claude', deadline: Date.now(), acks: message.ts ? [message.ts] : [] }); // a tap has no message to mark
+  // A !stack pick by this person: the follow-up starts that team's session, as a tag would.
+  const choice = stackChoice.get(`${s.channel}:${s.thread_ts}`);
+  const pick = choice?.user === message.user ? { profile: choice.profile, repos: choice.repos, is_new: true } : {};
+  // The owner with no await when the session has one, so the thread is reserved before anything else runs.
+  pending.set(key, { prompt: text, request: text, route, owner: s.owner && allowed(s.channel, s.owner) ? s.owner : await ownerOf(client, s.channel, s.thread_ts, message.user), team: message.team ?? s.team, channel: s.channel,
+    thread_ts: s.thread_ts, runtime: 'claude', deadline: Date.now(), acks: message.ts ? [message.ts] : [], ...pick }); // a tap has no message to mark
   const ctx = await threadContext(client, { channel: s.channel, thread_ts: s.thread_ts, ts: message.ts, user: pending.get(key).owner }, { withBot: true, files: earlier });
   pending.set(key, { ...pending.get(key), prompt: text + ctx, held_files: [...earlier, ...own], own_files: own.length > 0 });
   await begin(key, client).catch((e) => { pending.delete(key); console.error('begin', key, e.message); });
@@ -646,7 +650,8 @@ app.message(async ({ message, client }) => {
       text: `This PR is ${how}, so this session is done. Tag me here with what to do next, and I will start fresh from main with this thread as context.` }).catch(() => {});
     return;
   }
-  if (s.state === 'answered' && steers) { seen(message.channel, message.ts); await followUp(s, message, text, client); return; }
+  // A tag after a quick answer is onMention's (it starts the next look, with any !stack pick); a reply without one is ours.
+  if (s.state === 'answered' && steers) { if (!String(message.text).includes(`<@${botUserId}>`)) { seen(message.channel, message.ts); await followUp(s, message, text, client); } return; }
   if (!LIVE.includes(s.state)) return;
   if (s.state === 'queued' && steers) {
     const who = message.user === s.owner ? 'the person who started this session' : 'someone else in the thread, not the person who started this session';
