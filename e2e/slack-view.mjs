@@ -124,10 +124,11 @@ export function blockText(blocks = []) {
 }
 
 // The thread as text: one entry per message, in post order, with who sees an ephemeral.
-export function toText(view, { channel, thread_ts, who = (u) => u, notes = [] }) {
+export function toText(view, { channel, thread_ts, who = (u) => u, notes = [], viewer }) {
   const rows = [];
   for (const m of view.msgs) {
     if (m.channel !== channel || (m.ts !== thread_ts && m.thread_ts !== thread_ts)) continue;
+    if (viewer && m.to && m.to !== viewer) continue;
     const head = [`#${m.seq}`, m.bot ? 'bot' : who(m.user)];
     if (m.to) head.push(`(ephemeral -> ${who(m.to)})`);
     if (m.edits) head.push(`(edited x${m.edits})`);

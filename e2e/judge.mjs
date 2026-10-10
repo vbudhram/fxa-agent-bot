@@ -45,7 +45,9 @@ function claude(args, input, cwd) {
 }
 
 export async function judge(dir) {
-  const sc = (await import(JSON.parse(readFileSync(join(dir, 'meta.json'), 'utf8')).scenario)).default;
+  const meta = JSON.parse(readFileSync(join(dir, 'meta.json'), 'utf8'));
+  const sc = meta.persona ? (await import('./personas.mjs')).personaScenario(...meta.persona.split(':').map((x, i) => (i ? Number(x) : x)))
+    : (await import(meta.scenario)).default;
   const result = JSON.parse(readFileSync(join(dir, 'result.json'), 'utf8'));
   const thread = readFileSync(join(dir, 'thread.txt'), 'utf8');
   const png = existsSync(join(dir, 'thread.png'));

@@ -82,7 +82,8 @@ export async function runScenario(app, view, scenario) {
     if (a.tap !== undefined || a.pick !== undefined) {
       const want = a.tap ?? a.pick;
       // on: 'same' taps the message as it was at the last tap, as a quick double tap does.
-      const cands = (a.on === 'same' && lastTap ? [lastTap] : view.msgs.filter((m) => !m.deleted && m.bot && visibleTo(m, p) && inThread(m, t)).reverse());
+      const cands = a.on === 'same' && lastTap ? [lastTap] : typeof a.on === 'number' ? view.msgs.filter((m) => m.seq === a.on && visibleTo(m, p))
+        : view.msgs.filter((m) => !m.deleted && m.bot && visibleTo(m, p) && inThread(m, t)).reverse();
       for (const m of cands) {
         let els = elements(m);
         if (a.q !== undefined) els = els.filter(({ bi }) => bi === [...new Set(els.map((x) => x.bi))][a.q]);
@@ -134,8 +135,15 @@ export async function runScenario(app, view, scenario) {
 
   // only: {STEER: ['owner']} keeps a step for those matrix variants.
   const keep = (step) => Object.entries(step.only ?? {}).every(([k, vals]) => vals.includes(k === 'order' ? order : process.env[k]));
-  for (const [i, step] of scenario.steps.entries()) {
+  // steps: a list, or an async generator that decides each step from the thread (personas).
+  const ctx = { view, roots, said, who: (u) => u?.replace(/^U/, ''), channel: CHANNEL };
+  const steps = typeof scenario.steps === 'function' ? scenario.steps(ctx) : scenario.steps;
+  const played = [];
+  let i = -1;
+  for await (const step of steps) {
+    i++;
     if (!keep(step)) continue;
+    played.push(step);
     const snap = { chg: view.chg(), seq: Math.max(0, ...view.msgs.map((m) => m.seq)), ctl: ctlLines().length };
     const person = Object.keys(step).find((k) => k in scenario.people), t = step.thread ?? 'T1';
     stepAt = Date.now();
@@ -146,7 +154,8 @@ export async function runScenario(app, view, scenario) {
         notes.push({ t, seq: snap.seq + 0.5, text: `[advance ${step.advance}]` });
       }
       if (person) {
-        const what = await act(person, step[person], t, i);
+        // soft (persona steps): a button that went away before the tap is a note, as for a person.
+        const what = await act(person, step[person], t, i).catch((e) => { if (!step.soft) throw e; return `${e.message}; nothing happens`; });
         if (typeof step[person] !== 'string') notes.push({ t, seq: snap.seq + 0.5, text: `[${what}]` });
       }
       const w = step.wait ?? 'settled';
@@ -166,6 +175,8 @@ export async function runScenario(app, view, scenario) {
       }
       await settled();
       for (let s = snap.seq + 1; s <= Math.max(0, ...view.msgs.map((m) => m.seq)); s++) stepSeq[s] = i;
+      const started = ctlLines().slice(snap.ctl).filter((l) => l.argv[0] === 'task');
+      if (started.length > 1) failures.push(`step ${i + 1}: ${started.length} sessions started by one step`);
       const bad = step.expect ? stepChecks(step.expect, { view, snap, ctl: ctlLines(), roots, target: (on) => target(on, person, t) }) : [];
       if (bad.length && step.known) xfail.push(`step ${i + 1} (${step.known}): ${bad.join('; ')}`);
       else if (bad.length) failures.push(...bad.map((b) => `step ${i + 1}: expected ${b}`));
@@ -175,6 +186,16 @@ export async function runScenario(app, view, scenario) {
       break;
     }
   }
+
+  // Who may do what, whatever the steps were: a person not allowed owns nothing, and every ship
+  // (finish) comes from an action of the session's owner.
+  const all = ctlLines(), arg = (l, f) => l.argv[l.argv.indexOf(f) + 1];
+  const banned = Object.entries(scenario.people).filter(([, d]) => /not allowed/.test(d)).map(([p]) => uid(p));
+  for (const l of all.filter((x) => x.argv[0] === 'task' && banned.includes(arg(x, '--owner')))) failures.push(`a session is owned by ${arg(l, '--owner')}, who is not allowed`);
+  const owners = new Set(all.filter((x) => x.argv[0] === 'task').map((x) => arg(x, '--owner')));
+  const shipAsks = played.filter((s) => Object.entries(s).some(([p, a]) => owners.has(uid(p)) && (typeof a === 'string' ? /^!(pr|push)\b/.test(a) : /Open PR|Push|Update PR|open_pr|push_branch/.test(String(a.tap ?? ''))))).length;
+  const ships = all.filter((x) => x.argv[0] === 'finish').length;
+  if (ships > shipAsks) failures.push(`${ships} ship(s) (finish) but only ${shipAsks} ship action(s) by an owner`);
 
   const botLog = existsSync(join(out, 'bot.log')) ? readFileSync(join(out, 'bot.log'), 'utf8') : '';
   const global = globalChecks({ view, botLog, stepOf: (seq) => stepSeq[seq] ?? -1 });
@@ -194,5 +215,8 @@ export async function runScenario(app, view, scenario) {
   }
   writeFileSync(join(out, 'calls.jsonl'), view.calls.map((c) => JSON.stringify(c)).join('\n'));
   writeFileSync(join(out, 'result.json'), JSON.stringify({ ok: failures.length === 0, failures, xfail, fixed }, null, 2));
+  // A generated run saves its steps as a scenario: copy it to scenarios/ to replay it with no model.
+  if (typeof scenario.steps === 'function') writeFileSync(join(out, 'scenario.mjs'),
+    `// Recorded from ${scenario.title}\nexport default ${JSON.stringify({ title: `replay: ${scenario.title}`, people: scenario.people, env: scenario.env, judge: scenario.judge, steps: played }, null, 2)};\n`);
   return failures.length === 0;
 }

@@ -7,7 +7,9 @@ import { createView } from './slack-view.mjs';
 import { runScenario } from './driver.mjs';
 
 const OUT = process.env.E2E_OUT;
-const scenario = (await import(process.env.E2E_SCENARIO)).default;
+const scenario = process.env.E2E_PERSONA
+  ? (await import('./personas.mjs')).personaScenario(...process.env.E2E_PERSONA.split(':').map((x, i) => (i ? Number(x) : x)))
+  : (await import(process.env.E2E_SCENARIO)).default;
 const view = createView({ names: Object.fromEntries(Object.keys(scenario.people).map((p) => [`U${p}`, p])) });
 
 bolt.webApi.WebClient.prototype.apiCall = async function (method, args = {}) { return view.apply(method, args); };
