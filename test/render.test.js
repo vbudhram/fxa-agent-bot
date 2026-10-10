@@ -468,3 +468,10 @@ test('teamCard for a team stack: its label, and a repo the App cannot push to sh
   assert.match(t, /PyFxA team session/);
   assert.match(t, /✏️ `mozilla\/PyFxA` works here; ships as a diff in this thread \(no App\)/);
 });
+
+test("the team card names the team's connected tools, if its profile sets them", () => {
+  const ctx = (c) => c.blocks[1].elements.map((e) => e.text).filter((t) => t.startsWith('🔌'));
+  assert.deepEqual(ctx(teamCard({ profile: 'pyfxa-team', label: 'PyFxA team', repos: [], mcp: ['github', 'jira'] })), ['🔌 Reads GitHub, Jira']);
+  assert.deepEqual(ctx(teamCard({ profile: 'x', repos: [], mcp: [] })), ['🔌 No connected tools']);
+  assert.deepEqual(ctx(teamCard({ profile: 'x', repos: [] })), []);
+});
