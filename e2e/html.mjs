@@ -28,7 +28,8 @@ function message(m, who) {
     ${m.to ? `<div class="only">👁 Only visible to you (${esc(who(m.to))})</div>` : ''}
     <div class="who">${name} <span class="seq">#${m.seq}</span>${m.edits && !m.bot ? ' <span class="ed">(edited)</span>' : ''}</div>
     ${m.deleted ? '<div class="gone">This message was deleted.</div>' : `${rows ? `<div class="stream">${rows}</div>` : ''}${body}`}
-    ${buttons.length ? `<div class="btns">${buttons.map((b) => `<span class="btn">${esc(b)}</span>`).join('')}</div>` : ''}
+    ${buttons.length ? `<div class="btns">${buttons.map((b) => `<span class="btn">${esc(b)}</span>`).join('')}</div>`
+      : m.retired ? `<div class="btns gone-btns">${m.retired.map((b) => `<span class="btn">${esc(b)}</span>`).join('')} <span class="mute">later removed</span></div>` : ''}
     ${m.reactions.size || m.marks?.length ? `<div class="reacts">${[...m.reactions].map((r) => `<span>${EMOJI[r] ?? `:${r}:`}</span>`).join('')}${(m.marks ?? []).map((r) => `<span>${EMOJI[r.split(' ')[0]] ?? r.split(' ')[0]} ${esc(who(r.split(' by ')[1]))}</span>`).join('')}</div>` : ''}
   </div></div>`;
 }
@@ -47,7 +48,7 @@ h2{font-size:13px;color:#616061;border-bottom:1px solid #ddd;padding-bottom:4px}
 .main{flex:1;min-width:0}.who{font-weight:700}.seq,.ed{font-weight:400;color:#888;font-size:12px}.app{background:#ddd;font-size:10px;padding:0 3px;border-radius:2px;color:#555}
 .only{font-size:12px;color:#616061}.gone{color:#888;font-style:italic}
 .stream{border:1px solid #e8e8e8;border-radius:6px;padding:4px 8px;margin:2px 0;font-size:14px}.row.in_progress{color:#1264a3}.det{color:#888}
-.btns{margin-top:4px;display:flex;gap:6px;flex-wrap:wrap}.btn{border:1px solid #bbb;border-radius:4px;padding:2px 10px;font-weight:600;font-size:13px}
+.btns{margin-top:4px;display:flex;gap:6px;flex-wrap:wrap}.gone-btns .btn{opacity:.4;text-decoration:line-through}.mute{color:#888;font-size:12px}.btn{border:1px solid #bbb;border-radius:4px;padding:2px 10px;font-weight:600;font-size:13px}
 .reacts{margin-top:3px;display:flex;gap:4px}.reacts span{background:#eef3f8;border:1px solid #d0e0ef;border-radius:12px;padding:0 6px;font-size:13px}
 .at{background:#e8f5fa;color:#1264a3}a{color:#1264a3}code{background:#f6f6f6;border:1px solid #ddd;padding:0 3px;font-size:13px}pre{background:#f6f6f6;padding:6px;white-space:pre-wrap}q{display:block;border-left:3px solid #ddd;padding-left:8px}q:before,q:after{content:none}
 .note{color:#9a6700;font:12px monospace;margin:2px 0 2px 48px}

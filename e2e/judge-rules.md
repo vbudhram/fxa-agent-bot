@@ -11,6 +11,9 @@ The bot is "fxa-agent", a Slack front door to a coding agent. A person tags it i
 - Reactions: 👀 means seen, ⏳ means it waits for the running turn, ✅ or ⚠️ when its turn ends. No 👀 should stay forever.
 - A session moved to another thread with !stack checkout continues there; the old thread says where, and starts nothing.
 
+## Reading the thread
+The thread shows its final state. A line "(had buttons [..], later removed)" means the message had those buttons when it was posted; the bot moves buttons to the newest reply, and that is intended.
+
 ## Voice
 Candid, warm, not cheerful. No hype, no apology, no praise. A 🦊 now and then, never next to an error. Short sentences in plain English (ASD-STE100 style: active voice, no -ing forms where avoidable, no idioms, no noun clusters over three words).
 

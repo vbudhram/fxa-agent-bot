@@ -51,7 +51,12 @@ export function createView({ names = {} } = {}) {
         if (!m || m.deleted) throw err('message_not_found');
         if ('text' in args) m.text = args.text;
         // New blocks replace a finished stream's task card too, as in Slack.
-        if ('blocks' in args) { m.blocks = args.blocks; if (m.stream === 'closed') m.chunks = []; }
+        if ('blocks' in args) {
+          // Buttons an edit took away (the bot moves them to the newest reply): kept, so a reader knows they were there.
+          const had = blockText(m.blocks).buttons, now = blockText(args.blocks).buttons;
+          if (had.length && !now.length) m.retired = had;
+          m.blocks = args.blocks; if (m.stream === 'closed') m.chunks = [];
+        }
         m.edits++; touch(m);
         return { ok: true, channel, ts: m.ts };
       }
@@ -141,6 +146,7 @@ export function toText(view, { channel, thread_ts, who = (u) => u, notes = [], v
     for (const c of m.chunks ?? []) body.push(c.type === 'task_update' ? `  ${c.status === 'complete' ? '✓' : c.status === 'in_progress' ? '›' : '○'} ${c.title}${c.details ? ` (${c.details})` : ''}` : `  ${c.text ?? JSON.stringify(c)}`);
     rows.push({ seq: m.seq, text: [`${head.join(' ')}: ${body.join('\n    ')}`,
       ...(buttons.length ? [`    buttons: ${buttons.map((b) => `[${b}]`).join(' ')}`] : []),
+      ...(!buttons.length && m.retired ? [`    (had buttons ${m.retired.map((b) => `[${b}]`).join(' ')}, later removed)`] : []),
       ...(m.reactions.size ? [`    reactions: ${[...m.reactions].map((r) => `:${r}:`).join(' ')}`] : []),
       ...(m.marks?.length ? [`    marked: ${m.marks.map((r) => `:${r.replace(' by U', ': by ')}`).join(', ')}`] : [])].join('\n') });
   }
