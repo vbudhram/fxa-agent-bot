@@ -36,6 +36,13 @@ if (process.env.SLACK_CALL_LOG) {
     return call.call(this, method, args);
   };
 }
+// No link previews on the bot's own posts: a PR link drew GitHub's large preview under each card.
+{
+  const proto = bolt.webApi.WebClient.prototype, call = proto.apiCall;
+  proto.apiCall = function (method, args = {}) {
+    return call.call(this, method, method === 'chat.postMessage' ? { unfurl_links: false, unfurl_media: false, ...args } : args);
+  };
+}
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
   appToken: process.env.SLACK_APP_TOKEN,

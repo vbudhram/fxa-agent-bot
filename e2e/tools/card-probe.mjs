@@ -11,12 +11,15 @@ const token = env.SLACK_BOT_TOKEN, channel = (env.ALLOWED_CHANNELS ?? '').split(
 if (!token || !channel) throw new Error('.env.dev needs SLACK_BOT_TOKEN and ALLOWED_CHANNELS');
 Object.assign(process.env, SAMPLE_ENV); // the example.com links pass the allowlist
 const { BUILDERS } = await import('../../src/cards.js');
+// A real member, so the owner mention renders: a made-up id shows as a blank pill.
+const owner = process.env.PROBE_OWNER || (env.ALLOWED_USERS ?? '').split(',')[0].trim();
+if (owner) { SAMPLES.status.owner = owner; for (const r of SAMPLES.sessions.rows) r.owner = owner; }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function post(body) {
   for (;;) {
     const r = await fetch('https://slack.com/api/chat.postMessage', { method: 'POST',
-      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json; charset=utf-8' }, body: JSON.stringify({ channel, ...body }) });
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json; charset=utf-8' }, body: JSON.stringify({ channel, unfurl_links: false, unfurl_media: false, ...body }) }); // as the bot posts
     const j = await r.json();
     if (j.error === 'ratelimited') { await sleep(1000 * Number(r.headers.get('retry-after') ?? 3)); continue; }
     await sleep(1200);

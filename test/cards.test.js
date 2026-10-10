@@ -78,11 +78,10 @@ test('turn: chips, the collapsed stages, no chips after a question', () => {
   assert.match(C.turn({ summary: 'Hi <!channel>' }).blocks[0].text, /@channel/);
 });
 
-test('tools: three cards, fallback fields', () => {
+test('tools: two lines, no carousel', () => {
   const c = C.tools(SAMPLES.tools);
-  assert.equal(c.blocks[1].elements.length, 3);
-  assert.equal(c.blocks[1].elements[0].subtitle.text, '1 write · 0 read');
-  assert.equal(c.fallback[1].fields.length, 3);
+  assert.equal(c.blocks.length, 1);
+  assert.equal(c.blocks[0].elements[0].text, '*fxa* profile · Claude · read and write\nmozilla/fxa write · Jira, Sentry, GitHub, Argo CD, Grafana');
 });
 
 test('jira: no card for missing or bad data', () => {
@@ -91,14 +90,14 @@ test('jira: no card for missing or bad data', () => {
   assert.equal(C.jira(SAMPLES.jira).blocks[0].subtitle.text, 'In Progress · Bug · P2 · assignee-a');
 });
 
-test('sentry: 24 hours sum into 12 buckets, sparkline in the fallback', () => {
+test('sentry: 24 hours sum into 12 buckets, the trend as text, sparkline in the fallback', () => {
   assert.deepEqual(C.buckets([...Array(24).keys()]), [1, 5, 9, 13, 17, 21, 25, 29, 33, 37, 41, 45]);
   const c = C.sentry(SAMPLES.sentry);
-  assert.equal(c.blocks[1].chart.series[0].data.length, 12);
+  assert.equal(c.blocks.length, 1);
   assert.match(c.blocks[0].subtext.text, /^First seen 3d ago$/);
-  assert.equal(c.blocks[0].body.text, '*412* events · *37* users in 24h');
+  assert.equal(c.blocks[0].body.text, '*412* events · *37* users in 24h · rising, 3 → 75 per 2h');
   assert.match(c.fallback[1].elements[0].text, /^24h [▁-█]{12}/);
-  assert.equal(C.sentry({ ...SAMPLES.sentry, hourly: [1, 2] }).blocks.length, 1);
+  assert.equal(C.sentry({ ...SAMPLES.sentry, hourly: [1, 2] }).blocks[0].body.text, '*412* events · *37* users in 24h');
   assert.equal(C.sentry({}), null);
   assert.equal(C.spark([5, 5]), '▁▁');
 });
@@ -116,59 +115,58 @@ test('ci: infra marked, logs only from links, a tap button only when needed', ()
   assert.match(all(many.blocks), /8 more failing checks/);
 });
 
-test('review: table of first sentences, outcomes counted, no empty cells', () => {
+test('review: one line per comment, outcomes counted', () => {
   const c = C.review({ ...SAMPLES.review, comments: [...SAMPLES.review.comments, { path: 'a.js', body: `${'y'.repeat(300)}. More.` }] });
-  const t = c.blocks[0].child_blocks[0];
-  assert.equal(t.type, 'table');
-  assert.equal(t.rows[1][1].text, 'Check for null before you read the token.');
-  assert.equal(t.rows[4][1].text.length, 120);
-  assert.equal(t.rows[4][2].text, '-');
+  const lines = c.blocks[0].child_blocks[0].text.text.split('\n');
+  assert.equal(lines[0], '*fixed* session.ts:42 Check for null before you read the token.');
+  assert.equal(lines[3], `a.js ${'y'.repeat(119)}…`);
   assert.equal(c.blocks[0].subtitle.text, '4 comments · 2 fixed · 1 answered');
-  assert.deepEqual(t.column_settings, [{ align: 'left' }, { is_wrapped: true }, { align: 'right' }]);
   assert.equal(c.fallback.length, 1 + 4 + 1);
 });
 
-test('tests: pie only when something failed', () => {
-  assert.ok(C.tests(SAMPLES.tests).blocks.some((b) => b.type === 'data_visualization'));
-  assert.ok(!C.tests({ ...SAMPLES.tests, failed: 0 }).blocks.some((b) => b.type === 'data_visualization'));
+test('tests: one line, failures in bold, no chart', () => {
+  assert.equal(C.tests(SAMPLES.tests).blocks[0].text.text, '44 passed · *1 failed* · lint clean · types clean');
+  assert.equal(C.tests({ passed: 3, failed: 0, lint: 2 }).blocks[0].text.text, '3 passed · *2 lint errors*');
+  assert.ok(!C.tests(SAMPLES.tests).blocks.some((b) => b.type === 'data_visualization'));
   assert.match(C.tests(SAMPLES.tests).blocks.at(-1).elements[0].text, /Plan: 3 unit · 1 integration · 1 functional/);
 });
 
 test('deploy: fxa-* apps only, max 10, never a sync or rollback button', () => {
   const apps = Array.from({ length: 12 }, (_, i) => ({ name: `fxa-app-${i}`, sync: 'Synced', health: 'Healthy' }));
-  assert.equal(C.deploy({ apps: [...apps, { name: 'other', sync: 'x' }] }).blocks[0].elements.length, 10);
+  assert.equal(C.deploy({ apps: [...apps, { name: 'other', sync: 'x' }] }).blocks.length, 10);
   assert.equal(C.deploy({ apps: [{ name: 'other' }] }), null);
   const c = C.deploy(SAMPLES.deploy);
-  assert.deepEqual(c.blocks[0].elements.map((e) => e.slack_icon.name), ['rocket', 'warning']);
-  assert.match(c.blocks[0].elements[0].body.text, /v1\.290\.0 · synced 14:02 UTC/);
+  assert.match(c.blocks[0].text.text, /^✓ .*fxa-auth-stage.* · v1\.290\.0 · synced 14:02 UTC$/);
+  assert.match(c.blocks[1].text.text, /^⚠ .* · OutOfSync, Progressing · v1\.289\.2 · 2 resources not healthy$/);
+  assert.deepEqual(c.blocks.map((b) => b.accessory.action_id), ['wo_open', 'wo_investigate']);
   assert.doesNotMatch(all(c), /sync"|rollback/i);
 });
 
-test('grafana: line of the points, sparkline in the fallback', () => {
+test('grafana: one line with now, range and peak, sparkline in the fallback', () => {
   const c = C.grafana(SAMPLES.grafana);
-  assert.equal(c.blocks[1].chart.type, 'line');
-  assert.equal(c.blocks[1].chart.series[0].data.length, 12);
-  assert.ok(c.blocks[1].chart.series[0].name.length <= 20);
+  assert.equal(c.blocks.length, 1);
+  assert.equal(c.blocks[0].text.text, '*auth-server p95 latency*\n*120 ms* now · 24h range 90 to 180 ms · peak at 8h');
   assert.match(c.fallback[0].text.text, /`[▁-█]{12}` 24h/);
   assert.equal(C.grafana({ ...SAMPLES.grafana, url: 'https://evil.example.com' }).blocks[0].accessory, undefined);
 });
 
-test('status: stop is danger with a confirm, no fallback', () => {
+test('status: stop is danger with a confirm, owner last, no fallback', () => {
   const c = C.status(SAMPLES.status);
   const stop = c.blocks.at(-1).elements[2];
   assert.equal(stop.style, 'danger');
   assert.ok(stop.confirm);
   assert.equal(c.fallback, null);
-  assert.match(C.status({ ...SAMPLES.status, owner: '<!channel>' }).blocks[0].fields[2].text, /-$/);
+  assert.equal(c.blocks[0].text.text, '*Working* · 14 min · 3 turns\nNow: Running the unit tests');
+  assert.match(c.blocks[1].elements[0].text, /^PR <https:\/\/github\.com\/mozilla\/fxa\/pull\/12345\|#12345> · draft · CI running · <@U00000000>$/);
+  assert.doesNotMatch(all(C.status({ ...SAMPLES.status, owner: '<!channel>' })), /<!channel>|<@/);
 });
 
-test('sessions: an Open cell with a fallback, and section rows', () => {
+test('sessions: one linked line per session, unsafe links stay plain', () => {
   const c = C.sessions(SAMPLES.sessions);
-  assert.equal(c.blocks[0].rows.length, 3);
-  assert.equal(c.blocks[0].rows[1][3].type, 'action_cell');
-  assert.equal(c.fallback.length, 2);
+  assert.equal(c.blocks[0].elements[0].text, '*2 live sessions*');
+  assert.equal(c.blocks[1].text.text.split('\n')[0], '<https://example.slack.com/archives/C0/p1|FXA-0000 recovery copy> · working · 14 min · <@U00000000>');
   const bad = C.sessions({ rows: [{ key: 'k', task: 't', state: 's', url: 'https://evil.example.com' }] });
-  assert.equal(bad.blocks[0].rows[1][3].type, 'raw_text');
+  assert.equal(bad.blocks[1].text.text, 't · s · 0 min');
 });
 
 test('end: feedback buttons only in the primary layout', () => {
@@ -178,10 +176,9 @@ test('end: feedback buttons only in the primary layout', () => {
   assert.ok(!c.fallback.some((b) => b.type === 'context_actions'));
 });
 
-test('bot: table of services, text names what is down', () => {
+test('bot: what is down first, the rest on one line', () => {
   const c = C.bot(SAMPLES.bot);
-  assert.equal(c.blocks[1].rows.length, 5);
-  assert.equal(c.blocks[1].rows[1][2].text, '-');
+  assert.equal(c.blocks[1].text.text, '⚠ *MCP: grafana* down · proxy not running\n✓ Slack bot, Controller (3 live sessions), Pipeline timers (next run 10:00)');
   assert.match(c.text, /1 of 4 services are not up: MCP: grafana/);
   assert.equal(C.bot({ services: [{ name: 'a', state: 'up' }] }).text, 'All 1 services are up.');
 });

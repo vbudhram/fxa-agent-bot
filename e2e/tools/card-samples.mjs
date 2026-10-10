@@ -6,7 +6,7 @@ const now = Date.parse('2026-10-10T12:00:00Z');
 
 export const SAMPLES = {
   pr: { key: 'k1', number: 12345, title: 'Handle an expired session token in /account/status', url: PR, state: 'open', draft: true, repo: 'mozilla/fxa',
-    additions: 52, deletions: 11, files: 2, ci: 'fail', checks: 42, failed: 1, failing: ['unit-auth-server'], changers: ['reviewer-a'], approvers: [], mergeable: 'MERGEABLE', jira: 'FXA-0000' },
+    additions: 52, deletions: 11, files: 2, ci: 'pass', checks: 42, failed: 0, failing: [], changers: [], approvers: [], mergeable: 'MERGEABLE', jira: 'FXA-0000' },
   turn: { key: 'k1', summary: '**Done.** I fixed the expired token check in `/account/status`, and the unit tests pass.', files: 2, added: 52, removed: 11,
     tests: { passed: 44, failed: 0 }, lint: 0, types: 0, todos: { done: 4, total: 4 }, steps: 12, elapsed: '3m 4s', stages: ['Read the code', 'Edited 2 files', 'Ran the tests'], changes: 2 },
   tools: { profile: 'fxa', runtime: 'claude', read_only: false, repos: [{ slug: 'mozilla/fxa', write: true }], mcp: ['Jira', 'Sentry', 'GitHub', 'Argo CD', 'Grafana'] },
@@ -30,7 +30,7 @@ export const SAMPLES = {
   sessions: { rows: [
     { key: 'k1', task: 'FXA-0000 recovery copy', state: 'working', minutes: 14, owner: 'U00000000', url: 'https://example.slack.com/archives/C0/p1' },
     { key: 'k2', task: 'Sentry 1A2', state: 'answered', minutes: 40, owner: 'U00000000', url: 'https://example.slack.com/archives/C0/p2' }] },
-  end: { key: 'k1', reason: 'The PR merged.', minutes: 42, turns: 6, files: 2, added: 52, removed: 11, pr: { number: 12345, url: PR, state: 'merged' } },
+  end: { key: 'k1', reason: 'Idle for 30 minutes. The branch and PR stay.', minutes: 42, turns: 6, files: 2, added: 52, removed: 11, pr: { number: 12345, url: PR, state: 'draft' } },
   bot: { name: 'fxa-agent', version: 'v2026.10.10', uptime: '3d', services: [
     { name: 'Slack bot', state: 'up' }, { name: 'Controller', state: 'up', note: '3 live sessions' },
     { name: 'MCP: grafana', state: 'down', note: 'proxy not running' }, { name: 'Pipeline timers', state: 'up', note: 'next run 10:00' }] },
