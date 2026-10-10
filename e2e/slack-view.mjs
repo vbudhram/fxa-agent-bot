@@ -50,7 +50,8 @@ export function createView({ names = {} } = {}) {
         const m = find(channel, args.ts);
         if (!m || m.deleted) throw err('message_not_found');
         if ('text' in args) m.text = args.text;
-        if ('blocks' in args) m.blocks = args.blocks;
+        // New blocks replace a finished stream's task card too, as in Slack.
+        if ('blocks' in args) { m.blocks = args.blocks; if (m.stream === 'closed') m.chunks = []; }
         m.edits++; touch(m);
         return { ok: true, channel, ts: m.ts };
       }
@@ -113,7 +114,8 @@ export function blockText(blocks = []) {
   for (const b of blocks) {
     if (b.type === 'section') { if (b.text) lines.push(txt(b.text)); for (const f of b.fields ?? []) lines.push(txt(f));
       if (b.accessory?.type === 'button') buttons.push(txt(b.accessory.text)); else if (b.accessory) buttons.push(`<${b.accessory.type}: ${(b.accessory.options ?? []).map((o) => txt(o.text)).join(' | ')}>`); }
-    else if (b.type === 'markdown') lines.push(b.text);
+    // A markdown block renders [text](url) as a link; mrkdwn does not, so only here.
+    else if (b.type === 'markdown') lines.push(b.text.replace(/\[([^\]\n]+)\]\((https?:[^)\s]+)\)/g, '<$2|$1>'));
     else if (b.type === 'context') lines.push(b.elements.map(txt).filter(Boolean).join(' '));
     else if (b.type === 'header') lines.push(`# ${txt(b.text)}`);
     else if (b.type === 'actions') for (const e of b.elements ?? []) buttons.push(e.type === 'button' ? txt(e.text) : `<${e.type}>`);
