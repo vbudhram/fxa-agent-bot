@@ -1,86 +1,73 @@
-// npm run e2e:view: a local dashboard of the runs in e2e/out. Each thread as Slack lays it out,
-// the hard checks, the judge's findings, and a form for a person's own scores (human.json).
+// npm run e2e:view: read each test conversation whole, and write what should change.
+// Feedback goes to e2e/feedback/<run>.md and survives reruns; Claude reads it from there.
 import { createServer } from 'node:http';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { judge, MODEL } from './judge.mjs';
 
-const OUT = join(dirname(fileURLToPath(import.meta.url)), 'out');
+const HERE = dirname(fileURLToPath(import.meta.url));
+const OUT = join(HERE, 'out'), FEEDBACK = join(HERE, 'feedback');
 const PORT = Number(process.env.PORT || 8787);
-const RUBRIC = ['clarity', 'addressee', 'steer_followed', 'tone', 'ste', 'no_internal_leak', 'buttons_sensible', 'no_noise', 'visual'];
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const read = (run, f) => { try { return JSON.parse(readFileSync(join(OUT, run, f), 'utf8')); } catch { return null; } };
-const runs = () => readdirSync(OUT, { withFileTypes: true }).filter((d) => d.isDirectory() && !d.name.startsWith('.') && existsSync(join(OUT, d.name, 'result.json'))).map((d) => d.name).sort();
-const okName = (n) => runs().includes(n);
-const sum = (s) => (s ? Object.values(s).reduce((a, b) => a + b, 0) : null);
+const runs = () => readdirSync(OUT, { withFileTypes: true }).filter((d) => d.isDirectory() && !d.name.startsWith('.') && existsSync(join(OUT, d.name, 'thread.html'))).map((d) => d.name).sort();
+const fbFile = (run) => join(FEEDBACK, `${run}.md`);
+const feedback = (run) => (existsSync(fbFile(run)) ? readFileSync(fbFile(run), 'utf8') : '');
 
-function title(run) {
-  const m = read(run, 'meta.json');
-  const src = m?.scenario && existsSync(m.scenario) ? readFileSync(m.scenario, 'utf8') : '';
-  return src.match(/title: '([^']*)'/)?.[1] ?? src.match(/"title": "([^"]*)"/)?.[1] ?? (m?.persona ? `persona ${m.persona}` : '');
+// The scenario's own words: its title and what good looks like.
+function about(run) {
+  const m = read(run, 'meta.json'), src = m?.scenario && existsSync(m.scenario) ? readFileSync(m.scenario, 'utf8') : '';
+  const pick = (k) => src.match(new RegExp(`${k}: '((?:[^'\\\\]|\\\\.)*)'`))?.[1]?.replace(/\\'/g, "'") ?? src.match(new RegExp(`"${k}": "([^"]*)"`))?.[1] ?? '';
+  return { title: pick('title') || (m?.persona ? `Claude personas: ${m.persona}` : run), good: pick('judge') };
 }
 
-const CSS = `body{font:14px/1.45 -apple-system,sans-serif;margin:0;color:#1d1c1d;background:#f8f8f8}
-header{background:#3f0e40;color:#fff;padding:10px 16px}header a{color:#fff}main{padding:12px 16px}
-table{border-collapse:collapse;width:100%;background:#fff}td,th{border-bottom:1px solid #eee;padding:6px 8px;text-align:left;vertical-align:top}
-.ok{color:#007a5a;font-weight:600}.bad{color:#e01e5a;font-weight:600}.known{color:#9a6700}.mute{color:#888}
-.grid{display:grid;grid-template-columns:900px 1fr;gap:16px}iframe{width:900px;height:85vh;border:1px solid #ddd;background:#fff}
-.card{background:#fff;border:1px solid #ddd;border-radius:6px;padding:10px 12px;margin-bottom:12px}h3{margin:0 0 6px}
-.f{border-left:3px solid #ddd;padding-left:8px;margin:6px 0}.blocker,.major{border-color:#e01e5a}.minor{border-color:#ecb22e}
-label{display:inline-block;width:140px}select,textarea{font:inherit}textarea{width:100%;height:90px}button{font:inherit;padding:4px 12px}
-pre{white-space:pre-wrap;font-size:12px;background:#fff;border:1px solid #ddd;padding:8px;max-height:50vh;overflow:auto}
-@media (max-width:1300px){.grid{grid-template-columns:1fr}iframe{width:100%}}`;
-const page = (t, body) => `<!doctype html><meta charset="utf-8"><title>${esc(t)}</title><style>${CSS}</style><header><a href="/">e2e runs</a> · ${esc(t)}</header><main>${body}</main>`;
+const CSS = `body{font:15px/1.5 -apple-system,sans-serif;margin:0;background:#fff;color:#1d1c1d}
+header{background:#3f0e40;color:#fff;padding:10px 20px;display:flex;gap:16px;align-items:center}header a{color:#fff}
+.wrap{max-width:900px;margin:0 auto;padding:16px 20px}.about{color:#555;margin:4px 0 16px}
+ol{padding-left:20px}li{margin:6px 0}.done{color:#007a5a}.mute{color:#888;font-size:13px}
+.msg{cursor:pointer;border-radius:6px}.msg:hover{background:#fff8e1;outline:1px dashed #ecb22e}
+#fb{position:sticky;bottom:0;background:#fff;border-top:2px solid #3f0e40;padding:10px 0}
+textarea{width:100%;height:120px;font:inherit;box-sizing:border-box}button{font:inherit;padding:6px 16px;background:#007a5a;color:#fff;border:0;border-radius:4px}
+pre{white-space:pre-wrap;background:#f6f6f6;padding:8px;font-size:13px}details{margin:12px 0}`;
+const page = (t, body, nav = '') => `<!doctype html><meta charset="utf-8"><title>${esc(t)}</title><style>${CSS}</style><header><a href="/">All conversations</a>${nav}</header>${body}`;
 
 function index() {
-  const rows = runs().map((r) => {
-    const res = read(r, 'result.json'), j = read(r, 'judge.json'), h = read(r, 'human.json');
-    return `<tr><td><a href="/run/${encodeURIComponent(r)}">${esc(r)}</a><div class="mute">${esc(title(r))}</div></td>
-      <td class="${res.ok ? 'ok' : 'bad'}">${res.ok ? 'pass' : 'FAIL'}${res.failures.length ? `<div class="bad">${res.failures.map(esc).join('<br>')}</div>` : ''}${res.xfail.length ? `<div class="known">${res.xfail.length} known</div>` : ''}</td>
-      <td>${j ? `${j.total}/${j.max}` : '<span class="mute">not judged</span>'}</td>
-      <td>${h ? `${h.verdict} ${sum(h.scores)}/${RUBRIC.length * 2}${h.notes ? `<div class="mute">${esc(h.notes.slice(0, 80))}</div>` : ''}` : '<span class="mute">not yet</span>'}</td></tr>`;
+  const items = runs().map((r) => {
+    const a = about(r), res = read(r, 'result.json'), fb = feedback(r);
+    return `<li><a href="/run/${encodeURIComponent(r)}">${esc(a.title)}</a> <span class="mute">${esc(r)}${res && !res.ok ? ' · checks failed' : ''}</span>${fb ? ' <span class="done">✓ feedback</span>' : ''}</li>`;
   }).join('');
-  return page('e2e runs', `<p>Run <code>npm run e2e -- --png</code> to refresh. Judge model: ${esc(MODEL)} (about $2 a thread; on request only).</p>
-    <table><tr><th>Run</th><th>Hard checks</th><th>Judge</th><th>Your score</th></tr>${rows}</table>`);
+  return page('Test conversations', `<div class="wrap"><h1 style="font-size:20px">Test conversations</h1>
+    <p class="about">Open one, read it top to bottom, and write what you would change. Click a message to point at it.</p><ol>${items}</ol></div>`);
 }
 
 function runPage(r) {
-  const res = read(r, 'result.json'), j = read(r, 'judge.json'), h = read(r, 'human.json') ?? {};
-  const txt = existsSync(join(OUT, r, 'thread.txt')) ? readFileSync(join(OUT, r, 'thread.txt'), 'utf8') : '';
-  const checks = `<div class="card"><h3>Hard checks: <span class="${res.ok ? 'ok' : 'bad'}">${res.ok ? 'pass' : 'FAIL'}</span></h3>
-    ${res.failures.map((f) => `<div class="bad">✗ ${esc(f)}</div>`).join('')}${res.xfail.map((f) => `<div class="known">~ known: ${esc(f)}</div>`).join('')}${res.fixed.map((f) => `<div>! ${esc(f)}</div>`).join('')}</div>`;
-  const judged = j ? `<div class="card"><h3>Judge (${esc(j.model)}): ${j.total}/${j.max}, ${esc(j.verdict)}</h3>
-    <div>${Object.entries(j.scores).map(([k, v]) => `<span class="${v < 2 ? 'known' : 'mute'}">${k}=${v}</span>`).join(' · ')}</div>
-    ${j.findings.map((f) => `<div class="f ${f.severity}"><b>${esc(f.severity)}</b> ${esc(f.msg_ref)} ${esc(f.rubric_id)}: ${esc(f.evidence)}<div class="mute">fix: ${esc(f.fix)}</div></div>`).join('')}
-    <p>${esc(j.summary)}</p></div>`
-    : `<div class="card"><h3>Judge</h3><form method="post" action="/judge/${encodeURIComponent(r)}"><button>Ask ${esc(MODEL)} (about $2)</button></form></div>`;
-  const opt = (k, v) => `<option${h.scores?.[k] === v ? ' selected' : ''}>${v}</option>`;
-  const form = `<div class="card"><h3>Your judgment</h3><form method="post" action="/human/${encodeURIComponent(r)}">
-    <div><label>Verdict</label><select name="verdict">${['good', 'ok', 'bad'].map((v) => `<option${h.verdict === v ? ' selected' : ''}>${v}</option>`).join('')}</select></div>
-    ${RUBRIC.map((k) => `<div><label>${k}</label><select name="${k}">${opt(k, 2)}${opt(k, 1)}${opt(k, 0)}</select></div>`).join('')}
-    <div>Notes: what is wrong, which message, what it should say</div><textarea name="notes">${esc(h.notes)}</textarea>
-    <button>Save</button> ${h.at ? `<span class="mute">saved ${esc(h.at)}</span>` : ''}</form></div>`;
-  return page(r, `<div class="mute">${esc(title(r))}</div><div class="grid"><iframe src="/file/${encodeURIComponent(r)}/thread.html"></iframe>
-    <div>${checks}${form}${judged}<details><summary>Thread as text</summary><pre>${esc(txt)}</pre></details>
-    <details><summary>Controller calls</summary><pre>${esc(existsSync(join(OUT, r, 'ctl.jsonl')) ? readFileSync(join(OUT, r, 'ctl.jsonl'), 'utf8').split('\n').filter((l) => l && !l.includes('"events"') && !l.includes('"watch"')).join('\n') : '')}</pre></details></div></div>`);
+  const all = runs(), i = all.indexOf(r), a = about(r), res = read(r, 'result.json'), j = read(r, 'judge.json');
+  const thread = readFileSync(join(OUT, r, 'thread.html'), 'utf8').replace(/^[\s\S]*?<style>/, '<style>').replace(/body\{[^}]*\}/, '').replace('<body>', '').replace('</body>', '');
+  const nav = `${i > 0 ? ` · <a href="/run/${encodeURIComponent(all[i - 1])}">← previous</a>` : ''}${i < all.length - 1 ? ` · <a href="/run/${encodeURIComponent(all[i + 1])}">next →</a>` : ''}`;
+  const extra = `<details><summary>What the automatic checks said</summary><pre>${esc([...(res?.failures ?? []).map((f) => `failed: ${f}`), ...(res?.xfail ?? []).map((f) => `known bug: ${f}`)].join('\n') || 'all passed')}</pre>
+    ${j ? `<pre>${esc(`Judge (${j.model}) ${j.total}/${j.max}\n${j.findings.map((f) => `${f.severity} ${f.msg_ref}: ${f.evidence}`).join('\n')}`)}</pre>` : ''}</details>`;
+  return page(a.title, `<div class="wrap"><h1 style="font-size:20px">${esc(a.title)}</h1><div class="about">${a.good ? `Good looks like: ${esc(a.good)}` : ''}<br><span class="mute">Brown lines like [A taps "Open PR"] are what the test did. A shaded message is visible only to the person named.</span></div>
+    ${thread}${extra}
+    ${feedback(r) ? `<details open><summary>Your earlier feedback</summary><pre>${esc(feedback(r))}</pre></details>` : ''}
+    <form id="fb" method="post" action="/feedback/${encodeURIComponent(r)}"><textarea name="text" placeholder="What is wrong in this conversation, and what should the bot do or say instead? Click a message to add its number."></textarea>
+    <button>Save feedback</button> <span class="mute">Saved to e2e/feedback/${esc(r)}.md</span></form></div>
+    <script>document.querySelectorAll('.msg').forEach((m) => m.addEventListener('click', () => { const t = document.querySelector('textarea'); t.value += (t.value && !t.value.endsWith('\\n') ? '\\n' : '') + '#' + m.dataset.seq + ': '; t.focus(); }));</script>`, nav);
 }
 
 const body = (req) => new Promise((resolve) => { let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => resolve(new URLSearchParams(b))); });
-const send = (res, code, html, type = 'text/html; charset=utf-8') => { res.writeHead(code, { 'content-type': type }); res.end(html); };
+const send = (res, code, html) => { res.writeHead(code, { 'content-type': 'text/html; charset=utf-8' }); res.end(html); };
 
 createServer(async (req, res) => {
-  const [, kind, raw, file] = decodeURIComponent(req.url.split('?')[0]).split('/');
+  const [, kind, run] = decodeURIComponent(req.url.split('?')[0]).split('/');
   try {
     if (!kind) return send(res, 200, index());
-    if (!okName(raw)) return send(res, 404, 'no such run');
-    if (kind === 'run') return send(res, 200, runPage(raw));
-    if (kind === 'file' && ['thread.html', 'thread.png'].includes(file)) return send(res, 200, readFileSync(join(OUT, raw, file)), file.endsWith('png') ? 'image/png' : 'text/html; charset=utf-8');
-    if (req.method === 'POST' && kind === 'human') {
-      const f = await body(req);
-      writeFileSync(join(OUT, raw, 'human.json'), JSON.stringify({ verdict: f.get('verdict'), scores: Object.fromEntries(RUBRIC.map((k) => [k, Number(f.get(k))])), notes: f.get('notes') ?? '', at: new Date().toISOString() }, null, 2));
-    } else if (req.method === 'POST' && kind === 'judge') await judge(join(OUT, raw));
-    else return send(res, 404, 'not found');
-    res.writeHead(303, { location: `/run/${encodeURIComponent(raw)}` }); res.end();
+    if (!runs().includes(run)) return send(res, 404, 'no such conversation');
+    if (kind === 'run') return send(res, 200, runPage(run));
+    if (kind === 'feedback' && req.method === 'POST') {
+      const text = ((await body(req)).get('text') ?? '').trim();
+      if (text) { mkdirSync(FEEDBACK, { recursive: true }); appendFileSync(fbFile(run), `## ${new Date().toISOString()} · ${about(run).title}\n\n${text}\n\n`); }
+      res.writeHead(303, { location: `/run/${encodeURIComponent(run)}` }); return res.end();
+    }
+    send(res, 404, 'not found');
   } catch (e) { send(res, 500, `<pre>${esc(e.stack)}</pre>`); }
-}).listen(PORT, '127.0.0.1', () => console.log(`e2e dashboard: http://127.0.0.1:${PORT}/`));
+}).listen(PORT, '127.0.0.1', () => console.log(`Test conversations: http://127.0.0.1:${PORT}/`));

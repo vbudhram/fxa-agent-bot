@@ -22,7 +22,7 @@ function message(m, who) {
     ? `<div class="row ${c.status}">${c.status === 'complete' ? '✓' : c.status === 'in_progress' ? '◌' : '○'} ${esc(c.title)}${c.details ? `<span class="det"> ${esc(c.details)}</span>` : ''}</div>`
     : `<div>${mrkdwn(c.text ?? '', who)}</div>`)).join('');
   const name = m.bot ? 'fxa-agent <span class="app">APP</span>' : esc(who(m.user));
-  return `<div class="msg${m.to ? ' eph' : ''}${m.deleted ? ' del' : ''}">
+  return `<div class="msg${m.to ? ' eph' : ''}${m.deleted ? ' del' : ''}" data-seq="${m.seq}">
   <div class="av ${m.bot ? 'bot' : ''}">${m.bot ? '🦊' : esc(who(m.user)[0])}</div>
   <div class="main">
     ${m.to ? `<div class="only">👁 Only visible to you (${esc(who(m.to))})</div>` : ''}

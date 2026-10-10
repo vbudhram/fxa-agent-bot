@@ -5,3 +5,4 @@ node_modules/
 .env.*
 .DS_Store
 e2e/out/
+e2e/feedback/
