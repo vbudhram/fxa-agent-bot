@@ -1,0 +1,10 @@
+{
+  "source": "synthetic: the agent asks one question, then answers",
+  "sessions": [{ "turns": [
+    { "steps": ["Reading packages/fxa-settings/src/components/FormVerifyCode/index.tsx"],
+      "end": { "type": "question", "text": "The blur check runs on every keystroke. Where should it run?", "options": ["On submit (recommended)", "On blur", "Leave it"] } },
+    { "steps": ["Editing packages/fxa-settings/src/components/FormVerifyCode/index.tsx"],
+      "diff": [{ "file": "packages/fxa-settings/src/components/FormVerifyCode/index.tsx", "added": 4, "removed": 2 }],
+      "end": { "status": "ready", "text": "The check now runs on submit, and the tests pass." } }
+  ] }]
+}

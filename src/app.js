@@ -1086,6 +1086,7 @@ async function steerAndAck(s, text, client, userId, ts) {
   if (!busyBefore) await startStatus(s, 'Working').catch((e) => console.error('status', s.key, e.data?.error ?? e.message));
   try {
     const out = await ctl.steer(s.key, text, userId ? await whoIs(client, userId) : null);
+    if (userId) await retireQuestion(s.key); // a person's reply answers any open question
     const queued = out.includes('queued');
     addAck(s.key, ts, queued);
     // 👀 says it was seen, ⏳ that it waits for this step; settle clears both. No message.
@@ -1351,7 +1352,7 @@ const finishTurn = (key, msg, ev) => serial(key, async function finishTurn() {
       const ordered = (msg.blocks ?? []).length ? [kept[0], ...msg.blocks] : [...kept, ...actions];
       await app.client.chat.update({ channel: s.channel, ts: s.status_ts, text: msg.text, blocks: ordered });
       sessions.patch(s.key, STATUS_CLEAR);
-      if (actions.length) await retireButtons(key, { ts: s.status_ts, text: msg.text, blocks: kept });
+      if (actions.length) await retireButtons(key, { ts: s.status_ts, text: msg.text, blocks: kept, question: asks(msg.blocks) });
       return;
     } catch (e) {
       console.error('finish', key, e.data?.error ?? e.message);
@@ -1366,7 +1367,7 @@ async function postMsg(key, msg) {
   if (s.muted) return null;
   const { ts } = await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...msg });
   const blocks = (msg.blocks ?? []).filter((b) => b.type !== 'actions' && b.block_id !== 'answer_hint');
-  if (blocks.length !== (msg.blocks ?? []).length) await retireButtons(key, { ts, text: msg.text, blocks });
+  if (blocks.length !== (msg.blocks ?? []).length) await retireButtons(key, { ts, text: msg.text, blocks, question: asks(msg.blocks) });
   return ts;
 }
 
@@ -1379,6 +1380,15 @@ async function retireButtons(key, current) {
     await app.client.chat.update({ channel: s.channel, ts: prev.ts, text: prev.text, blocks: prev.blocks }).catch(() => {});
   }
   sessions.patch(key, { buttons_msg: current });
+}
+const asks = (blocks) => (blocks ?? []).some((b) => b.type === 'actions' && b.elements?.some((e) => /^answer_/.test(e.action_id ?? '')));
+// A question's answer buttons go once the person answered in a reply, or the session stopped or
+// paused: a later tap would send a stale answer. Diff and Open PR stay; they still work after a stop.
+async function retireQuestion(key) {
+  const s = fresh(key), q = s?.buttons_msg;
+  if (!q?.question) return;
+  sessions.patch(key, { buttons_msg: null, answers_pending: null });
+  await app.client.chat.update({ channel: s.channel, ts: q.ts, text: q.text, blocks: q.blocks }).catch(() => {});
 }
 
 // While a turn runs, a watch stream feeds the status line within a second, and
@@ -1980,6 +1990,7 @@ async function pauseNow(key, why) {
   await updateStatus(key, 'paused', { busy: false }).catch(() => {});
   sessions.patch(key, { state: 'paused' });
   await settle(fresh(key), null);
+  await retireQuestion(key);
   await desktopClosed(key, 'paused');
   return true;
 }
@@ -2014,6 +2025,7 @@ async function stopSession(key) {
   stopWatch(key);
   await updateStatus(key, 'stopped', { busy: false }).catch(() => {});
   await settle(s, null);
+  await retireQuestion(key);
   for (const m of [steps, unsent, lastEdit, chains]) m.delete(key);
   await desktopClosed(key, 'stopped');
   if (!hadRunner) return true;
