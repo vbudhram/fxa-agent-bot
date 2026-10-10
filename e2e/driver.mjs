@@ -46,7 +46,7 @@ export async function runScenario(app, view, scenario) {
   // Quiet for SETTLE_MS, counted from the step's start too: an advance gives the bot's 1 s poll time to see it.
   let stepAt = Date.now();
   const settled = () => until(() => Math.min(view.quietFor(), Date.now() - stepAt) >= SETTLE_MS, 'the bot to go quiet');
-  const ctlLines = () => (existsSync(ctlFile) ? readFileSync(ctlFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+  const ctlLines = () => (existsSync(ctlFile) ? readFileSync(ctlFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((l) => l.argv) : []);
   const inThread = (m, t) => (m.thread_ts ?? m.ts) === roots[t];
 
   // A step's target message: 'root', 'last' (the person's last), 'self' (this step's), 'last:B', 'status' (newest bot post), or a seq.
