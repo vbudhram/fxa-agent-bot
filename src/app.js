@@ -1072,6 +1072,13 @@ setTimeout(prune, 60_000);
 // steer spends ~2 s over ssh starting the turn. A turn already running keeps
 // its own timeline, and startStatus leaves it alone.
 async function steerAndAck(s, text, client, userId, ts) {
+  // A bare "^" while a turn runs, with no new message above it, points at what that turn already
+  // answers: it joins the turn's acks, and gets no second reply of its own.
+  const cur0 = fresh(s.key);
+  if (/^\^+$/.test(text.replace(/^\(From someone else[^\n]*\)\n/, '').trim()) && cur0?.state === 'active' && cur0.status_ts && !cur0.aside?.length) {
+    addAck(s.key, ts);
+    return;
+  }
   text = takeAside(s.key) + text;
   if (userId && userId === s.owner) sessions.patch(s.key, { last_person_at: Date.now() }); // the owner wrote: a queued ship waits (shipAfterResume)
   // A tapped answer or an edit after the session ended (paused, Stop, a failure):
