@@ -35,3 +35,8 @@ test('PROFILE_OPEN: an open team needs no PROFILE_USERS entry', () => {
   assert.equal(resolveProfile({ text: 'profile:pyfxa-team fix it', user: 'U9', env }).profile, 'pyfxa-team');
   assert.match(resolveProfile({ text: 'profile:monitor fix it', user: 'U9', env }).error, /can't start/);
 });
+
+test('a profile: word inside the text is not a flag (a pasted scope list)', () => {
+  assert.deepEqual(r('why did the client lose avatar? log: scope=openid profile:email profile:avatar'),
+    { profile: undefined, text: 'why did the client lose avatar? log: scope=openid profile:email profile:avatar' });
+});

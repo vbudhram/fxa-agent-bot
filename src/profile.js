@@ -7,11 +7,12 @@ const pairs = (v) => new Map((v || '').split(',').map((p) => p.trim().split(':')
 
 export function resolveProfile({ text, channel, user, env = process.env }) {
   let profile;
-  const flag = text.match(/(^|\s)profile:(\S+)/i);
+  // Only as the first word: a pasted log or scope list ("openid profile:email") is not a flag.
+  const flag = text.trim().match(/^profile:(\S+)/i);
   if (flag) {
-    profile = flag[2].toLowerCase();
-    if (!/^[a-z0-9][a-z0-9-]*$/.test(profile)) return { error: `"${flag[2]}" is not a profile name.` };
-    text = text.replace(flag[0], ' ').trim();
+    profile = flag[1].toLowerCase();
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(profile)) return { error: `"${flag[1]}" is not a profile name.` };
+    text = text.trim().slice(flag[0].length).trim();
   } else {
     const jira = pairs(env.PROFILE_JIRA);
     const key = [...text.matchAll(/\b([A-Z][A-Z0-9]+)-\d+\b/g)].find((m) => jira.has(m[1]));
