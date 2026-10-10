@@ -1,0 +1,5 @@
+[
+  {"profile": "fxa", "label": "fxa", "defaults": [], "repos": [{"slug": "mozilla/fxa", "role": "work", "write": true}]},
+  {"profile": "monitor", "label": "monitor", "defaults": [], "repos": [{"slug": "mozilla/blurts-server", "role": "work", "write": false, "why": "the profile is read-only"}, {"slug": "mozilla/fxa", "role": "dep", "write": false, "why": "it runs beside the work repo"}]},
+  {"profile": "pyfxa-team", "label": "PyFxA team", "defaults": ["mozilla/PyFxA", "mozilla/fxa"], "repos": [{"slug": "mozilla/PyFxA", "role": "work", "write": false, "why": "the agent's GitHub App is not installed on this repo"}, {"slug": "mozilla/fxa", "role": "work", "write": true}]}
+]
