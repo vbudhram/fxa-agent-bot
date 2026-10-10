@@ -11,7 +11,9 @@ const L = { title: 150, body: 200, buttons: 3, carousel: 10, children: 10, table
 const cut = (s, n) => { const t = defuse(s).replace(/</g, '‹').replace(/>/g, '›').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
 const pt = (text, n = L.title) => ({ type: 'plain_text', text: cut(text, n) || '-' });
 const mk = (text, n = L.body) => ({ type: 'mrkdwn', text: String(text).slice(0, n) || '-' });
-const pill = (s) => (s ? `\`${cut(s, 40).replace(/`/g, "'")}\`` : '');
+// Plain words, not code pills: monospace on every fact made each card busy on a phone.
+const pill = (s) => (s ? cut(s, 40) : '');
+const cap = (s) => (s ? `${s.charAt(0).toUpperCase()}${s.slice(1)}` : '');
 const dot = (...parts) => parts.filter(Boolean).join(' · ');
 const count = (n, label) => (n ? `${n} ${label}` : '');
 const nfiles = (n) => `${num(n)} file${n === 1 ? '' : 's'}`;
@@ -58,7 +60,7 @@ function _pr(d) {
   const n = d.number, url = safeUrl(d.url);
   const state = d.state === 'merged' || d.state === 'closed' ? d.state : d.draft ? 'draft' : 'open';
   const conflict = d.mergeable === 'CONFLICTING', changers = d.changers ?? [], approvers = d.approvers ?? [];
-  const ciLine = d.ci === 'fail' ? `:x: CI failed: ${(d.failing ?? []).slice(0, 3).map(pill).join(', ') || 'a check'}${d.checks ? ` · ${num(d.checks) - num(d.failed)} of ${d.checks} checks passed` : ''}`
+  const ciLine = d.ci === 'fail' ? `CI failed on ${(d.failing ?? []).slice(0, 2).map(pill).join(', ') || 'a check'}${d.checks ? ` · ${num(d.checks) - num(d.failed)} of ${d.checks} passed` : ''}`
     : d.ci === 'pass' ? `✓ CI passed${d.checks ? ` · ${d.checks} checks` : ''}` : d.ci === 'pending' ? `CI running${d.running ? ` · ${d.running} checks left` : ''}` : 'No CI result yet';
   const rev = changers.length ? `Changes requested by ${changers.slice(0, 3).join(', ')}` : approvers.length ? `Approved by ${approvers.slice(0, 3).join(', ')}` : 'No review yet';
   const jiraLine = d.jira ? `Jira ${link(jiraUrl(d.jira), d.jira)}` : 'No Jira ticket';
@@ -67,24 +69,26 @@ function _pr(d) {
   const next = live ? [conflict && btn('Rebase onto main', 'rebase_pr', d.key), changers.length && btn('Fix review', 'fix_review', d.key),
     state === 'draft' && d.ci === 'pass' && btn('Mark ready', 'pr_ready', d.key), !d.jira && btn('Create Jira', 'create_jira', d.key)].filter(Boolean) : [];
   if (next[0]) next[0].style = 'primary';
-  const subtitle = dot(pill(conflict ? 'conflict' : state), d.repo, d.additions != null && `+${d.additions} −${num(d.deletions)}`, d.files != null && nfiles(d.files));
+  const repo = d.repo && d.repo !== (process.env.PIPE_REPO_SLUG || 'mozilla/fxa') ? d.repo : '';
+  const subtitle = dot(cap(conflict ? 'merge conflict' : state), repo, d.additions != null && `+${d.additions} −${num(d.deletions)}`, d.files != null && nfiles(d.files));
   const title = `#${n} ${d.title ?? ''}`;
   return {
     text: plain(`PR #${n} is ${state}. ${ciLine.replace(/^:x: |^✓ /, '')}. ${rev}.`),
     blocks: [({ type: 'card', block_id: `pr_${n}_v${d.version ?? 1}`, icon: logo('github', 'GitHub'), title: pt(title), subtitle: mk(subtitle), body: mk(ciLine), subtext: mk(dot(rev, jiraLine)),
-      actions: btns(url && btn('Open on GitHub', 'wo_open', d.key, { url }), ...next) })],
-    fallback: [sec(`*${link(url, title)}*\n${subtitle}`, url ? btn('Open', 'wo_open', d.key, { url }) : undefined), ctx(dot(ciLine, rev, jiraLine)), ...actions(btns(...next))],
+      actions: btns(next[0], url && btn('Open', 'wo_open', d.key, { url })) })],
+    fallback: [sec(`*${link(url, title)}*\n${subtitle}`, url ? btn('Open', 'wo_open', d.key, { url }) : undefined), ctx(dot(ciLine, rev, jiraLine)), ...actions(btns(next[0]))],
   };
 }
 
 function _turn(d) {
-  const chips = d.needsInput ? [] : [d.files != null && `\`${nfiles(d.files)} +${num(d.added)} −${num(d.removed)}\``,
-    d.tests && `\`tests ${d.tests.passed} passed${d.tests.failed ? ` ${d.tests.failed} failed` : ''}\``, d.lint != null && `\`lint ${d.lint}\``,
-    d.types != null && `\`types ${d.types}\``, d.todos && `\`todos ${d.todos.done}/${d.todos.total}\``, dot(count(d.steps, 'steps'), d.elapsed)].filter(Boolean);
+  // One quiet line: what changed, whether the tests pass, how long. Only problems get more.
+  const chips = d.needsInput ? [] : [dot(d.files != null && `${nfiles(d.files)} +${num(d.added)} −${num(d.removed)}`,
+    d.tests && `${d.tests.failed ? `${d.tests.failed} tests failed` : `${d.tests.passed} tests pass`}`, num(d.lint) > 0 && `${d.lint} lint errors`,
+    num(d.types) > 0 && `${d.types} type errors`, d.todos && d.todos.done < d.todos.total && `${d.todos.total - d.todos.done} todos open`, d.elapsed)].filter(Boolean);
   const stages = (d.stages ?? []).slice(0, 20).map((s) => cut(s, 100));
   const changes = num(d.changes) > 0;
   const acts = btns(changes && !d.pr && btn('Open PR', 'open_pr', d.key, { style: 'primary' }), changes && btn('Diff', 'diff', d.key),
-    d.more && btn('Show more', 'more', d.key), changes && !d.pr && btn('Push branch', 'push_branch', d.key));
+    d.more && btn('Show more', 'more', d.key)); // Push branch stays a command (!push): a fourth full-width button fills a phone screen
   const body = { type: 'markdown', text: defuse(d.summary).slice(0, L.md) || 'Done.' };
   return {
     text: plain(String(d.summary ?? '').split('\n')[0]) || 'Reply',
@@ -114,11 +118,11 @@ function _tools(d) {
 // Null data (a hidden or unreadable ticket) gives no card: the link stays in the text.
 function _jira(d) {
   if (!d?.key || !/^FXA-\d+$/.test(d.key)) return null;
-  const url = jiraUrl(d.key), sub = dot(pill(d.status), d.type, d.priority);
+  const url = jiraUrl(d.key), sub = dot(d.status, d.type, d.priority, d.assignee ? cut(d.assignee, 40) : 'Unassigned');
   return {
     text: plain(`${d.key}: ${d.summary}. ${d.status ?? ''}`),
     blocks: [({ type: 'card', block_id: `jira_${d.key}`, icon: logo('jira', 'Jira'), title: pt(`${d.key} ${d.summary ?? ''}`), subtitle: mk(sub),
-      body: mk(`Assignee: ${cut(d.assignee || 'none', 80)}`), actions: btns(open('Open in Jira', url, d.key), btn('Investigate', 'wo_investigate', `jira:${d.key}`)) })],
+      actions: btns(btn('Investigate', 'wo_investigate', `jira:${d.key}`, { style: 'primary' }), open('Open', url, d.key)) })],
     fallback: [sec(`*${link(url, d.key)}* ${cut(d.summary, L.body)}\n${dot(sub, d.assignee)}`, btn('Investigate', 'wo_investigate', `jira:${d.key}`))],
   };
 }
@@ -131,15 +135,15 @@ const chart = (kind, title, labels, name, vals, extra = {}) => ({ type: 'data_vi
 
 function _sentry(d) {
   if (!d?.id) return null;
-  const url = safeUrl(d.permalink), sub = dot(pill(d.shortId), d.project, pill(d.status));
-  const body = dot(`*${num(d.count)}* events`, `*${num(d.userCount)}* users in 24h`, d.culprit && pill(d.culprit));
-  const seen = dot(d.firstSeen && `first seen ${ago(d.firstSeen, d.now)}`, d.release && `release ${cut(d.release, 40)}`);
+  const url = safeUrl(d.permalink), sub = dot(d.project, cap(d.status));
+  const body = `*${num(d.count)}* events · *${num(d.userCount)}* users in 24h`;
+  const seen = d.firstSeen ? `First seen ${ago(d.firstSeen, d.now)}` : '';
   const inv = btn('Investigate', 'wo_investigate', `sentry:${d.id}`, { style: 'primary' });
   const h = d.hourly?.length === 24 ? buckets(d.hourly) : null;
   return {
     text: plain(`Sentry ${d.shortId ?? d.id}: ${d.title}. ${num(d.count)} events, ${num(d.userCount)} users in 24h.`),
     blocks: [({ type: 'card', block_id: `sentry_${d.id}`, icon: logo('sentry', 'Sentry'), title: pt(d.title), subtitle: mk(sub), body: mk(body),
-      ...(seen ? { subtext: mk(seen) } : {}), actions: btns(open('Open in Sentry', url, d.id), inv) }),
+      ...(seen ? { subtext: mk(seen) } : {}), actions: btns(inv, open('Open', url, d.id)) }),
       ...(h ? [chart('bar', 'Events, last 24h', LABELS(2, 12, true), 'events', h)] : [])],
     fallback: [sec(`*${link(url, d.title)}*\n${dot(sub, body)}`, inv), ...(h || seen ? [ctx(dot(h && `24h ${spark(h)}`, seen))] : [])],
   };
@@ -149,7 +153,7 @@ function _ci(d) {
   const failing = d.failing ?? [], infra = new Set(d.infra ?? []), links = new Map((d.links ?? []).map((l) => [l.name, l.url]));
   const counts = dot(count(failing.length, 'failed'), count(d.running, 'running'), count(d.passed, 'passed'));
   const rows = failing.slice(0, 7).map((f) => { const u = safeUrl(links.get(f));
-    return sec(infra.has(f) ? `:warning: ${pill(f)}  infra failure, not the change` : `:x: ${pill(f)}  failed`, u ? btn('Logs', 'wo_open', d.key, { url: u }) : undefined); });
+    return sec(infra.has(f) ? `*${pill(f)}*\nInfra failure, not the change` : `*${pill(f)}*\nFailed`, u ? btn('Logs', 'wo_open', d.key, { url: u }) : undefined); });
   const tail = [...(failing.length > 7 ? [ctx(`${failing.length - 7} more failing checks`)] : []), ...(d.needsTap && d.why ? [ctx(cut(d.why, 300))] : []),
     ...actions(d.needsTap ? [btn('Run a round', 'auto_round', d.key, { style: 'primary' })] : [])];
   return {

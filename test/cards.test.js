@@ -38,7 +38,7 @@ test('safeUrl allows github.com, the env bases and Slack permalinks only', () =>
 
 test('a link outside the allowlist drops the button and keeps the card', () => {
   const c = C.jira(SAMPLES.jira);
-  assert.deepEqual(buttons(c.blocks), ['wo_open', 'wo_investigate']);
+  assert.deepEqual(buttons(c.blocks), ['wo_investigate', 'wo_open']);
   delete process.env.JIRA_URL;
   const d = C.jira(SAMPLES.jira);
   assert.deepEqual(buttons(d.blocks), ['wo_investigate']);
@@ -50,15 +50,17 @@ test('a link outside the allowlist drops the button and keeps the card', () => {
 
 test('pr: buttons follow the state order and cap at 3', () => {
   const ids = (d) => buttons(C.pr({ ...SAMPLES.pr, ...d }).blocks);
-  assert.deepEqual(ids({ mergeable: 'CONFLICTING', jira: null }), ['wo_open', 'rebase_pr', 'fix_review']);
-  assert.deepEqual(ids({ changers: [], ci: 'pass' }), ['wo_open', 'pr_ready']);
-  assert.deepEqual(ids({ changers: [], jira: null, ci: 'pending' }), ['wo_open', 'create_jira']);
+  // The one next step first, then Open: two buttons, a calm card on a phone.
+  assert.deepEqual(ids({ mergeable: 'CONFLICTING', jira: null }), ['rebase_pr', 'wo_open']);
+  assert.deepEqual(ids({ changers: [], ci: 'pass' }), ['pr_ready', 'wo_open']);
+  assert.deepEqual(ids({ changers: [], jira: null, ci: 'pending' }), ['create_jira', 'wo_open']);
   assert.deepEqual(ids({ state: 'merged' }), ['wo_open']);
   const c = C.pr({ ...SAMPLES.pr, changers: [], ci: 'pass' });
-  assert.equal(c.blocks[0].actions[1].style, 'primary');
-  assert.equal(c.blocks[0].block_id, 'pr_999999_v1');
-  assert.equal(C.pr({ ...SAMPLES.pr, version: 4 }).blocks[0].block_id, 'pr_999999_v4');
-  assert.match(c.blocks[0].subtitle.text, /^`draft` · mozilla\/fxa · \+52 −11 · 2 files$/);
+  assert.equal(c.blocks[0].actions[0].style, 'primary');
+  assert.equal(c.blocks[0].block_id, 'pr_12345_v1');
+  assert.equal(C.pr({ ...SAMPLES.pr, version: 4 }).blocks[0].block_id, 'pr_12345_v4');
+  assert.equal(c.blocks[0].subtitle.text, 'Draft · +52 −11 · 2 files');
+  assert.equal(C.pr({ ...SAMPLES.pr, repo: 'mozilla/PyFxA' }).blocks[0].subtitle.text, 'Draft · mozilla/PyFxA · +52 −11 · 2 files');
   assert.equal(C.pr({ ...SAMPLES.pr, title: 'x'.repeat(400) }).blocks[0].title.text.length, 150);
 });
 
@@ -66,7 +68,9 @@ test('turn: chips, the collapsed stages, no chips after a question', () => {
   const c = C.turn(SAMPLES.turn);
   assert.deepEqual(c.blocks.map((b) => b.type), ['markdown', 'context', 'container', 'actions']);
   assert.equal(c.blocks[2].default_collapsed, true);
-  assert.deepEqual(buttons(c.blocks), ['open_pr', 'diff', 'push_branch']);
+  assert.deepEqual(buttons(c.blocks), ['open_pr', 'diff']);
+  assert.equal(c.blocks[1].elements[0].text, '2 files +52 −11 · 44 tests pass · 3m 4s');
+  assert.match(C.turn({ ...SAMPLES.turn, lint: 2, todos: { done: 1, total: 3 } }).blocks[1].elements[0].text, /2 lint errors · 2 todos open/);
   assert.deepEqual(c.fallback.map((b) => b.type), ['markdown', 'context', 'actions']);
   assert.match(c.fallback[1].elements[0].text, /✓ Read the code/);
   const q = C.turn({ ...SAMPLES.turn, needsInput: true, stages: [], changes: 0 });
@@ -84,14 +88,15 @@ test('tools: three cards, fallback fields', () => {
 test('jira: no card for missing or bad data', () => {
   assert.equal(C.jira(null), null);
   assert.equal(C.jira({ key: 'ABC-1' }), null);
-  assert.match(C.jira(SAMPLES.jira).blocks[0].subtitle.text, /`In Progress` · Bug · P2/);
+  assert.equal(C.jira(SAMPLES.jira).blocks[0].subtitle.text, 'In Progress · Bug · P2 · assignee-a');
 });
 
 test('sentry: 24 hours sum into 12 buckets, sparkline in the fallback', () => {
   assert.deepEqual(C.buckets([...Array(24).keys()]), [1, 5, 9, 13, 17, 21, 25, 29, 33, 37, 41, 45]);
   const c = C.sentry(SAMPLES.sentry);
   assert.equal(c.blocks[1].chart.series[0].data.length, 12);
-  assert.match(c.blocks[0].subtext.text, /first seen 3d ago/);
+  assert.match(c.blocks[0].subtext.text, /^First seen 3d ago$/);
+  assert.equal(c.blocks[0].body.text, '*412* events · *37* users in 24h');
   assert.match(c.fallback[1].elements[0].text, /^24h [▁-█]{12}/);
   assert.equal(C.sentry({ ...SAMPLES.sentry, hourly: [1, 2] }).blocks.length, 1);
   assert.equal(C.sentry({}), null);
@@ -101,8 +106,8 @@ test('sentry: 24 hours sum into 12 buckets, sparkline in the fallback', () => {
 test('ci: infra marked, logs only from links, a tap button only when needed', () => {
   const c = C.ci(SAMPLES.ci);
   const kids = c.blocks[0].child_blocks;
-  assert.match(kids[0].text.text, /^:x:/);
-  assert.match(kids[1].text.text, /^:warning:/);
+  assert.match(kids[0].text.text, /^\*unit-auth-server\*\nFailed$/);
+  assert.match(kids[1].text.text, /Infra failure, not the change$/);
   assert.equal(c.blocks[0].subtitle.text, '2 failed · 1 running · 39 passed');
   assert.deepEqual(buttons(c.blocks), ['wo_open', 'wo_open', 'auto_round']);
   assert.deepEqual(buttons(C.ci({ ...SAMPLES.ci, links: [], needsTap: false }).blocks), []);
@@ -135,7 +140,7 @@ test('deploy: fxa-* apps only, max 10, never a sync or rollback button', () => {
   assert.equal(C.deploy({ apps: [{ name: 'other' }] }), null);
   const c = C.deploy(SAMPLES.deploy);
   assert.deepEqual(c.blocks[0].elements.map((e) => e.slack_icon.name), ['rocket', 'warning']);
-  assert.match(c.blocks[0].elements[0].body.text, /`v1\.290\.0` · synced 14:02 UTC/);
+  assert.match(c.blocks[0].elements[0].body.text, /v1\.290\.0 · synced 14:02 UTC/);
   assert.doesNotMatch(all(c), /sync"|rollback/i);
 });
 
