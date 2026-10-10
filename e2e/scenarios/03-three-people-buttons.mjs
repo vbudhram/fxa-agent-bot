@@ -6,7 +6,7 @@ export default {
   steps: [
     { A: '@bot fix the blur on the verify code input' },
     { advance: 'setup' }, { advance: 'turn', wait: { buttons: /Open PR/ } },
-    { C: '@bot stop', expect: { ephemeral: { to: 'C', match: /not on the list/ }, noCtl: 'stop', ephemeralCount: { to: 'C', n: 1 } }, known: 'flag 2: C also gets a second ephemeral' },
+    { C: '@bot stop', expect: { ephemeral: { to: 'C', match: /not on the list.*<@UA> runs this session/s }, noCtl: 'stop', ephemeralCount: { to: 'C', n: 1 } } },
     { B: { tap: 'Open PR' }, expect: { ephemeral: { to: 'B', match: /Only <@UA> can use these buttons/ }, noCtl: 'finish' } },
     { C: { tap: 'Open PR' }, expect: { noEphemeral: 'C', noCtl: 'finish' } },
     { A: { tap: 'Open PR' }, expect: { ctl: { cmd: 'finish', n: 1 } } },

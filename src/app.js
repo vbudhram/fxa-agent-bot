@@ -126,8 +126,9 @@ const stackPicks = new Map();
 async function onMention({ event, body, client }) {
   if (fromBot(event)) return; // another app's post, as for thread replies
   if (!allowed(event.channel, event.user)) {
+    const runs = event.thread_ts && sessions.get(event.channel, event.thread_ts)?.owner;
     if (CHANNELS.includes(event.channel)) await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts,
-      text: "Sorry, you're not on the list of people who can start agent sessions here." }).catch(() => {});
+      text: `Sorry, you're not on the list of people who can use the agent here.${runs ? ` <@${runs}> runs this session: ask them.` : ''}` }).catch(() => {});
     return;
   }
   const thread = event.thread_ts || event.ts;
@@ -247,16 +248,19 @@ async function begin(key, client) {
 // The first session's owner stays the owner: a later tag by someone else does not take the thread.
 // One Slack read per thread, kept in memory.
 const STARTERS = new Map();
+// The thread's starter owns it (a teammate often tags the bot for them), but only someone who may
+// use the bot here: a starter who may not, such as a guest from another team, leaves it to the asker.
 async function ownerOf(client, channel, thread_ts, asker) {
   if (!thread_ts) return asker;
+  const ok = (u) => u && allowed(channel, u);
   const prior = sessions.get(channel, thread_ts)?.owner;
-  if (prior) return prior;
+  if (ok(prior)) return prior;
   const id = `${channel}:${thread_ts}`;
   if (!STARTERS.has(id)) {
     const root = await client.conversations.replies({ channel, ts: thread_ts, limit: 1 }).then((r) => r.messages?.[0], () => null);
     if (root) STARTERS.set(id, threadStarter(root, null));
   }
-  return STARTERS.get(id) || asker;
+  return ok(STARTERS.get(id)) ? STARTERS.get(id) : asker;
 }
 // followUp: a reply in a quick-answer thread, taken as a tag: a quick look first,
 // a sandbox when it asks for work or the agent asks for one.
@@ -584,7 +588,8 @@ app.message(async ({ message, client }) => {
   const crowd = untaggedOwner(message, s) && await crowded(client, s);
   if (STEER_ANYONE && !forBotFromOthers(message, s, botUserId, STEER_MODE, crowd)) {
     keepAside(s, message);
-    if (!tippedInThread(sessions.all(), s, message.user)) {
+    // No "tag me" tip for someone who may not use the bot here: a tag would only be refused.
+    if (allowed(message.channel, message.user) && !tippedInThread(sessions.all(), s, message.user)) {
       sessions.patch(s.key, { tipped: [...(fresh(s.key).tipped ?? []), message.user] });
       const why = message.user !== s.owner ? `This is <@${s.owner}>'s session. I answer others here when they tag me`
         : crowd ? 'Others are in this thread now, so I act only when you tag me' : 'You stopped this session, so I pick it up only when you tag me';
@@ -636,7 +641,8 @@ app.message(async ({ message, client }) => {
     return;
   }
   if (message.user !== s.owner && !(STEER_ANYONE && allowed(message.channel, message.user))) {
-    if ((s.told ?? []).includes(message.user)) return;
+    // Someone who may not use the bot here: their tag already got the one refusal (onMention).
+    if (!allowed(message.channel, message.user) || (s.told ?? []).includes(message.user)) return;
     sessions.patch(s.key, { told: [...(fresh(s.key).told ?? []), message.user] });
     await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: message.user,
       text: `Only <@${s.owner}> can steer this session, so I won't act on your message. They can see it, though.` }).catch(() => {});
