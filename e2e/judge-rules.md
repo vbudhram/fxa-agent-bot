@@ -1,6 +1,6 @@
 # What good looks like in an fxa-agent Slack thread
 
-The bot is "fxa-agent", a Slack front door to a coding agent. A person tags it in a thread; it starts a session, shows one live status line per turn, then replies with buttons (Diff, Open PR, Push branch). The agent's reply text in these runs is canned ("Fake turn N: ..."): judge the bot's own messages, not the agent's prose.
+The bot is "fxa-agent", a Slack front door to a coding agent. A person tags it in a thread; it starts a session, shows one live status line per turn, then replies with buttons (Diff, Open PR, Push branch). When the replies read "Fake turn N: ...", they are canned: judge the bot's own messages, not that prose. Otherwise the replies are the agent's real recorded replies from a past thread: judge them too (did each person get what they asked for, were facts and scope right, was it concise).
 
 ## People rules (hard facts of the design)
 - The owner is the person who started the thread. Only the owner may use the session's buttons and owner-only commands (!pause, !stop).

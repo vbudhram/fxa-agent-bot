@@ -12,7 +12,8 @@ const PARALLEL = 8;
 const CHROME = process.env.E2E_CHROME || `${homedir()}/Library/Caches/ms-playwright/chromium_headless_shell-1234/chrome-headless-shell-mac-arm64/chrome-headless-shell`;
 const flags = new Set(process.argv.slice(2).filter((a) => a.startsWith('--')));
 const filter = process.argv.slice(2).find((a) => !a.startsWith('--')) ?? '';
-// Flags: [filter] --png --judge --personas=N
+// Flags: [filter] --png --judge --personas=N --real (the replays of real threads in recordings.local/, not committed)
+const SCEN = flags.has('--real') ? 'recordings.local' : 'scenarios';
 
 // A scenario's matrix: {order: [...], STEER: [...]} gives one run per combination.
 function variants(sc) {
@@ -28,7 +29,7 @@ function runOne({ file, sc, vary, persona }) {
   rmSync(out, { recursive: true, force: true }); mkdirSync(out, { recursive: true });
   const home = mkdtempSync(join(tmpdir(), 'fxa-e2e-'));
   writeFileSync(join(home, 'now'), String(Math.floor(Date.now() / 1000)));
-  writeFileSync(join(out, 'meta.json'), JSON.stringify(persona ? { persona } : { scenario: join(HERE, 'scenarios', file), vary }));
+  writeFileSync(join(out, 'meta.json'), JSON.stringify(persona ? { persona } : { scenario: join(HERE, SCEN, file), vary }));
   return new Promise((done) => {
     const people = Object.entries(sc.people);
     // Only what the bot needs: no .env, and every state path in a fresh HOME.
@@ -40,7 +41,7 @@ function runOne({ file, sc, vary, persona }) {
       FXA_AGENT_STATE: join(home, 'sessions.json'), FXA_ERRORS_FILE: join(home, 'errors.jsonl'), FXA_DB: '/nonexistent/fxa.db',
       ERROR_DMS: '0', QUICK_ANSWERS: '0', ALLOWED_CHANNELS: 'C_TEST',
       ALLOWED_USERS: people.filter(([, d]) => !/not allowed/.test(d)).map(([p]) => `U${p}`).join(','),
-      ...(persona ? { E2E_PERSONA: persona, E2E_REAL_HOME: homedir(), USER: process.env.USER, ...(process.env.E2E_PERSONA_ROUNDS ? { E2E_PERSONA_ROUNDS: process.env.E2E_PERSONA_ROUNDS } : {}) } : { E2E_SCENARIO: join(HERE, 'scenarios', file) }), E2E_OUT: out, ...(sc.env ?? {}),
+      ...(persona ? { E2E_PERSONA: persona, E2E_REAL_HOME: homedir(), USER: process.env.USER, ...(process.env.E2E_PERSONA_ROUNDS ? { E2E_PERSONA_ROUNDS: process.env.E2E_PERSONA_ROUNDS } : {}) } : { E2E_SCENARIO: join(HERE, SCEN, file) }), E2E_OUT: out, ...(sc.tape ? { FAKE_TAPE: resolve(HERE, sc.tape) } : {}), ...(sc.env ?? {}),
       ...(flags.has('--png') || flags.has('--judge') ? { E2E_CHROME: CHROME } : {}),
       ...Object.fromEntries(Object.entries(vary).map(([k, v]) => [k === 'order' ? 'E2E_ORDER' : k, v])),
     };
@@ -65,8 +66,8 @@ if (nPersonas) {
   const names = Object.keys(CASTS).filter((c) => c.includes(filter));
   for (let k = 0; k < nPersonas; k++) { const persona = `${names[k % names.length]}:${Math.floor(k / names.length) + 1}`; jobs.push({ sc: personaScenario(...persona.split(':').map((x, i) => (i ? Number(x) : x))), vary: {}, persona }); }
 } else {
-  const files = readdirSync(join(HERE, 'scenarios')).filter((f) => f.endsWith('.mjs') && f.includes(filter)).sort();
-  for (const file of files) { const sc = (await import(join(HERE, 'scenarios', file))).default; for (const vary of variants(sc)) jobs.push({ file, sc, vary }); }
+  const files = readdirSync(join(HERE, SCEN)).filter((f) => f.endsWith('.mjs') && f.includes(filter)).sort();
+  for (const file of files) { const sc = (await import(join(HERE, SCEN, file))).default; for (const vary of variants(sc)) jobs.push({ file, sc, vary }); }
 }
 // A pool of PARALLEL runs at a time.
 const results = [];

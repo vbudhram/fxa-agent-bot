@@ -6,3 +6,5 @@ node_modules/
 .DS_Store
 e2e/out/
 e2e/feedback/
+e2e/recordings.local/
+e2e/sources.local.json

@@ -30,7 +30,7 @@ function prompt(sc, result, thread, png) {
     '- no_noise: no duplicate, stale or contradicting messages; one status line per turn',
     '- visual: the thread is easy to scan in the picture',
     '',
-    `## The scenario\n${sc.title}\nPeople: ${Object.entries(sc.people).map(([p, d]) => `${p} (${d})`).join(', ')}\nWhat good looks like here: ${sc.judge ?? '(not given)'}`,
+    `## The scenario\n${sc.title}\nPeople: ${Object.entries(sc.people).map(([p, d]) => `${p} (${d})`).join(', ')}\nWhat good looks like here: ${sc.judge ?? '(not given)'}${sc.story ? `\nThe real thread this replays (${sc.story.kind ?? ''}): ${sc.story.real ?? ''}` : ''}`,
     `\n## Hard checks (code already decided these; do not grade them again, but set disputes_hard if one looks wrong)\nfailed: ${JSON.stringify(result.failures)}\nknown bugs (expected failures): ${JSON.stringify(result.xfail)}`,
     `\n## The thread as text (#n is a message; [..] lines are the test's own actions; "(ephemeral -> B)" is visible to B only)\n\`\`\`\n${thread.slice(0, 40000)}\n\`\`\``,
     png ? '\n## The picture\nRead thread.png in the current folder: the same thread as Slack would lay it out (an approximation).' : '',

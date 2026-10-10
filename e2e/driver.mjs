@@ -14,6 +14,9 @@ const ADVANCE = { setup: 5, turn: 10, finish: 12 }; // fake-ctl.sh: setup 5 s, a
 const SETTLE_MS = 1500; // longer than the bot's 1.2 s live-edit throttle
 const TIMEOUT_MS = 20_000;
 const uid = (p) => `U${p}`;
+// A turn's reply: the canned text, or the start of any reply in the tape.
+const tapeEnds = process.env.FAKE_TAPE ? JSON.parse(readFileSync(process.env.FAKE_TAPE, 'utf8')).sessions.flatMap((s) => s.turns.map((t) => t.end?.text ?? '')).filter(Boolean) : [];
+const TURN_TEXT = new RegExp(['Fake turn \\d+', ...tapeEnds.map((t) => t.slice(0, 30).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))].join('|'));
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function until(pred, what, ms = TIMEOUT_MS) {
@@ -165,7 +168,7 @@ export async function runScenario(app, view, scenario) {
         const waiting = () => view.msgs.filter((m) => !m.bot && !m.deleted && m.reactions.has('eyes') && !m.reactions.has('hourglass_flowing_sand'));
         // A turn with no new message to answer ends without a reaction: then its stream stops, or its line shows the reply.
         const ended = (c) => (c.method === 'reactions.add' && ['white_check_mark', 'warning'].includes(c.args.name)) || c.method === 'chat.stopStream'
-          || (c.method === 'chat.update' && /Fake turn \d+/.test(`${c.args.text} ${JSON.stringify(c.args.blocks ?? '')}`));
+          || (/^chat\.(update|postMessage)$/.test(c.method) && TURN_TEXT.test(`${c.args.text} ${JSON.stringify(c.args.blocks ?? '')}`));
         await until(() => view.calls.slice(from).some(ended) && !waiting().length,
           () => `a turn to end (✅ or ⚠️, and no 👀 left${waiting().length ? `; waiting: #${waiting().map((m) => m.seq).join(', #')}` : ''})`);
       } else if (w.text) {

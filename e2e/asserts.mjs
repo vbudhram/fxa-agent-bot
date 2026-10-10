@@ -48,6 +48,8 @@ export function globalChecks({ view, botLog, stepOf }) {
   const fail = (id, list) => { out[id] = list.length ? list.slice(0, 5) : null; };
   fail('reacted', person.filter((m) => m.reactions.has('eyes') || m.reactions.has('hourglass_flowing_sand')).map((m) => `#${m.seq} still has ${[...m.reactions].join(',')}`));
   fail('no_control_lines', bot.filter((m) => /^(status:|OPTION:|QUESTION:)/m.test(said(m))).map((m) => `#${m.seq}`));
+  // A post that says only "Done · 12s" tells nobody anything (seen in real threads).
+  fail('no_empty_post', bot.filter((m) => /^\s*Done · [\dm h]+s?\s*$/.test(said(m).trim())).map((m) => `#${m.seq}`));
   fail('no_pings', bot.filter((m) => /<!(here|channel|everyone)>|<!subteam\^/.test(said(m))).map((m) => `#${m.seq}`));
   fail('one_open_stream', Object.values(Object.groupBy(bot.filter((m) => m.stream === 'open'), (m) => m.thread_ts)).filter((g) => g.length > 1).map((g) => `${g.length} open streams`));
   const twice = (list) => Object.values(Object.groupBy(list, (m) => `${stepOf(m.seq)}|${m.to ?? ''}|${said(m).trim()}`)).filter((g) => g.length > 1).map((g) => `#${g.map((m) => m.seq).join(', #')}: ${said(g[0]).slice(0, 80)}`);
