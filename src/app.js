@@ -101,15 +101,16 @@ function addAck(key, ts, queued = false) {
   if (!cur || !ts) return;
   sessions.patch(key, queued ? { next_acks: [...(cur.next_acks ?? []), ts] } : { acks: [...ackList(cur), ts], ack_ts: null });
 }
+// ok null: the session stopped or paused mid-turn. Every waiting message loses 👀 and ⏳, with no ✅ or ⚠️.
 async function settle(s, ok = true) {
   const cur = fresh(s.key);
   if (!cur) return;
-  const done = ackList(cur);
-  sessions.patch(s.key, { acks: cur.next_acks ?? [], next_acks: [], ack_ts: null });
+  const done = ok === null ? [...ackList(cur), ...(cur.next_acks ?? [])] : ackList(cur);
+  sessions.patch(s.key, { acks: ok === null ? [] : cur.next_acks ?? [], next_acks: [], ack_ts: null });
   for (const ts of done) {
     await app.client.reactions.remove({ channel: cur.channel, timestamp: ts, name: 'eyes' }).catch(() => {});
     await app.client.reactions.remove({ channel: cur.channel, timestamp: ts, name: 'hourglass_flowing_sand' }).catch(() => {});
-    await app.client.reactions.add({ channel: cur.channel, timestamp: ts, name: ok ? 'white_check_mark' : 'warning' }).catch(() => {});
+    if (ok !== null) await app.client.reactions.add({ channel: cur.channel, timestamp: ts, name: ok ? 'white_check_mark' : 'warning' }).catch(() => {});
   }
 }
 const strip = (t) => (t ?? '').replace(/<@[A-Z0-9]+>/g, '').trim();
@@ -181,7 +182,8 @@ async function onMention({ event, body, client }) {
   const deadline = Date.now() + START_DELAY_S * 1000;
   const tagFiles = fileRefs(event.files);
   // team: the workspace the person wrote from. In an org-wide install the bot's own team (auth.test) is not it.
-  pending.set(key, { prompt, request: resume_from ? requestOf(cur) : prompt, owner: await ownerOf(client, event.channel, event.thread_ts, event.user), team: event.team ?? body?.team_id ?? cur?.team, channel: event.channel, thread_ts, resume_from, runtime, profile: resume_from ? undefined : prof.profile, read_only: resume_from ? cur.read_only : undefined, deadline,
+  // A resume keeps its owner with no await, so the reply handler's resume of the same tag sees this reservation.
+  pending.set(key, { prompt, request: resume_from ? requestOf(cur) : prompt, owner: resume_from ? cur.owner : await ownerOf(client, event.channel, event.thread_ts, event.user), team: event.team ?? body?.team_id ?? cur?.team, channel: event.channel, thread_ts, resume_from, runtime, profile: resume_from ? undefined : prof.profile, read_only: resume_from ? cur.read_only : undefined, deadline,
     ...(choice?.user === event.user ? { repos: choice.repos, ...(resume_from ? {} : { is_new: true }) } : {}),
     held_files: [...(resume_from ? cur.held_files ?? [] : []), ...tagFiles], own_files: tagFiles.length > 0 });
   if (event.files?.length > tagFiles.length)
@@ -598,7 +600,8 @@ app.message(async ({ message, client }) => {
   const prOpen = s.state === 'pr_open' && !prDone;
   // After the PR merged or closed, a reply is not a new task (a tag is).
   const resumable = (['paused', 'stopped', 'failed'].includes(s.state) && !prDone) || prOpen;
-  if (steers && (LIVE.includes(s.state) || resumable)) seen(message.channel, message.ts);
+  // A moved session takes nothing here (resumePaused says where it went), so no 👀 that never settles.
+  if (steers && (LIVE.includes(s.state) || resumable) && !s.moved_to) seen(message.channel, message.ts);
   if (resumable && steers && !s.stop_failed) {
     addAck(s.key, message.ts);
     const t = text || 'See the attached files.';
@@ -1970,6 +1973,7 @@ async function pauseNow(key, why) {
   stopWatch(key);
   await updateStatus(key, 'paused', { busy: false }).catch(() => {});
   sessions.patch(key, { state: 'paused' });
+  await settle(fresh(key), null);
   await desktopClosed(key, 'paused');
   return true;
 }
@@ -2003,6 +2007,7 @@ async function stopSession(key) {
   sessions.patch(key, { state: 'stopped' });
   stopWatch(key);
   await updateStatus(key, 'stopped', { busy: false }).catch(() => {});
+  await settle(s, null);
   for (const m of [steps, unsent, lastEdit, chains]) m.delete(key);
   await desktopClosed(key, 'stopped');
   if (!hadRunner) return true;
