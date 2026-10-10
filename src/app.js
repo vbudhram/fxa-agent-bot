@@ -121,6 +121,19 @@ const stackChoice = new Map();
 // The open pickers, by message ts: who asked, and what they picked so far.
 const stackPicks = new Map();
 
+// A reply while the thread's session is still starting (the quick look, the boot): it joins the
+// start's prompt, as a queued session's does, in place of being dropped. Its ✅ comes with the reply.
+function joinStarting(message, text) {
+  const e = [...pending.entries()].find(([, p]) => p.channel === message.channel && p.thread_ts === message.thread_ts);
+  if (!e || e[1].src_ts === message.ts) return Boolean(e);
+  const [key, p] = e;
+  const who = message.user === p.owner ? 'the person who started this session' : 'someone else in the thread, not the person who started this session';
+  seen(message.channel, message.ts);
+  pending.set(key, { ...p, prompt: `${p.prompt}\n\nA later message in the thread, from ${who}:\n${text || 'See the attached files.'}`,
+    late: [...(p.late ?? []), { user: message.user, ts: message.ts, text }] });
+  return true;
+}
+
 // A mention starts at once, after a short window to cancel a mistaken tag.
 // A tag of the bot, and the Investigate button on a Work Object card, which makes one (wo_investigate).
 async function onMention({ event, body, client }) {
@@ -184,7 +197,7 @@ async function onMention({ event, body, client }) {
   const tagFiles = fileRefs(event.files);
   // team: the workspace the person wrote from. In an org-wide install the bot's own team (auth.test) is not it.
   // A resume keeps its owner with no await, so the reply handler's resume of the same tag sees this reservation.
-  pending.set(key, { prompt, request: resume_from ? requestOf(cur) : prompt, owner: resume_from ? cur.owner : await ownerOf(client, event.channel, event.thread_ts, event.user), team: event.team ?? body?.team_id ?? cur?.team, channel: event.channel, thread_ts, resume_from, runtime, profile: resume_from ? undefined : prof.profile, read_only: resume_from ? cur.read_only : undefined, deadline,
+  pending.set(key, { src_ts: event.ts, prompt, request: resume_from ? requestOf(cur) : prompt, owner: resume_from ? cur.owner : await ownerOf(client, event.channel, event.thread_ts, event.user), team: event.team ?? body?.team_id ?? cur?.team, channel: event.channel, thread_ts, resume_from, runtime, profile: resume_from ? undefined : prof.profile, read_only: resume_from ? cur.read_only : undefined, deadline,
     ...(choice?.user === event.user ? { repos: choice.repos, ...(resume_from ? {} : { is_new: true }) } : {}),
     held_files: [...(resume_from ? cur.held_files ?? [] : []), ...tagFiles], own_files: tagFiles.length > 0 });
   if (event.files?.length > tagFiles.length)
@@ -221,11 +234,20 @@ async function begin(key, client) {
   // ("Fix both bugs with tests") must not send "File a Jira ticket" to a sandbox.
   // Quick answers know only FxA: another profile goes straight to its sandbox.
   if (quickFirst(p.route ?? p.prompt, { resuming: Boolean(p.resume_from), runtime: p.runtime, on: QUICK && !p.own_files && !p.checkout && !p.repos && (!p.profile || p.profile === 'fxa') })) {
+    const late = () => pending.get(key)?.late ?? p.late ?? [];
+    const before = late();
     const r = await quick(key, p, client);
-    if (r === 'answered' || !(p = pending.get(key))) return;
+    // Answered without a session: what came in during the look is a follow-up, as a reply after it would be.
+    if (r === 'answered') {
+      const l = (pending.get(key) ?? p).late ?? before, a = sessions.get(p.channel, p.thread_ts);
+      if (l.length && a?.state === 'answered') await followUp(a, { ...l.at(-1), channel: p.channel, thread_ts: p.thread_ts }, l.map((x) => x.text).join('\n'), client);
+      return;
+    }
+    if (!(p = pending.get(key))) return;
     if (r?.findings) pending.set(key, p = { ...p, findings: r.findings });
   }
-  const { timer, card_ts, deadline, ...rest } = p;
+  const { timer, card_ts, deadline, late, src_ts, ...rest } = p;
+  if (late?.length) rest.acks = [...(rest.acks ?? []), ...late.map((l) => l.ts)];
   // Record the session before releasing the thread's reservation.
   // Continuing a PR: the new session replaces the old one in the thread, so it
   // takes over following the PR from what the old one saw.
@@ -577,6 +599,8 @@ app.message(async ({ message, client }) => {
   if (!message.thread_ts || fromBot(message)) return;
   if (message.subtype && !['thread_broadcast', 'file_share'].includes(message.subtype)) return;
   const s = sessions.get(message.channel, message.thread_ts);
+  // Starting (no session yet, or a resume of one): the reply joins the start. A tag's app_mention returns on the reservation.
+  if (allowed(message.channel, message.user) && !strip(message.text).startsWith('!') && joinStarting(message, strip(message.text))) return;
   if (!s) return;
   let text = strip(message.text);
   if (!text && !message.files?.length) return;
