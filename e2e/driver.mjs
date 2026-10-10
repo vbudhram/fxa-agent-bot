@@ -1,8 +1,13 @@
 // Plays a scenario's steps into the bot as Slack events, and waits on the fake Slack, not on sleeps.
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BOT, toText } from './slack-view.mjs';
 import { stepChecks, globalChecks } from './asserts.mjs';
+import { toHtml } from './html.mjs';
+
+// Playwright's headless shell (run.mjs finds it): the PNG of the thread for the judge.
+const SHELL = process.env.E2E_CHROME ?? '';
 
 export const CHANNEL = 'C_TEST';
 const ADVANCE = { setup: 5, turn: 10, finish: 12 }; // fake-ctl.sh: setup 5 s, a turn 10 s, a wrap-up 12 s
@@ -180,6 +185,13 @@ export async function runScenario(app, view, scenario) {
 
   const thread = Object.entries(roots).map(([t, ts]) => `${Object.keys(roots).length > 1 ? `== ${t}\n` : ''}${toText(view, { channel: CHANNEL, thread_ts: ts, who: (u) => u?.replace(/^U/, ''), notes: notes.filter((n) => n.t === t) })}`).join('\n\n');
   writeFileSync(join(out, 'thread.txt'), `${thread}\n`);
+  const html = toHtml(view, { channel: CHANNEL, roots, who: (u) => u?.replace(/^U/, '') ?? '?', notes });
+  writeFileSync(join(out, 'thread.html'), html);
+  if (SHELL && existsSync(SHELL)) {
+    const h = Math.min(12000, 160 + (html.match(/<div/g) ?? []).length * 24);
+    try { execFileSync(SHELL, ['--headless', '--disable-gpu', '--hide-scrollbars', `--screenshot=${join(out, 'thread.png')}`, `--window-size=900,${h}`, `file://${join(out, 'thread.html')}`], { stdio: 'ignore', timeout: 30_000 }); }
+    catch (e) { console.error(`png: ${e.message}`); }
+  }
   writeFileSync(join(out, 'calls.jsonl'), view.calls.map((c) => JSON.stringify(c)).join('\n'));
   writeFileSync(join(out, 'result.json'), JSON.stringify({ ok: failures.length === 0, failures, xfail, fixed }, null, 2));
   return failures.length === 0;

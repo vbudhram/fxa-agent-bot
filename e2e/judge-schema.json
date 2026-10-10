@@ -1,0 +1,38 @@
+{
+  "type": "object",
+  "required": ["scores", "findings", "summary"],
+  "properties": {
+    "scores": {
+      "type": "object",
+      "required": ["clarity", "addressee", "steer_followed", "tone", "ste", "no_internal_leak", "buttons_sensible", "no_noise", "visual"],
+      "properties": {
+        "clarity": {"type": "integer", "minimum": 0, "maximum": 2},
+        "addressee": {"type": "integer", "minimum": 0, "maximum": 2},
+        "steer_followed": {"type": "integer", "minimum": 0, "maximum": 2},
+        "tone": {"type": "integer", "minimum": 0, "maximum": 2},
+        "ste": {"type": "integer", "minimum": 0, "maximum": 2},
+        "no_internal_leak": {"type": "integer", "minimum": 0, "maximum": 2},
+        "buttons_sensible": {"type": "integer", "minimum": 0, "maximum": 2},
+        "no_noise": {"type": "integer", "minimum": 0, "maximum": 2},
+        "visual": {"type": "integer", "minimum": 0, "maximum": 2}
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["rubric_id", "severity", "msg_ref", "evidence", "fix"],
+        "properties": {
+          "rubric_id": {"type": "string"},
+          "severity": {"enum": ["blocker", "major", "minor"]},
+          "msg_ref": {"type": "string", "description": "#seq of the message"},
+          "evidence": {"type": "string"},
+          "fix": {"type": "string"},
+          "disputes_hard": {"type": "string", "description": "a hard check you think is wrong, if any"}
+        }
+      }
+    },
+    "visual_notes": {"type": "string"},
+    "summary": {"type": "string", "maxLength": 400}
+  }
+}

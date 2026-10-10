@@ -1,7 +1,7 @@
 // npm run e2e [-- name-filter]: run each scenario against the real bot, fake Slack and fake-ctl.
 import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -9,7 +9,9 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const BOT = resolve(HERE, '..');
 const CTL = process.env.FXA_CTL_REPO || resolve(BOT, '../fxa-sandbox-ctl');
 const PARALLEL = 8;
-const filter = process.argv[2] ?? '';
+const CHROME = process.env.E2E_CHROME || `${homedir()}/Library/Caches/ms-playwright/chromium_headless_shell-1234/chrome-headless-shell-mac-arm64/chrome-headless-shell`;
+const flags = new Set(process.argv.slice(2).filter((a) => a.startsWith('--')));
+const filter = process.argv.slice(2).find((a) => !a.startsWith('--')) ?? '';
 
 // A scenario's matrix: {order: [...], STEER: [...]} gives one run per combination.
 function variants(sc) {
@@ -25,6 +27,7 @@ function runOne({ file, sc, vary }) {
   rmSync(out, { recursive: true, force: true }); mkdirSync(out, { recursive: true });
   const home = mkdtempSync(join(tmpdir(), 'fxa-e2e-'));
   writeFileSync(join(home, 'now'), String(Math.floor(Date.now() / 1000)));
+  writeFileSync(join(out, 'meta.json'), JSON.stringify({ scenario: join(HERE, 'scenarios', file), vary }));
   return new Promise((done) => {
     const people = Object.entries(sc.people);
     // Only what the bot needs: no .env, and every state path in a fresh HOME.
@@ -37,6 +40,7 @@ function runOne({ file, sc, vary }) {
       ERROR_DMS: '0', QUICK_ANSWERS: '0', ALLOWED_CHANNELS: 'C_TEST',
       ALLOWED_USERS: people.filter(([, d]) => !/not allowed/.test(d)).map(([p]) => `U${p}`).join(','),
       E2E_SCENARIO: join(HERE, 'scenarios', file), E2E_OUT: out, ...(sc.env ?? {}),
+      ...(flags.has('--png') || flags.has('--judge') ? { E2E_CHROME: CHROME } : {}),
       ...Object.fromEntries(Object.entries(vary).map(([k, v]) => [k === 'order' ? 'E2E_ORDER' : k, v])),
     };
     const t0 = Date.now();
@@ -66,6 +70,14 @@ for (const r of results) {
   for (const f of r.xfail ?? []) console.log(`       ~ known: ${f}`);
   for (const f of r.fixed ?? []) console.log(`       ! ${f}`);
   if (!r.ok) console.log(`       see e2e/out/${r.name}/thread.txt`);
+}
+// --judge: the judge model scores each run, 4 at a time, cached on the transcript.
+if (flags.has('--judge')) {
+  const { judge, judgeLine, MODEL } = await import('./judge.mjs');
+  console.log(`\njudge: ${MODEL}`);
+  let j = 0;
+  await Promise.all(Array.from({ length: 4 }, async () => { while (j < results.length) { const r = results[j++];
+    try { console.log(judgeLine(r.name, await judge(join(HERE, 'out', r.name)))); } catch (e) { console.log(`ERR  ${r.name}: ${e.message.slice(0, 300)}`); } } }));
 }
 const bad = results.filter((r) => !r.ok).length;
 console.log(`${results.length - bad}/${results.length} pass, ${results.reduce((n, r) => n + (r.xfail?.length ?? 0), 0)} known failures`);
