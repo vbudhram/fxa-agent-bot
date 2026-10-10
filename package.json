@@ -9,7 +9,8 @@
     "start": "node --env-file=.env src/app.js",
     "dev": "node --env-file=.env.dev src/app.js",
     "test": "node --test",
-    "e2e": "node e2e/run.mjs"
+    "e2e": "node e2e/run.mjs",
+    "e2e:view": "node e2e/view.mjs"
   },
   "dependencies": {
     "@slack/bolt": "^5.1.0"
