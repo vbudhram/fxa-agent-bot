@@ -1849,6 +1849,7 @@ function explain(e, key) {
   const m = err.match(/ERROR: ([^\n]+)(?:\n\s*-\s*([^\n]+))?/);
   const line = m && (m[1].endsWith(':') && m[2] ? `${m[1]} ${m[2]}` : m[1]);
   if (/takes no messages/.test(err)) return 'This session has ended. Tag me again to start a new one.';
+  if (/ is from a fork\. /.test(err) && line) return `${line}.`; // a refusal, not a failure: a retry gets the same answer
   if (/is (paused|stopped); reply in the thread to resume it/.test(err)) return 'This session is paused. Reply here to pick it up, then try that again.';
   if (/nothing to push: no files changed/.test(err)) return 'There is nothing to push or open a PR for: I have not changed any files in this session.';
   if (/no Claude session id/.test(err)) return "I'm still starting up. Send that again in a minute.";
