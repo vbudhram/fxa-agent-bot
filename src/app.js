@@ -134,6 +134,8 @@ const stackPicks = new Map();
 function joinStarting(message, text) {
   const p = [...pending.values()].find((x) => x.channel === message.channel && x.thread_ts === message.thread_ts);
   if (!p || p.src_ts === message.ts) return Boolean(p);
+  // A live session's steer rules: the owner, or someone the STEER mode lets in. Never a message to a person.
+  if ((message.user !== p.owner && !(STEER_ANYONE && forBotFromOthers(message, p, botUserId, STEER_MODE))) || toSomeoneElse(message.text, botUserId)) return true;
   const who = message.user === p.owner ? 'the person who started this session' : 'someone else in the thread, not the person who started this session';
   seen(message.channel, message.ts);
   (p.late ??= []).push({ user: message.user, ts: message.ts, who, text: text || 'See the attached files.' });
@@ -244,7 +246,7 @@ async function begin(key, client) {
     // Answered without a session: what came in during the look is a follow-up, as a reply after it would be.
     if (r === 'answered') {
       const a = sessions.get(p.channel, p.thread_ts);
-      if (p.late?.length && a?.state === 'answered') await followUp(a, { ...p.late.at(-1), channel: p.channel, thread_ts: p.thread_ts }, p.late.map((x) => x.text).join('\n'), client);
+      if (p.late?.length && a?.state === 'answered') await followUp(a, { ...p.late.at(-1), channel: p.channel, thread_ts: p.thread_ts, acks: p.late.map((x) => x.ts) }, p.late.map((x) => x.text).join('\n'), client);
       return;
     }
     if (!(p = pending.get(key))) return;
@@ -303,7 +305,7 @@ async function followUp(s, message, text, client, route = text) {
   const pick = choice?.user === message.user ? { profile: choice.profile, repos: choice.repos, is_new: true } : {};
   // The owner with no await when the session has one, so the thread is reserved before anything else runs.
   pending.set(key, { prompt: text, request: text, route, owner: s.owner && allowed(s.channel, s.owner) ? s.owner : await ownerOf(client, s.channel, s.thread_ts, message.user), team: message.team ?? s.team, channel: s.channel,
-    thread_ts: s.thread_ts, runtime: 'claude', deadline: Date.now(), acks: message.ts ? [message.ts] : [], ...pick }); // a tap has no message to mark
+    thread_ts: s.thread_ts, runtime: 'claude', deadline: Date.now(), acks: message.acks ?? (message.ts ? [message.ts] : []), ...pick }); // a tap has no message to mark
   const ctx = await threadContext(client, { channel: s.channel, thread_ts: s.thread_ts, ts: message.ts, user: pending.get(key).owner }, { withBot: true, files: earlier });
   pending.set(key, { ...pending.get(key), prompt: text + ctx, held_files: [...earlier, ...own], own_files: own.length > 0 });
   await begin(key, client).catch((e) => { pending.delete(key); console.error('begin', key, e.message); });
@@ -785,6 +787,11 @@ async function stackCmd(s, text, m, client, note) {
   const p = parseStack(text);
   if (p.error) { await note(p.error); return; }
   if (s && LIVE.includes(fresh(s.key)?.state)) { await note('This thread has a running session. Use a new thread, or `!stop` first: the next session here then starts with your pick.'); return; }
+  // Someone else's pick would start a session that replaces the owner's, as their tag must not (onMention).
+  const cur = s && fresh(s.key);
+  if (cur && m.user !== cur.owner && ['paused', 'stopped', 'failed', 'pr_open'].includes(cur.state) && !['MERGED', 'CLOSED'].includes(cur.pr_seen?.state)) {
+    await note(`This is <@${cur.owner}>'s session. Only they can pick a stack here.`); return;
+  }
   const teams = teamsFor(await ctl.profileList().catch((e) => { console.error('profile list', e.message); return []; }), m.user);
   if (!teams.length) { await note('I could not read the teams. Try again in a moment.'); return; }
   if (p.sub === 'checkout') { await stackCheckout(s, p, text, m, client, note, teams); return; }
@@ -957,6 +964,7 @@ async function bang(s, text, m, client) {
     await sayWhile(s, 'Stopping… saving the work first.', () => stoppedText(s.key));
   } else if (cmd === 'new' || cmd === 'restart') {
     if (ownerOnly()) return;
+    if (fresh(s.key)?.moved_to) { await say(s, `This work moved to ${fresh(s.key).moved_to}. Continue it there, or tag me in a new thread to start something else.`); return; }
     if (LIVE.includes(s.state) && !(await stopSession(s.key))) { await say(s, STOPPED_TEXT(false)); return; }
     // The thread's first request, not this session's: a resumed session's prompt is only its last message.
     const request = requestOf(s);

@@ -22,7 +22,8 @@ export function resolveProfile({ text, channel, user, env = process.env }) {
   const open = (env.PROFILE_OPEN || '').split(',').map((x) => x.trim()).includes(profile);
   if (profile && profile !== 'fxa' && !open) {
     const users = (pairs(env.PROFILE_USERS).get(profile) || '').split('+');
-    if (!users.includes(user)) return { error: `You can't start a ${profile} session yet.` };
+    // The text too: a !stack pick in the thread can override the refusal (onMention).
+    if (!users.includes(user)) return { error: `You can't start a ${profile} session yet.`, text };
   }
   return { profile, text };
 }

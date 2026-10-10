@@ -36,6 +36,12 @@ test('PROFILE_OPEN: an open team needs no PROFILE_USERS entry', () => {
   assert.match(resolveProfile({ text: 'profile:monitor fix it', user: 'U9', env }).error, /can't start/);
 });
 
+test('a refused profile keeps the text, for a !stack pick that overrides it', () => {
+  const r2 = resolveProfile({ text: 'MNTOR-12 fix it', channel: 'C1', user: 'U9', env: { PROFILE_JIRA: 'MNTOR:monitor' } });
+  assert.match(r2.error, /can't start/);
+  assert.equal(r2.text, 'MNTOR-12 fix it');
+});
+
 test('a profile: word inside the text is not a flag (a pasted scope list)', () => {
   assert.deepEqual(r('why did the client lose avatar? log: scope=openid profile:email profile:avatar'),
     { profile: undefined, text: 'why did the client lose avatar? log: scope=openid profile:email profile:avatar' });
