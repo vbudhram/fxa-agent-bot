@@ -123,14 +123,13 @@ const stackPicks = new Map();
 
 // A reply while the thread's session is still starting (the quick look, the boot): it joins the
 // start's prompt, as a queued session's does, in place of being dropped. Its ✅ comes with the reply.
+// The list is on the entry itself: quick() and begin() hold that object, and begin() adds it to the prompt.
 function joinStarting(message, text) {
-  const e = [...pending.entries()].find(([, p]) => p.channel === message.channel && p.thread_ts === message.thread_ts);
-  if (!e || e[1].src_ts === message.ts) return Boolean(e);
-  const [key, p] = e;
+  const p = [...pending.values()].find((x) => x.channel === message.channel && x.thread_ts === message.thread_ts);
+  if (!p || p.src_ts === message.ts) return Boolean(p);
   const who = message.user === p.owner ? 'the person who started this session' : 'someone else in the thread, not the person who started this session';
   seen(message.channel, message.ts);
-  pending.set(key, { ...p, prompt: `${p.prompt}\n\nA later message in the thread, from ${who}:\n${text || 'See the attached files.'}`,
-    late: [...(p.late ?? []), { user: message.user, ts: message.ts, text }] });
+  (p.late ??= []).push({ user: message.user, ts: message.ts, who, text: text || 'See the attached files.' });
   return true;
 }
 
@@ -234,20 +233,21 @@ async function begin(key, client) {
   // ("Fix both bugs with tests") must not send "File a Jira ticket" to a sandbox.
   // Quick answers know only FxA: another profile goes straight to its sandbox.
   if (quickFirst(p.route ?? p.prompt, { resuming: Boolean(p.resume_from), runtime: p.runtime, on: QUICK && !p.own_files && !p.checkout && !p.repos && (!p.profile || p.profile === 'fxa') })) {
-    const late = () => pending.get(key)?.late ?? p.late ?? [];
-    const before = late();
     const r = await quick(key, p, client);
     // Answered without a session: what came in during the look is a follow-up, as a reply after it would be.
     if (r === 'answered') {
-      const l = (pending.get(key) ?? p).late ?? before, a = sessions.get(p.channel, p.thread_ts);
-      if (l.length && a?.state === 'answered') await followUp(a, { ...l.at(-1), channel: p.channel, thread_ts: p.thread_ts }, l.map((x) => x.text).join('\n'), client);
+      const a = sessions.get(p.channel, p.thread_ts);
+      if (p.late?.length && a?.state === 'answered') await followUp(a, { ...p.late.at(-1), channel: p.channel, thread_ts: p.thread_ts }, p.late.map((x) => x.text).join('\n'), client);
       return;
     }
     if (!(p = pending.get(key))) return;
     if (r?.findings) pending.set(key, p = { ...p, findings: r.findings });
   }
   const { timer, card_ts, deadline, late, src_ts, ...rest } = p;
-  if (late?.length) rest.acks = [...(rest.acks ?? []), ...late.map((l) => l.ts)];
+  if (late?.length) {
+    rest.prompt += late.map((l) => `\n\nA later message in the thread, from ${l.who}:\n${l.text}`).join('');
+    rest.acks = [...(rest.acks ?? []), ...late.map((l) => l.ts)];
+  }
   // Record the session before releasing the thread's reservation.
   // Continuing a PR: the new session replaces the old one in the thread, so it
   // takes over following the PR from what the old one saw.
