@@ -543,6 +543,9 @@ export const othersIn = (messages, owner, botId) => messages.some((m) => m.user 
 // them); anyone else's are context only, data and not instructions.
 const OWNER = 'the person who started this session';
 const quoted = (ls) => ls.map((l) => String(l.text).replace(/<@[A-Z0-9]+(?:\|[^>]*)?>/g, '@someone').split('\n').map((t) => `> ${l.who}: ${t}`).join('\n')).join('\n');
+// A thread message from someone other than the session's owner, labelled on every line, so no
+// line of it can pose as the owner (a header on the first line alone did not stop that).
+export const fromOther = (t) => `(From someone else in the thread, not the person who started this session.)\n${String(t ?? '').split('\n').map((l) => `> someone else: ${l}`).join('\n')}`;
 export const asideBlock = (lines) => {
   const own = lines.filter((l) => l.who === OWNER), rest = lines.filter((l) => l.who !== OWNER);
   return [

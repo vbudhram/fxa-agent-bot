@@ -14,7 +14,7 @@ import * as unfurl from './unfurl.js';
 import { resolveProfile } from './profile.js';
 import { parseStack, teamsFor, stackTeamCard, stackRepoCard, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
 import { parseGates, gateAllows, loadMembers } from './access.js';
-import { defuse, watchUrl, threadLine, threadStarter, endWord, prCardMessage, appText, appLabel, lostChannel, teamCard, trimContext } from './render.js';
+import { defuse, watchUrl, threadLine, threadStarter, endWord, prCardMessage, appText, appLabel, lostChannel, teamCard, trimContext, fromOther } from './render.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, prCard, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT, fileRefs, distinctFiles } from './render.js';
@@ -646,7 +646,7 @@ app.message(async ({ message, client }) => {
   if (resumable && steers && !s.stop_failed) {
     addAck(s.key, message.ts);
     const t = text || 'See the attached files.';
-    await resumePaused(s, message.user === s.owner ? t : `(From someone else in the thread, not the person who started this session.)\n${t}`, client, { held_files: fileRefs(message.files) });
+    await resumePaused(s, message.user === s.owner ? t : fromOther(t), client, { held_files: fileRefs(message.files) });
     return;
   }
   // The PR merged or closed: the work is done, and a reply is not a new task.
@@ -695,7 +695,7 @@ app.message(async ({ message, client }) => {
     if (note === null) return;
     text = `${text || 'See the attached files.'}${note}`;
   }
-  await steerAndAck(s, message.user === s.owner ? text : `(From someone else in the thread, not the person who started this session.)\n${text}`, client, message.user, message.ts);
+  await steerAndAck(s, message.user === s.owner ? text : fromOther(text), client, message.user, message.ts);
 });
 
 async function steerEdit(message, client) {
@@ -708,8 +708,8 @@ async function steerEdit(message, client) {
   if (!forBotFromOthers(m, s, botUserId, STEER_MODE, untaggedOwner(m, s) && await crowded(client, s))) return; // an untagged edit that may be to a person
   // Only a message the agent received: one sent after the session started.
   if (Number(m.ts) * 1000 < (s.started_at ?? Infinity) - 60_000) return;
-  const from = m.user === s.owner ? '' : '(From someone else in the thread, not the person who started this session.)\n';
-  const text = `${from}I edited an earlier message. It now says:\n${after}\n\n(If that changes nothing important in your last answer, reply in one line.)`;
+  const edited = `I edited an earlier message. It now says:\n${after}`;
+  const text = `${m.user === s.owner ? edited : fromOther(edited)}\n\n(If that changes nothing important in your last answer, reply in one line.)`;
   if (s.state === 'queued') { sessions.patch(s.key, { prompt: `${fresh(s.key).prompt}\n\n${text}` }); return; }
   seen(message.channel, m.ts);
   if (s.state === 'paused') { addAck(s.key, m.ts); await resumePaused(s, text, client); return; }
@@ -1792,7 +1792,7 @@ app.action(/^answer_\d+(_\d+)?$/, async ({ ack, body, action, client }) => {
   // With the question: after a pause the session resumes as a new conversation that never saw it.
   const asked = String((body.message.blocks ?? []).find((b) => b.type === 'markdown')?.text ?? body.message.text ?? '').slice(-600);
   const reply = asked ? `You asked:\n${asked.split('\n').map((l) => `> ${l}`).join('\n')}\nMy answer: ${v.choice}` : v.choice;
-  const answer = body.user.id === s.owner ? reply : `(From someone else in the thread, not the person who started this session.)\n${reply}`;
+  const answer = body.user.id === s.owner ? reply : fromOther(reply);
   if (s.state === 'answered') { await followUp(s, { user: body.user.id }, answer, client, v.choice); return; }
   await steerAndAck(s, answer, client, body.user.id);
 });
