@@ -2,6 +2,8 @@
 // parts live here: the !stack picker cards, the turn-end buttons for each repo, and the
 // follow state of each repo's PR.
 
+import { mayStart } from './profile.js';
+
 const SLUG = /^[\w.-]+\/[\w.-]+$/;
 const PR = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)\/?$/;
 
@@ -17,9 +19,7 @@ export function parseStack(text) {
 
 // The teams a person may pick: every profile, less the gated ones they are not on.
 export function teamsFor(profiles, user, env = process.env) {
-  const pairs = (v) => new Map((v || '').split(',').map((p) => p.trim().split(':')).filter((p) => p.length === 2));
-  const users = pairs(env.PROFILE_USERS), open = new Set((env.PROFILE_OPEN || '').split(',').map((x) => x.trim()));
-  return profiles.filter((p) => p.profile === 'fxa' || open.has(p.profile) || (users.get(p.profile) || '').split('+').includes(user));
+  return profiles.filter((p) => mayStart(p.profile, user, env));
 }
 
 // Step 1: which team. The select's value is the profile name.

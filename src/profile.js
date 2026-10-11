@@ -18,12 +18,14 @@ export function resolveProfile({ text, channel, user, env = process.env }) {
     const key = [...text.matchAll(/\b([A-Z][A-Z0-9]+)-\d+\b/g)].find((m) => jira.has(m[1]));
     profile = key ? jira.get(key[1]) : pairs(env.PROFILE_CHANNELS).get(channel);
   }
-  // PROFILE_OPEN=pyfxa-team: a team anyone allowed here may use.
-  const open = (env.PROFILE_OPEN || '').split(',').map((x) => x.trim()).includes(profile);
-  if (profile && profile !== 'fxa' && !open) {
-    const users = (pairs(env.PROFILE_USERS).get(profile) || '').split('+');
-    // The text too: a !stack pick in the thread can override the refusal (onMention).
-    if (!users.includes(user)) return { error: `You can't start a ${profile} session yet.`, text };
-  }
+  // The text too: a !stack pick in the thread can override the refusal (onMention).
+  if (profile && !mayStart(profile, user, env)) return { error: `You can't start a ${profile} session yet.`, text };
   return { profile, text };
+}
+
+// The one gate for a team: fxa for everyone, a PROFILE_OPEN team for everyone allowed here,
+// else only the people PROFILE_USERS lists. The !stack picker (teamsFor) uses it too.
+export function mayStart(profile, user, env = process.env) {
+  if (profile === 'fxa' || (env.PROFILE_OPEN || '').split(',').map((x) => x.trim()).includes(profile)) return true;
+  return (pairs(env.PROFILE_USERS).get(profile) || '').split('+').includes(user);
 }
