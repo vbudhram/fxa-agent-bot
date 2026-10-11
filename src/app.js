@@ -1963,11 +1963,15 @@ app.action('wo_investigate', async ({ ack, body, client }) => {
   const c = body.container ?? {}, a = body.actions?.[0] ?? {};
   const channel = c.channel_id ?? body.channel?.id, ts = c.message_ts;
   if (!channel || !ts || !botUserId) return; // the details panel has no thread to work in
-  const ref = String(a.value ?? '').replace(/[^\w:-]/g, '').slice(0, 40);
+  // A button sends value; a menu option (the Jira card's) sends selected_option, and Open in Jira is only a link.
+  const ref = String(a.value ?? a.selected_option?.value ?? '').replace(/[^\w:-]/g, '').slice(0, 40);
+  if (!ref || ref === 'open') return;
   const link = String(c.app_unfurl_url ?? '').slice(0, 300);
   const ask = ref.startsWith('pr:')
     ? `Investigate why CI fails on pull request #${ref.slice(3)} ${link}: which checks fail, the error, and the likely cause. Do not change code.`
-    : `Investigate Sentry issue ${ref} ${link}: what fails, since when, how many users, and the likely cause in the code. Do not change code.`;
+    : ref.startsWith('jira:')
+      ? `Investigate Jira ticket ${ref.slice(5)}: what it asks for, where in the code it applies, and a plan. Do not change code.`
+      : `Investigate Sentry issue ${ref} ${link}: what fails, since when, how many users, and the likely cause in the code. Do not change code.`;
   await onMention({ client, body, event: { type: 'app_mention', channel, ts, thread_ts: c.thread_ts ?? ts, user: body.user?.id,
     team: body.team?.id, text: `<@${botUserId}> ${ask}` } }).catch((e) => console.error('investigate', e.data?.error ?? e.message));
 });

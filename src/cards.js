@@ -105,14 +105,20 @@ function _tools(d) {
 }
 
 // Null data (a hidden or unreadable ticket) gives no card: the link stays in the text.
+// The layout of the Jira app's own Slack message: the key and summary as one link, a row of labelled
+// fields with "(none)" or "Unassigned" for an empty one, and one menu for the actions.
+const noneWord = (v) => (v && !/^\(?none\)?$/i.test(v) ? v : '(none)');
 function _jira(d) {
   if (!d?.key || !/^FXA-\d+$/.test(d.key)) return null;
-  const url = jiraUrl(d.key), sub = dot(d.status, d.type, d.priority, d.assignee ? cut(d.assignee, 40) : 'Unassigned');
+  const url = safeUrl(jiraUrl(d.key)), field = (k, v) => `${k}: *${v}*`;
+  const more = { type: 'overflow', action_id: 'wo_investigate', options: [{ text: pt('Investigate', 75), value: `jira:${d.key}` },
+    ...(url ? [{ text: pt('Open in Jira', 75), value: 'open', url }] : [])] };
   return {
     text: plain(`${d.key}: ${d.summary}. ${d.status ?? ''}`),
-    blocks: [({ type: 'card', block_id: `jira_${d.key}`, icon: logo('jira', 'Jira'), title: pt(`${d.key} ${d.summary ?? ''}`), subtitle: mk(sub),
-      actions: btns(btn('Investigate', 'wo_investigate', `jira:${d.key}`, { style: 'primary' }), open('Open', url, d.key)) })],
-    fallback: [sec(`*${link(url, d.key)}* ${cut(d.summary, L.body)}\n${dot(sub, d.assignee)}`, btn('Investigate', 'wo_investigate', `jira:${d.key}`))],
+    blocks: [sec(`*${link(url, `${d.key} ${d.summary ?? ''}`)}*`, more),
+      ctx(field('Status', cut(d.status ?? 'Unknown', 40)), field('Type', cut(d.type ?? 'Task', 30)),
+        field('Assignee', d.assignee ? cut(d.assignee, 40) : 'Unassigned'), field('Priority', cut(noneWord(d.priority), 20)))],
+    fallback: null,
   };
 }
 

@@ -37,12 +37,12 @@ test('safeUrl allows github.com, the env bases and Slack permalinks only', () =>
 });
 
 test('a link outside the allowlist drops the button and keeps the card', () => {
-  const c = C.jira(SAMPLES.jira);
-  assert.deepEqual(buttons(c.blocks), ['wo_investigate', 'wo_open']);
+  const menu = (c) => c.blocks[0].accessory.options.map((o) => o.value);
+  assert.deepEqual(menu(C.jira(SAMPLES.jira)), ['jira:FXA-0000', 'open']);
   delete process.env.JIRA_URL;
   const d = C.jira(SAMPLES.jira);
-  assert.deepEqual(buttons(d.blocks), ['wo_investigate']);
-  assert.match(d.fallback[0].text.text, /^\*FXA-0000\*/);
+  assert.deepEqual(menu(d), ['jira:FXA-0000']);
+  assert.match(d.blocks[0].text.text, /^\*FXA-0000 /);
   const s = C.sentry({ ...SAMPLES.sentry, permalink: 'https://evil.example.com/x' });
   assert.deepEqual(buttons(s.blocks), ['wo_investigate']);
   assert.doesNotMatch(all(s.fallback), /evil/);
@@ -87,7 +87,11 @@ test('tools: two lines, no carousel', () => {
 test('jira: no card for missing or bad data', () => {
   assert.equal(C.jira(null), null);
   assert.equal(C.jira({ key: 'ABC-1' }), null);
-  assert.equal(C.jira(SAMPLES.jira).blocks[0].subtitle.text, 'In Progress · Bug · P2 · assignee-a');
+  const row = (d) => C.jira(d).blocks[1].elements.map((e) => e.text);
+  assert.deepEqual(row(SAMPLES.jira), ['Status: *In Progress*', 'Type: *Bug*', 'Assignee: *assignee-a*', 'Priority: *P2*']);
+  // An empty field reads as the Jira app shows it.
+  assert.deepEqual(row({ key: 'FXA-1', summary: 's', status: 'Backlog', type: 'Task', priority: '(none)' }), ['Status: *Backlog*', 'Type: *Task*', 'Assignee: *Unassigned*', 'Priority: *(none)*']);
+  assert.match(C.jira(SAMPLES.jira).blocks[0].text.text, /^\*<https:\/\/[^|]+\/browse\/FXA-0000\|FXA-0000 Recovery phone copy is wrong on settings>\*$/);
 });
 
 test('sentry: 24 hours sum into 12 buckets, the trend as text, sparkline in the fallback', () => {
