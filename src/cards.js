@@ -210,7 +210,7 @@ function _status(d) {
   const p = d.pr, url = safeUrl(p?.url);
   return {
     text: plain(`Session is ${d.state}, ${num(d.minutes)} min.${d.now ? ` Now: ${d.now}` : ''}`),
-    blocks: [sec(`${dot(`*${cap(pill(d.state))}*`, `${num(d.minutes)} min`, `${num(d.turns)} turns`)}${d.now ? `\nNow: ${cut(d.now, 300)}` : ''}`),
+    blocks: [sec(`${dot(`*${cap(pill(d.state))}*`, `${num(d.minutes)} min`, d.turns != null && `${num(d.turns)} turns`)}${d.now ? `\nNow: ${cut(d.now, 300)}` : ''}`),
     ctx(dot(p && `PR ${link(url, `#${p.number}`)}`, p && pill(p.state), p?.ci && `CI ${cut(p.ci, 20)}`, /^[UW][A-Z0-9]+$/.test(d.owner ?? '') && `<@${d.owner}>`) || '-'),
     ...actions([btn('Diff', 'diff', d.key), btn('Interrupt', 'interrupt', d.key), btn('Stop', 'stop', d.key, { style: 'danger',
       confirm: { title: pt('Stop the session?'), text: pt('The sandbox stops. The branch stays.'), confirm: pt('Stop'), deny: pt('Keep') } })])],

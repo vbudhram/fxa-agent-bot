@@ -15,7 +15,7 @@ import { resolveProfile } from './profile.js';
 import { parseStack, teamsFor, stackTeamCard, stackRepoCard, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
 import { parseGates, gateAllows, loadMembers } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, LINE_BREAK, laterMessage } from './render.js';
-import { prFromStatus } from './cards.js';
+import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT, fileRefs, distinctFiles } from './render.js';
@@ -913,7 +913,16 @@ async function bang(s, text, m, client) {
   if (cmd === 'status') {
     // In the thread, not just for the asker: whoever follows it may want to know.
     const cur = fresh(s.key), mins = cur.started_at ? Math.round((Date.now() - cur.started_at) / 60_000) : 0;
-    await say(s, [`*${STATE_WORD[cur.state] ?? cur.state}* · ${mins} min · started by <@${cur.owner}>`,
+    const notes = [cur.state === 'active' && !cur.status_ts ? 'Waiting for you. I pause after 10 minutes without a message; a reply picks it up again.' : null,
+      cur.muted ? 'Replies are muted here. `!unmute` to hear from me.' : null, cur.boot_s ? `Setup took ${cur.boot_s}s.` : null].filter(Boolean);
+    // One repo: the status card (cards.status), with the owner's Diff, Interrupt and Stop. A team stack keeps the text, one line per PR.
+    if (!cur.prs) {
+      const n = Number(String(cur.pr_url ?? '').match(/\/pull\/(\d+)$/)?.[1]) || 0;
+      const c = cards.status({ key: cur.key, state: STATE_WORD[cur.state] ?? cur.state, minutes: mins, owner: cur.owner, now: cur.last_act,
+        pr: cur.pr_url ? { url: cur.pr_url, number: n, state: String(cur.pr_seen?.state ?? '').toLowerCase(), ci: cur.pr_seen?.ci } : null });
+      const extra = notes.length ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: notes.join(' ') }] }] : [];
+      await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: c.text, blocks: [...c.blocks.slice(0, -1), ...extra, c.blocks.at(-1)] });
+    } else await say(s, [`*${STATE_WORD[cur.state] ?? cur.state}* · ${mins} min · started by <@${cur.owner}>`,
       cur.last_act ? `Now: ${defuse(String(cur.last_act)).slice(0, 200)}` : null,
       ...(cur.prs ? Object.entries(cur.prs).filter(([, x]) => x.pr_url).map(([r, x]) => `PR in ${r}: ${x.pr_url}`) : [cur.pr_url ? `PR: ${cur.pr_url}` : null]),
       cur.boot_s ? `Setup took ${cur.boot_s}s.` : null,
@@ -2257,7 +2266,7 @@ setInterval(followPrs, 30_000);
 // The PR's card: its link message with the state line under it, edited when the line
 // changes. A session with no card (older, or one continued from another) gets one, once.
 async function updatePrCard(s, cur) {
-  const c = prFromStatus(cur, { key: s.key, repo: s.repo });
+  const c = cards.prFromStatus(cur, { key: s.key, repo: s.repo });
   // The change key is the card itself: the old one-line text left out Jira and CI none or running.
   const line = c && JSON.stringify(c.blocks);
   if (!line || line === prView(fresh(s.key), s.repo)?.pr_card_text) return;

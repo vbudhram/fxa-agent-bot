@@ -253,3 +253,10 @@ test('the PR card changes when Jira or CI none and running change, where the old
     assert.notEqual(JSON.stringify(C.prFromStatus(a, { key: 'k' }).blocks), JSON.stringify(C.prFromStatus(b, { key: 'k' }).blocks));
   }
 });
+
+test('the status card leaves out turns when it does not know them', () => {
+  const c = C.status({ key: 'k', state: 'working', minutes: 3, owner: 'U12345678' });
+  assert.doesNotMatch(JSON.stringify(c.blocks), /turns/);
+  assert.match(JSON.stringify(C.status({ key: 'k', state: 'working', minutes: 3, turns: 2 }).blocks), /2 turns/);
+  assert.deepEqual(c.blocks.at(-1).elements.map((b) => b.action_id), ['diff', 'interrupt', 'stop']);
+});
