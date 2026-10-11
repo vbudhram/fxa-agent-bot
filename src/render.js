@@ -539,7 +539,10 @@ const OWNER = 'the person who started this session';
 const quoted = (ls) => ls.map((l) => String(l.text).replace(/<@[A-Z0-9]+(?:\|[^>]*)?>/g, '@someone').split('\n').map((t) => `> ${l.who}: ${t}`).join('\n')).join('\n');
 // A thread message from someone other than the session's owner, labelled on every line, so no
 // line of it can pose as the owner (a header on the first line alone did not stop that).
-export const fromOther = (t) => `(From someone else in the thread, not the person who started this session.)\n${String(t ?? '').split('\n').map((l) => `> someone else: ${l}`).join('\n')}`;
+// Every line break the model may read as one, not only \n.
+export const LINE_BREAK = /\r\n|[\n\r\u2028\u2029\u0085]/;
+export const othersLines = (t) => String(t ?? '').split(LINE_BREAK).map((l) => `> someone else: ${l}`).join('\n');
+export const fromOther = (t) => `(From someone else in the thread, not the person who started this session.)\n${othersLines(t)}`;
 export const asideBlock = (lines) => {
   const own = lines.filter((l) => l.who === OWNER), rest = lines.filter((l) => l.who !== OWNER);
   return [

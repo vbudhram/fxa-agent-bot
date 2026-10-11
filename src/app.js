@@ -14,7 +14,7 @@ import * as unfurl from './unfurl.js';
 import { resolveProfile } from './profile.js';
 import { parseStack, teamsFor, stackTeamCard, stackRepoCard, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
 import { parseGates, gateAllows, loadMembers } from './access.js';
-import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther } from './render.js';
+import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, othersLines, LINE_BREAK } from './render.js';
 import { prFromStatus } from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
@@ -139,7 +139,7 @@ function joinStarting(message, text) {
   if ((message.user !== p.owner && !(STEER_ANYONE && forBotFromOthers(message, p, botUserId, STEER_MODE))) || toSomeoneElse(message.text, botUserId)) return true;
   const who = message.user === p.owner ? 'the person who started this session' : 'someone else in the thread, not the person who started this session';
   seen(message.channel, message.ts);
-  (p.late ??= []).push({ user: message.user, ts: message.ts, who, text: text || 'See the attached files.' });
+  (p.late ??= []).push({ user: message.user, ts: message.ts, who, own: message.user === p.owner, text: text || 'See the attached files.' });
   return true;
 }
 
@@ -247,7 +247,7 @@ async function begin(key, client) {
     // Answered without a session: what came in during the look is a follow-up, as a reply after it would be.
     if (r === 'answered') {
       const a = sessions.get(p.channel, p.thread_ts);
-      if (p.late?.length && a?.state === 'answered') await followUp(a, { ...p.late.at(-1), channel: p.channel, thread_ts: p.thread_ts, acks: p.late.map((x) => x.ts) }, p.late.map((x) => x.text).join('\n'), client);
+      if (p.late?.length && a?.state === 'answered') await followUp(a, { ...p.late.at(-1), channel: p.channel, thread_ts: p.thread_ts, acks: p.late.map((x) => x.ts) }, p.late.map((x) => (x.own ? x.text : fromOther(x.text))).join('\n'), client);
       return;
     }
     if (!(p = pending.get(key))) return;
@@ -255,7 +255,7 @@ async function begin(key, client) {
   }
   const { timer, card_ts, deadline, late, src_ts, ...rest } = p;
   if (late?.length) {
-    rest.prompt += late.map((l) => `\n\nA later message in the thread, from ${l.who}:\n${l.text}`).join('');
+    rest.prompt += late.map((l) => `\n\nA later message in the thread, from ${l.who}:\n${l.own ? l.text : othersLines(l.text)}`).join('');
     rest.acks = [...(rest.acks ?? []), ...late.map((l) => l.ts)];
   }
   // Record the session before releasing the thread's reservation.
@@ -555,7 +555,7 @@ async function threadContext(client, event, { withBot = false, files } = {}) {
         const who = app(m) ? appLabel(m) : fromBot(m) ? 'you (an earlier answer)' : m.user === event.user ? 'owner' : 'someone else';
         const text = app(m) ? appText(m) : m.text;
         // Label every line, so a line cannot pose as another speaker.
-        return text ? text.replace(/<@[A-Z0-9]+>/g, '@someone').split('\n').map((l) => `${who}: ${l}`).join('\n') : '';
+        return text ? text.replace(/<@[A-Z0-9]+>/g, '@someone').split(LINE_BREAK).map((l) => `${who}: ${l}`).join('\n') : '';
       }).filter(Boolean);
     if (!lines.length) return '';
     const t = trimContext(lines.flatMap((x) => x.split('\n')));
@@ -666,7 +666,8 @@ app.message(async ({ message, client }) => {
     const who = message.user === s.owner ? 'the person who started this session' : 'someone else in the thread, not the person who started this session';
     if (message.files?.length) hold(s.key, fileRefs(message.files));
     const cur = fresh(s.key);
-    sessions.patch(s.key, { prompt: `${cur.prompt}\n\nA later message in the thread, from ${who}:\n${text || 'See the attached files.'}`, late_acks: [...(cur.late_acks ?? []), message.ts] });
+    const said = text || 'See the attached files.';
+    sessions.patch(s.key, { prompt: `${cur.prompt}\n\nA later message in the thread, from ${who}:\n${message.user === s.owner ? said : othersLines(said)}`, late_acks: [...(cur.late_acks ?? []), message.ts] });
     await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: message.user,
       text: cur.queue_ts ? "Got it. I'm still waiting for capacity; I'll include that when I start." : "Got it. I'll include that." }).catch(() => {});
     return;
