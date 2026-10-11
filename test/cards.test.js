@@ -243,3 +243,13 @@ test('prFromStatus: merged and closed, CI none and pass, and a team stack names 
   assert.match(C.prFromStatus({ url, state: 'CLOSED', ci: 'none', reviews: [] }, { key: 'k' }).blocks[0].body.text, /No CI result yet/);
   assert.equal(C.prFromStatus(null, { key: 'k' }), null);
 });
+
+test('the PR card changes when Jira or CI none and running change, where the old line did not', async () => {
+  const { prCard } = await import('../src/render.js');
+  const url = 'https://github.com/mozilla/fxa/pull/12', base = { url, state: 'OPEN', draft: true, reviews: [] };
+  const pairs = [[{ ...base, ci: 'none' }, { ...base, ci: 'running' }], [{ ...base, ci: 'pass' }, { ...base, ci: 'pass', jira: 'FXA-1' }]];
+  for (const [a, b] of pairs) {
+    assert.equal(prCard(a), prCard(b), 'the old line could not tell these apart');
+    assert.notEqual(JSON.stringify(C.prFromStatus(a, { key: 'k' }).blocks), JSON.stringify(C.prFromStatus(b, { key: 'k' }).blocks));
+  }
+});
