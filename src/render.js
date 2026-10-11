@@ -183,12 +183,6 @@ export function prCard(cur) {
   return bits.join(' · ');
 }
 
-// The PR card's message: the PR state as a small grey line, as the turn's status line is, under
-// the message it was added to (the "PR is up" note). text stays plain, for notifications.
-export const prCardMessage = (head, line) => ({
-  text: head ? `${head}\n${line}` : line,
-  blocks: [...(head ? [{ type: 'section', text: { type: 'mrkdwn', text: head } }] : []), { type: 'context', elements: [{ type: 'mrkdwn', text: line }] }],
-});
 
 // The PR merged or closed. stopped: true or false when this also stopped the session (false:
 // the stop failed), undefined when no stop ran.

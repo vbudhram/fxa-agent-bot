@@ -220,3 +220,26 @@ test('no data field can inject a link or a mention, in any card or its fallback'
     assert.ok(!out.includes('<!here'), `${kind} lets a mention through`);
   }
 });
+
+test('prFromStatus maps the controller PR status to the card, with Open as its only button', () => {
+  const url = 'https://github.com/mozilla/fxa/pull/12';
+  const c = C.prFromStatus({ url, state: 'OPEN', draft: true, ci: 'running', mergeable: 'CONFLICTING', jira: 'FXA-1',
+    reviews: [{ login: 'ana', state: 'CHANGES_REQUESTED' }, { login: 'copilot-pull-request-reviewer', state: 'COMMENTED' }] }, { key: 'agent-1' });
+  const card = c.blocks[0];
+  assert.equal(card.type, 'card');
+  assert.match(card.title.text, /^#12/);
+  assert.match(card.subtitle.text, /^Merge conflict/);
+  assert.match(card.body.text, /^CI running/);
+  assert.match(card.subtext.text, /Changes requested by ana/);
+  assert.doesNotMatch(card.subtext.text, /copilot/i);
+  assert.deepEqual(card.actions.map((a) => a.action_id), ['wo_open']);
+  assert.ok(c.fallback.every((b) => b.type !== 'actions'), 'the fallback keeps only the Open link');
+  assert.match(c.text, /PR #12 is draft/);
+});
+
+test('prFromStatus: merged and closed, CI none and pass, and a team stack names its repo', () => {
+  const url = 'https://github.com/mozilla/PyFxA/pull/7';
+  assert.match(C.prFromStatus({ url, state: 'MERGED', ci: 'pass', reviews: [{ login: 'bo', state: 'APPROVED' }] }, { key: 'k', repo: 'mozilla/PyFxA' }).blocks[0].subtitle.text, /^Merged · mozilla\/PyFxA/);
+  assert.match(C.prFromStatus({ url, state: 'CLOSED', ci: 'none', reviews: [] }, { key: 'k' }).blocks[0].body.text, /No CI result yet/);
+  assert.equal(C.prFromStatus(null, { key: 'k' }), null);
+});

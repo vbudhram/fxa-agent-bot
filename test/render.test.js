@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { threadStarter, endWord, prCardMessage, render, operatorProblem, summaryLine, closestCommand, watchUrl, threadLine, draftSplit, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, fromOther } from '../src/render.js';
+import { threadStarter, endWord, render, operatorProblem, summaryLine, closestCommand, watchUrl, threadLine, draftSplit, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, fromOther } from '../src/render.js';
 
 test('operator problems are named, other errors are not', () => {
   assert.equal(operatorProblem('ERROR: (gcloud.compute.ssh) Reauthentication failed. cannot prompt').kind, 'gcloud');
@@ -366,13 +366,6 @@ test('a closed status line says what ended it; a wrap-up says it wrapped up for 
   assert.equal(endWord({ wrap_done: 'pr' }, 'active'), 'Wrapped up for the PR (review, title and body)');
   assert.equal(endWord({ wrap_done: 'pushed' }, 'active'), 'Wrapped up for the push');
   assert.equal(endWord({ wrap_done: 'pr' }, 'stopped'), 'Stopped');
-});
-
-test('the PR card is a small grey line under its note, with plain text for notifications', () => {
-  const m = prCardMessage('Draft PR is up: <https://x/pull/1>.', 'PR #1 · draft · ⏳ CI running');
-  assert.equal(m.text, 'Draft PR is up: <https://x/pull/1>.\nPR #1 · draft · ⏳ CI running');
-  assert.deepEqual(m.blocks.map((b) => b.type), ['section', 'context']);
-  assert.deepEqual(prCardMessage('', 'PR #1 · open').blocks.map((b) => b.type), ['context']);
 });
 
 test('errorsToDm: new once, reopened once per resolve, never the dev bot', () => {

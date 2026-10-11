@@ -1,4 +1,4 @@
-import { defuse, RUNTIMES } from './render.js';
+import { defuse, RUNTIMES, isCopilot } from './render.js';
 
 // Card catalog: one pure builder per kind, data object in, {text, blocks, fallback} out.
 // fallback is the block list to send once when Slack answers invalid_blocks (null: none).
@@ -259,6 +259,21 @@ const clean = (v, k) => (typeof v === 'string' ? (/url|permalink|^href$/i.test(k
 const RAW = { pr: _pr, turn: _turn, tools: _tools, jira: _jira, sentry: _sentry, ci: _ci, review: _review, tests: _tests, deploy: _deploy, grafana: _grafana, status: _status, sessions: _sessions, end: _end, bot: _bot };
 export const BUILDERS = Object.fromEntries(Object.entries(RAW).map(([k, f]) => [k, (d) => f(clean(d))]));
 export const { pr, turn, tools, jira, sentry, ci, review, tests, deploy, grafana, status, sessions, end, bot } = BUILDERS;
+
+// The thread's PR card, from the controller's pr-status (session_pr_status) for one session.
+// Open is its only button: the PR notes keep their own buttons, which carry the reviewer and repo.
+export function prFromStatus(cur, { key, repo } = {}) {
+  if (!cur?.url) return null;
+  const people = (st) => (cur.reviews ?? []).filter((r) => r.state === st && !isCopilot(r.login)).map((r) => r.login);
+  const c = pr({ key, repo, url: cur.url, number: Number(String(cur.url).match(/\/pull\/(\d+)$/)?.[1]) || 0,
+    state: cur.state === 'MERGED' ? 'merged' : cur.state === 'CLOSED' ? 'closed' : 'open', draft: cur.draft,
+    ci: cur.ci === 'running' ? 'pending' : cur.ci, failing: cur.failing, mergeable: cur.mergeable, jira: cur.jira,
+    approvers: people('APPROVED'), changers: people('CHANGES_REQUESTED') });
+  const open = (b) => (b?.type === 'button' ? b.action_id === 'wo_open' : true);
+  const strip = (bl) => bl.map((b) => (b.type === 'card' ? { ...b, actions: (b.actions ?? []).filter(open) }
+    : b.type === 'actions' ? { ...b, elements: b.elements.filter(open) } : b)).filter((b) => b.type !== 'actions' || b.elements.length);
+  return { text: c.text, blocks: strip(c.blocks), fallback: strip(c.fallback) };
+}
 
 // Agent card protocol: a fenced ```fxa-card {"kind","ref"}``` block. Only kind and ref are read.
 const REPO = () => (process.env.PIPE_REPO_SLUG || 'mozilla/fxa').replace(/[.]/g, '\\.');

@@ -14,7 +14,8 @@ import * as unfurl from './unfurl.js';
 import { resolveProfile } from './profile.js';
 import { parseStack, teamsFor, stackTeamCard, stackRepoCard, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
 import { parseGates, gateAllows, loadMembers } from './access.js';
-import { defuse, watchUrl, threadLine, threadStarter, endWord, prCardMessage, appText, appLabel, lostChannel, teamCard, trimContext, fromOther } from './render.js';
+import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther } from './render.js';
+import { prFromStatus } from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, prCard, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT, fileRefs, distinctFiles } from './render.js';
@@ -2254,18 +2255,21 @@ setInterval(followPrs, 30_000);
 // The PR's card: its link message with the state line under it, edited when the line
 // changes. A session with no card (older, or one continued from another) gets one, once.
 async function updatePrCard(s, cur) {
-  const line = prCard(cur);
-  if (!line || line === prView(fresh(s.key), s.repo)?.pr_card_text) return;
+  const line = prCard(cur); // the change key: the card is edited only when this line moves
+  const c = prFromStatus(cur, { key: s.key, repo: s.repo });
+  if (!line || !c || line === prView(fresh(s.key), s.repo)?.pr_card_text) return;
   const head = s.pr_card_ts ? (s.pr_card_head ?? '') : '';
-  const msg = prCardMessage(head, line);
+  const msg = (blocks) => ({ text: head ? `${head}\n${c.text}` : c.text, blocks: [...(head ? [{ type: 'section', text: { type: 'mrkdwn', text: head } }] : []), ...blocks] });
+  // A workspace that refuses the card block (invalid_blocks) gets its plain fallback, once.
+  const send = (call) => call(msg(c.blocks)).catch((e) => (e?.data?.error === 'invalid_blocks' && c.fallback ? call(msg(c.fallback)) : Promise.reject(e)));
   const pp = (fields) => sessions.patch(s.key, prPatch(fresh(s.key), s.repo, fields));
   if (s.pr_card_ts) {
-    const ok = await app.client.chat.update({ channel: s.channel, ts: s.pr_card_ts, ...msg }).then(() => true, () => false);
+    const ok = await send((m) => app.client.chat.update({ channel: s.channel, ts: s.pr_card_ts, ...m })).then(() => true, () => false);
     if (ok) { pp({ pr_card_text: line }); return; }
   }
-  // A new card names its repo in a team stack: there is one card for each.
-  const { ts } = await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...prCardMessage(s.repo ? `*${s.repo}*` : '', line) });
-  pp({ pr_card_ts: ts, pr_card_head: s.repo ? `*${s.repo}*` : '', pr_card_text: line });
+  // A new card: the card itself names a team stack's repo, so it needs no head.
+  const { ts } = await send((m) => app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...m }));
+  pp({ pr_card_ts: ts, pr_card_head: '', pr_card_text: line });
 }
 // A PR note: plain text, or text with the owner's buttons. Their value carries the reviewer for Fix these.
 function postPrNote(s, item) {
