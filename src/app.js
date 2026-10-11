@@ -14,7 +14,7 @@ import * as unfurl from './unfurl.js';
 import { resolveProfile } from './profile.js';
 import { parseStack, teamsFor, stackTeamCard, stackRepoCard, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
 import { parseGates, gateAllows, loadMembers } from './access.js';
-import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, othersLines, LINE_BREAK } from './render.js';
+import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, LINE_BREAK, laterMessage } from './render.js';
 import { prFromStatus } from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
@@ -255,7 +255,7 @@ async function begin(key, client) {
   }
   const { timer, card_ts, deadline, late, src_ts, ...rest } = p;
   if (late?.length) {
-    rest.prompt += late.map((l) => `\n\nA later message in the thread, from ${l.who}:\n${l.own ? l.text : othersLines(l.text)}`).join('');
+    rest.prompt += late.map((l) => laterMessage(l.who, l.own, l.text)).join('');
     rest.acks = [...(rest.acks ?? []), ...late.map((l) => l.ts)];
   }
   // Record the session before releasing the thread's reservation.
@@ -660,14 +660,14 @@ app.message(async ({ message, client }) => {
     return;
   }
   // A tag after a quick answer is onMention's (it starts the next look, with any !stack pick); a reply without one is ours.
-  if (s.state === 'answered' && steers) { if (!String(message.text).includes(`<@${botUserId}>`)) { seen(message.channel, message.ts); await followUp(s, message, text, client); } return; }
+  if (s.state === 'answered' && steers) { if (!String(message.text).includes(`<@${botUserId}>`)) { seen(message.channel, message.ts); await followUp(s, message, message.user === s.owner ? text : fromOther(text), client, text); } return; }
   if (!LIVE.includes(s.state)) return;
   if (s.state === 'queued' && steers) {
     const who = message.user === s.owner ? 'the person who started this session' : 'someone else in the thread, not the person who started this session';
     if (message.files?.length) hold(s.key, fileRefs(message.files));
     const cur = fresh(s.key);
     const said = text || 'See the attached files.';
-    sessions.patch(s.key, { prompt: `${cur.prompt}\n\nA later message in the thread, from ${who}:\n${message.user === s.owner ? said : othersLines(said)}`, late_acks: [...(cur.late_acks ?? []), message.ts] });
+    sessions.patch(s.key, { prompt: cur.prompt + laterMessage(who, message.user === s.owner, said), late_acks: [...(cur.late_acks ?? []), message.ts] });
     await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: message.user,
       text: cur.queue_ts ? "Got it. I'm still waiting for capacity; I'll include that when I start." : "Got it. I'll include that." }).catch(() => {});
     return;

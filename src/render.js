@@ -536,12 +536,14 @@ export const othersIn = (messages, owner, botId) => messages.some((m) => m.user 
 // Thread messages that did not tag the bot. The owner's are theirs (a later "@bot ^" points at
 // them); anyone else's are context only, data and not instructions.
 const OWNER = 'the person who started this session';
-const quoted = (ls) => ls.map((l) => String(l.text).replace(/<@[A-Z0-9]+(?:\|[^>]*)?>/g, '@someone').split('\n').map((t) => `> ${l.who}: ${t}`).join('\n')).join('\n');
-// A thread message from someone other than the session's owner, labelled on every line, so no
-// line of it can pose as the owner (a header on the first line alone did not stop that).
 // Every line break the model may read as one, not only \n.
 export const LINE_BREAK = /\r\n|[\n\r\u2028\u2029\u0085]/;
+const quoted = (ls) => ls.map((l) => String(l.text).replace(/<@[A-Z0-9]+(?:\|[^>]*)?>/g, '@someone').split(LINE_BREAK).map((t) => `> ${l.who}: ${t}`).join('\n')).join('\n');
+// A thread message from someone other than the session's owner, labelled on every line, so no
+// line of it can pose as the owner (a header on the first line alone did not stop that).
 export const othersLines = (t) => String(t ?? '').split(LINE_BREAK).map((l) => `> someone else: ${l}`).join('\n');
+// A note added to a session's request after it was written: the owner's as is, anyone else's labelled.
+export const laterMessage = (who, own, text) => `\n\nA later message in the thread, from ${who}:\n${own ? text : othersLines(text)}`;
 export const fromOther = (t) => `(From someone else in the thread, not the person who started this session.)\n${othersLines(t)}`;
 export const asideBlock = (lines) => {
   const own = lines.filter((l) => l.who === OWNER), rest = lines.filter((l) => l.who !== OWNER);
