@@ -123,6 +123,11 @@ export function prPayload(pr, icons = ICONS) {
 }
 
 // One entity for chat.unfurl's metadata.
+// The links a reader may see as cards: none unless the bot's gates allow that reader in that
+// channel, and a watch card (a session's live state) only in the channel the session runs in.
+export const visibleLinks = (channel, user, links, allowed) =>
+  (user && allowed(channel, user) ? links.filter((l) => l.kind !== 'watch' || l.channel === channel) : []);
+
 export const entity = (link, payload) => ({
   app_unfurl_url: link.url, url: link.url,
   external_ref: link.kind === 'watch' ? { id: `${link.channel}:${link.ts}`, type: 'watch' }

@@ -1928,8 +1928,8 @@ async function cardPayload(link) {
   return card ? unfurl.jiraPayload(card) : null; // hidden or unreadable: no card
 }
 app.event('link_shared', async ({ event, client }) => {
-  if (!WORK_OBJECTS || (CHANNELS.length && !CHANNELS.includes(event.channel))) return;
-  const links = unfurl.parseLinks((event.links ?? []).map((l) => l.url), LINK_HOSTS);
+  if (!WORK_OBJECTS) return;
+  const links = unfurl.visibleLinks(event.channel, event.user, unfurl.parseLinks((event.links ?? []).map((l) => l.url), LINK_HOSTS), allowed);
   const entities = [];
   for (const link of links) { const p = await cardPayload(link); if (p) entities.push(unfurl.entity(link, p)); }
   if (!entities.length) return;
@@ -1939,7 +1939,7 @@ app.event('link_shared', async ({ event, client }) => {
 });
 app.event('entity_details_requested', async ({ event, client }) => {
   if (!WORK_OBJECTS) return;
-  const [link] = unfurl.parseLinks([event.app_unfurl_url ?? event.entity_url], LINK_HOSTS);
+  const [link] = unfurl.visibleLinks(event.channel, event.user, unfurl.parseLinks([event.app_unfurl_url ?? event.entity_url], LINK_HOSTS), allowed);
   const payload = link && await cardPayload(link);
   const body = payload ? { metadata: JSON.stringify({ entity_type: unfurl.entity(link, payload).entity_type, entity_payload: payload }) }
     : { error: JSON.stringify({ status: 'custom_partial_view', custom_title: 'Not available', custom_message: 'This item cannot be shown here.' }) };

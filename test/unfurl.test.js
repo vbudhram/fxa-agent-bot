@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseLinks, watchPayload, jiraPayload, sentryPayload, prPayload, entity, TASK, INCIDENT } from '../src/unfurl.js';
+import * as U from '../src/unfurl.js';
 
 const hosts = { gateway: 'https://gw.example.run.app', jira: 'https://example.atlassian.net' };
 
@@ -119,4 +120,13 @@ test('a PR card tags state, CI and reviews, sizes the change, and offers to inve
   assert.deepEqual(prPayload({ ...pr, state: 'MERGED' }).fields.status, { value: 'Merged', tag_color: 'blue' });
   assert.deepEqual(prPayload({ ...pr, draft: true }).fields.status, { value: 'Draft', tag_color: 'gray' });
   assert.deepEqual(cf(prPayload({ ...pr, ci: 'running', running: 3 })).ci, ['Running · 3 of 20 left', 'yellow']);
+});
+
+test('visibleLinks: only an allowed reader sees cards, and a watch card only in its own channel', () => {
+  const allowed = (c, u) => c === 'CALLOWED' && u === 'UOK';
+  const links = [{ kind: 'pr', repo: 'mozilla/fxa', number: 1 }, { kind: 'watch', channel: 'CALLOWED', ts: '1.1' }, { kind: 'watch', channel: 'COTHER', ts: '2.2' }];
+  assert.deepEqual(U.visibleLinks('CALLOWED', 'UOK', links, allowed).map((l) => l.kind + (l.channel ?? '')), ['pr', 'watchCALLOWED']);
+  assert.deepEqual(U.visibleLinks('CALLOWED', 'USTRANGER', links, allowed), []);
+  assert.deepEqual(U.visibleLinks('COTHER', 'UOK', links, allowed), []);
+  assert.deepEqual(U.visibleLinks('CALLOWED', undefined, links, allowed), []);
 });
