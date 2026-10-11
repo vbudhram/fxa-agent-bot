@@ -569,3 +569,11 @@ export function distinctFiles(refs) {
   }
   return out;
 }
+// Thread context, newest kept: drop whole labelled lines from the front, and cap each line, so a
+// cut never lands inside a line and strips its speaker label (one long message could pose as the owner).
+export function trimContext(lines, max = 6000, per = 1500) {
+  const out = lines.map((l) => (l.length > per ? `${l.slice(0, per - 1)}…` : l));
+  let len = out.reduce((n, l) => n + l.length + 1, 0), cut = false;
+  while (out.length > 1 && len > max) { len -= out.shift().length + 1; cut = true; }
+  return `${cut ? '...\n' : ''}${out.join('\n')}`;
+}
