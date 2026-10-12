@@ -1110,7 +1110,7 @@ async function sweepOnce() {
   for (const key of stopped) {
     if (fresh(key)?.state !== 'paused') continue;
     sessions.patch(key, { state: 'stopped' });
-    await postEnd(key, 'Paused a day with no reply, so I closed it. A reply here still picks it up.');
+    await postEnd(key, 'Paused a day with no reply, so I closed it. A reply here still picks it up.', false);
   }
   for (const key of paused) {
     const s = fresh(key);
@@ -2127,17 +2127,18 @@ async function stoppedText(key) {
   return ok ? endCard(key, STOPPED_TEXT(true), await ctl.summary(key)) ?? STOPPED_TEXT(true) : STOPPED_TEXT(false);
 }
 // The session-end card (cards.end), once per session: a person's stop, the idle close, or its PR
-// merging or closing. A pause is not an end. null when it was already posted.
-function endCard(key, reason, sm) {
+// merging or closing. A pause is not an end. null when it was already posted. live: it was at
+// work when it ended; else the clock since its start would count the pause or the review wait.
+function endCard(key, reason, sm, live = true) {
   const s = fresh(key);
   if (!s || s.end_posted) return null;
   sessions.patch(key, { end_posted: true });
   const n = Number(String(s.pr_url ?? '').match(/\/pull\/(\d+)$/)?.[1]) || 0;
-  return cards.end({ key, reason, minutes: sm?.minutes ?? Math.max(0, Math.round((Date.now() - (s.started_at ?? Date.now())) / 60_000)),
+  return cards.end({ key, reason, minutes: sm?.minutes ?? (live ? Math.max(0, Math.round((Date.now() - (s.started_at ?? Date.now())) / 60_000)) : undefined),
     turns: sm?.turns, pr: s.pr_url ? { url: s.pr_url, number: n, state: String(s.pr_seen?.state ?? s.pr_ended ?? '').toLowerCase() } : null });
 }
-async function postEnd(key, reason) {
-  const s = fresh(key), c = s && !s.muted && endCard(key, reason, null);
+async function postEnd(key, reason, live) {
+  const s = fresh(key), c = s && !s.muted && endCard(key, reason, null, live);
   if (c) await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: c.text, blocks: c.blocks }).catch((e) => lost(s, e, 'end card'));
 }
 
@@ -2252,7 +2253,7 @@ setInterval(() => {
 async function endIfPrDone(s) {
   if (!s || s.repo || !s.pr_ended || !['active', 'pr_open'].includes(s.state) || s.status_ts || busy.has(s.key) || sessions.get(s.channel, s.thread_ts)?.key !== s.key) return false;
   const ok = await stopSession(s.key);
-  if (ok) await postEnd(s.key, `${prEndedNote({ ...s.pr_seen, state: s.pr_ended })} Tag me here to start fresh from main.`);
+  if (ok) await postEnd(s.key, `${prEndedNote({ ...s.pr_seen, state: s.pr_ended })} Tag me here to start fresh from main.`, s.state === 'active');
   else if (!s.muted) await say(s, prEndedNote({ ...s.pr_seen, state: s.pr_ended }, ok)).catch(() => {});
   return true;
 }

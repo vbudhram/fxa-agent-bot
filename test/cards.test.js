@@ -271,3 +271,8 @@ test('the status card offers Interrupt and Stop only while the session runs', ()
   assert.deepEqual(ids(false), ['diff']);
   assert.deepEqual(ids(true), ['diff', 'interrupt', 'stop']);
 });
+
+test('the end card leaves out minutes it does not know', () => {
+  const c = C.end({ key: 'k', reason: 'Closed.' });
+  assert.doesNotMatch(JSON.stringify(c.blocks) + c.text, /min/);
+});
