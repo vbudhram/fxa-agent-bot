@@ -4,6 +4,8 @@
 // scenario checks one checkout and one refusal, not which person wins.
 const PR = 'https://github.com/mozilla/fxa/pull/4321';
 const REFUSAL = /already took this thread's checkout|This thread has a running session/;
+// An "already took" refusal names the winner, so it must go to the other person, never to the winner.
+const TO_LOSER = /^(?=.*"user":"UA")(?=.*<@UB> already took)|^(?=.*"user":"UB")(?=.*<@UA> already took)|This thread has a running session/;
 export default {
   title: 'A and B send !stack checkout in one thread at the same moment: one checkout, the other is told',
   people: { A: 'owner, allowed', B: 'teammate, allowed' },
@@ -11,6 +13,7 @@ export default {
     { A: `@bot !stack checkout ${PR}`, wait: 'none' },
     { B: `@bot !stack checkout ${PR}`,
       expect: { ctl: { cmd: 'task', match: /--checkout/, n: 1 }, calls: { method: 'chat.postEphemeral', match: REFUSAL, n: 1 } } },
+    { wait: 'none', expect: { calls: { method: 'chat.postEphemeral', match: TO_LOSER, n: 1 } } },
   ],
   judge: 'One session starts, for whoever was first. The other person gets one private line about it.',
 };
