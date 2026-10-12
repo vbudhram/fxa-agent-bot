@@ -134,6 +134,17 @@ export async function runScenario(app, view, scenario) {
       send(envelope({ type: 'reaction_added', user: p, reaction: a.react, item: { type: 'message', channel: CHANNEL, ts: m.ts }, item_user: m.bot ? BOT.user_id : m.user, event_ts: ets }));
       return `${person} reacts :${a.react}: on #${m.seq}`;
     }
+    if (a.shares !== undefined) { // links pasted in a message: Slack sends link_shared for the hosts the app claims
+      const ets = String(Date.now() / 1000);
+      send(envelope({ type: 'link_shared', channel: a.channel ?? CHANNEL, user: p, message_ts: root ?? ets, unfurl_id: `Un${i}`, source: 'conversations_history',
+        links: a.shares.map((url) => ({ url, domain: new URL(url).host })), event_ts: ets }));
+      return `${person} shares ${a.shares.join(' ')}`;
+    }
+    if (a.details !== undefined) { // a click on a card's title: Slack asks for the full view
+      send(envelope({ type: 'entity_details_requested', channel: a.channel ?? CHANNEL, user: p, entity_url: a.details, app_unfurl_url: a.details,
+        trigger_id: `trig${i}`, event_ts: String(Date.now() / 1000) }));
+      return `${person} opens the card for ${a.details}`;
+    }
     throw new Error(`unknown action ${JSON.stringify(a)}`);
   }
   const visibleTo = (m, u) => !m.to || m.to === u;
