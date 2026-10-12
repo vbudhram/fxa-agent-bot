@@ -2,6 +2,8 @@
 // time and more than once, and one repo's PR merging does not end the session: only Stop does.
 export default {
   title: 'A two-repo stack: Diff on PyFxA, Open PR on fxa, the fxa PR merges, the session stays until Stop',
+  // ship: Open PR from the button, or from the command !pr fxa (code review: it lost PyFxA's buttons).
+  matrix: { ship: ['tap', 'command'] },
   env: { FAKE_CI_S: '0', FAKE_MERGE_S: '0' },
   people: { A: 'owner, allowed' },
   steps: [
@@ -11,7 +13,8 @@ export default {
     { A: '@bot make the live tests read the URL from env' },
     { advance: 'setup' }, { advance: 'turn', wait: { buttons: /Open PR · fxa/ } },
     { A: { tap: 'Diff · pyfxa' }, expect: { ctl: { cmd: 'diff', match: /--repo","mozilla\/PyFxA"/, n: 1 } } },
-    { A: { tap: 'Open PR · fxa' }, expect: { ctl: { cmd: 'finish', match: /--repo","mozilla\/fxa"/, n: 1 } } },
+    { A: { tap: 'Open PR · fxa' }, only: { ship: ['tap'] }, expect: { ctl: { cmd: 'finish', match: /--repo","mozilla\/fxa"/, n: 1 } } },
+    { A: '!pr fxa', only: { ship: ['command'] }, expect: { ctl: { cmd: 'finish', match: /--repo","mozilla\/fxa"/, n: 1 } } },
     { advance: 'finish', wait: { text: /mozilla\/fxa\/pull\/999999/ } },
     { advance: 1, wait: { text: /Merged/ }, expect: { noCtl: 'stop' } },
     { A: { tap: 'Diff · pyfxa' }, expect: { ctl: { cmd: 'diff', match: /--repo","mozilla\/PyFxA"/, n: 2 }, noCtl: 'stop' } },

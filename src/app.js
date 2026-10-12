@@ -1428,7 +1428,7 @@ const finishTurn = (key, msg, ev) => serial(key, async function finishTurn() {
       const ordered = (msg.blocks ?? []).length ? [kept[0], ...msg.blocks] : [...kept, ...actions];
       await app.client.chat.update({ channel: s.channel, ts: s.status_ts, text: msg.text, blocks: ordered });
       sessions.patch(s.key, STATUS_CLEAR);
-      if (actions.length) await retireButtons(key, { ts: s.status_ts, text: msg.text, blocks: kept, question: asks(msg.blocks) });
+      if (actions.length) await retireButtons(key, { ts: s.status_ts, text: msg.text, blocks: kept, full: ordered, question: asks(msg.blocks) });
       return;
     } catch (e) {
       console.error('finish', key, e.data?.error ?? e.message);
@@ -1443,7 +1443,8 @@ async function postMsg(key, msg) {
   if (s.muted) return null;
   const { ts } = await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...msg });
   const blocks = (msg.blocks ?? []).filter((b) => b.type !== 'actions' && b.block_id !== 'answer_hint');
-  if (blocks.length !== (msg.blocks ?? []).length) await retireButtons(key, { ts, text: msg.text, blocks, question: asks(msg.blocks) });
+  // full: the row as posted, so a command (!pr <repo>) can keep the other repos' buttons too.
+  if (blocks.length !== (msg.blocks ?? []).length) await retireButtons(key, { ts, text: msg.text, blocks, full: msg.blocks, question: asks(msg.blocks) });
   return ts;
 }
 
@@ -1721,14 +1722,15 @@ async function wrapTap(s, client, body, what, repo) {
 async function startWrap(s, client, what, user, msg, repo) {
   if (wrapping.has(s.key) || fresh(s.key)?.state === 'wrapping') return 'Already wrapping up. I will post here when it is done.';
   wrapping.add(s.key); setTimeout(() => wrapping.delete(s.key), 30_000);
-  const target = msg ?? fresh(s.key)?.buttons_msg;
+  const bm = fresh(s.key)?.buttons_msg, target = msg ?? (bm && { ...bm, blocks: bm.full ?? bm.blocks });
   if (target?.ts) {
     const keep = (e) => repo && !(['open_pr', 'push_branch'].includes(e.action_id) && valueRepo(e.value) === repo);
     const blocks = (target.blocks ?? []).map((x) => (x.type === 'actions' ? { ...x, elements: (x.elements ?? []).filter(keep) } : x))
       .filter((x) => x.type !== 'actions' || x.elements.length);
     await client.chat.update({ channel: s.channel, ts: target.ts, text: target.text,
       blocks: [...blocks, { type: 'context', elements: [{ type: 'mrkdwn', text: `${what} · started by <@${user}>` }] }] }).catch(() => {});
-    if (fresh(s.key)?.buttons_msg?.ts === target.ts && !blocks.some((x) => x.type === 'actions')) sessions.patch(s.key, { buttons_msg: null });
+    const cur = fresh(s.key)?.buttons_msg;
+    if (cur?.ts === target.ts) sessions.patch(s.key, { buttons_msg: blocks.some((x) => x.type === 'actions') ? { ...cur, full: blocks } : null });
   }
   return null;
 }
