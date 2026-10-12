@@ -40,7 +40,7 @@ function runOne({ file, sc, vary, persona }) {
       FXA_CTL: join(CTL, 'skills/fxa-ctl-dev/fake-ctl.sh'), FAKE_CTL_DIR: join(home, 'ctl'), FAKE_NOW_FILE: join(home, 'now'),
       FAKE_CTL_LOG: join(out, 'ctl.jsonl'), FAKE_TICK: '0.2', FAKE_PROFILES: join(HERE, 'profiles.json'), PROFILE_OPEN: 'pyfxa-team',
       FXA_AGENT_STATE: join(home, 'sessions.json'), FXA_ERRORS_FILE: join(home, 'errors.jsonl'), FXA_DB: '/nonexistent/fxa.db',
-      ERROR_DMS: '0', QUICK_ANSWERS: '0', ALLOWED_CHANNELS: 'C_TEST',
+      ERROR_DMS: '0', QUICK_ANSWERS: '0', FXA_FOLLOW_MS: '2000', ALLOWED_CHANNELS: 'C_TEST',
       ALLOWED_USERS: people.filter(([, d]) => !/not allowed/.test(d)).map(([p]) => `U${p}`).join(','),
       ...(persona ? { E2E_PERSONA: persona, E2E_REAL_HOME: homedir(), USER: process.env.USER, ...(process.env.E2E_PERSONA_ROUNDS ? { E2E_PERSONA_ROUNDS: process.env.E2E_PERSONA_ROUNDS } : {}) } : { E2E_SCENARIO: join(HERE, SCEN, file) }), E2E_OUT: out, ...(sc.tape ? { FAKE_TAPE: resolve(HERE, sc.tape) } : {}), ...(sc.env ?? {}),
       ...(flags.has('--png') || flags.has('--judge') ? { E2E_CHROME: CHROME } : {}),

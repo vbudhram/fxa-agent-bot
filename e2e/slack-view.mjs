@@ -98,6 +98,12 @@ export function createView({ names = {} } = {}) {
         const more = from + n < all.length;
         return { ok: true, messages: page, has_more: more, response_metadata: { next_cursor: more ? String(from + n) : '' } };
       }
+      // An upload shows in the thread as its comment and file name.
+      case 'files.uploadV2': {
+        const m = { ts: nextTs(), channel: args.channel_id, thread_ts: args.thread_ts, bot: true, text: `${args.initial_comment ?? ''} [file: ${args.filename}]`, edits: 0, reactions: new Set(), seq: ++seq };
+        msgs.push(m); touch(m);
+        return { ok: true, files: [{ ok: true, files: [{ id: `F${m.seq}`, name: args.filename }] }] };
+      }
       case 'users.info': {
         const name = names[args.user] ?? args.user;
         return { ok: true, user: { id: args.user, name, real_name: name, profile: { display_name: name, real_name: name, image_48: '' } } };

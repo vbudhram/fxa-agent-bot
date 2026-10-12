@@ -13,6 +13,8 @@ const scenario = process.env.E2E_PERSONA
 const view = createView({ names: Object.fromEntries(Object.keys(scenario.people).map((p) => [`U${p}`, p])) });
 
 bolt.webApi.WebClient.prototype.apiCall = async function (method, args = {}) { return view.apply(method, args); };
+// files.uploadV2 is bound to its own method, which needs a real upload URL: the view gets the call instead.
+bolt.webApi.WebClient.prototype.filesUploadV2 = async function (args = {}) { return view.apply('files.uploadV2', args); };
 
 let app = null;
 bolt.SocketModeReceiver.prototype.start = async function () {

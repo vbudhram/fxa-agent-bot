@@ -7,7 +7,7 @@ export default {
     started_at: old * 1000, pr_url: 'https://github.com/mozilla/fxa/pull/123', pr_ended: 'MERGED', pr_follow_done: true,
     pr_seen: { state: 'MERGED', number: 123 } } },
   steps: [
-    { pause: 35, wait: 'none', expect: { noCtl: 'stop', postCount: { match: /Session ended/, n: 0 } } },
+    { pause: 6, wait: 'none', expect: { noCtl: 'stop', postCount: { match: /Session ended/, n: 0 } } },
   ],
   judge: 'Nothing is posted in the old thread.',
 };

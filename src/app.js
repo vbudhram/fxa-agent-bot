@@ -2264,6 +2264,8 @@ async function endIfPrDone(s) {
 // 4: after Open PR the thread follows the PR: CI results, reviews, and the merge
 // or close, for two weeks. One gh call per open PR every two minutes.
 const FOLLOW_MS = 14 * 86_400_000;
+// How often the follower reads each PR after a push (4 times slower later); the e2e makes it short.
+const FOLLOW_EVERY_MS = Number(process.env.FXA_FOLLOW_MS) || 30_000;
 let following = false;
 async function followPrs() {
   if (following) return;
@@ -2281,7 +2283,7 @@ async function followPrs() {
       const since = s.pr_follow_since ?? Date.now();
       if (Date.now() - since > FOLLOW_MS) { pp({ pr_follow_done: true }); continue; }
       // Every 30 s for 20 min after a push, when Copilot and CI answer; every 2 min after that.
-      const every = Date.now() - (s.pr_pushed_at ?? 0) < 20 * 60_000 ? 30_000 : 120_000;
+      const every = Date.now() - (s.pr_pushed_at ?? 0) < 20 * 60_000 ? FOLLOW_EVERY_MS : 4 * FOLLOW_EVERY_MS;
       const lf = `${s.key}|${s.repo ?? ''}`;
       if (Date.now() - (lastFollow.get(lf) ?? 0) < every) continue;
       lastFollow.set(lf, Date.now());
@@ -2308,7 +2310,7 @@ async function followPrs() {
   } finally { following = false; }
 }
 const lastFollow = new Map();
-setInterval(followPrs, 30_000);
+setInterval(followPrs, FOLLOW_EVERY_MS);
 // The PR's card: its link message with the state line under it, edited when the line
 // changes. A session with no card (older, or one continued from another) gets one, once.
 async function updatePrCard(s, cur) {

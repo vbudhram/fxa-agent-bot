@@ -12,7 +12,7 @@ export default {
       expect: { postCount: { match: /Session ended.*Stopped\. The work so far is kept/, n: 1 } } },
     { A: { tap: 'Open PR' }, only: { end: ['merge'] } },
     { advance: 'finish', only: { end: ['merge'] }, wait: { text: /pull\/999999/ } },
-    { pause: 25, only: { end: ['merge'] }, wait: { text: /Session ended/ },
+    { pause: 6, only: { end: ['merge'] }, wait: { text: /Session ended/ },
       expect: { ctl: { cmd: 'stop', n: 1 }, postCount: { match: /Session ended.*The PR merged/, n: 1 } } },
     { advance: 1, expect: { postCount: { match: /Session ended/, n: 1 } } },
   ],
