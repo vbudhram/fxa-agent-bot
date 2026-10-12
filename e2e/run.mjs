@@ -29,6 +29,7 @@ function runOne({ file, sc, vary, persona }) {
   rmSync(out, { recursive: true, force: true }); mkdirSync(out, { recursive: true });
   const home = mkdtempSync(join(tmpdir(), 'fxa-e2e-'));
   writeFileSync(join(home, 'now'), String(Math.floor(Date.now() / 1000)));
+  if (sc.sessions) writeFileSync(join(home, 'sessions.json'), JSON.stringify(sc.sessions));
   writeFileSync(join(out, 'meta.json'), JSON.stringify(persona ? { persona } : { scenario: join(HERE, SCEN, file), vary }));
   return new Promise((done) => {
     const people = Object.entries(sc.people);

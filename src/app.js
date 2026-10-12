@@ -2270,7 +2270,8 @@ async function followPrs() {
     // PR fields are written back to that repo (pp).
     for (const s of sessions.all().filter(here).flatMap(followTargets)) {
       const pp = (fields) => sessions.patch(s.key, prPatch(fresh(s.key), s.repo, fields));
-      if (await endIfPrDone(s)) continue;
+      // Only an end this follower saw and could not finish (a turn ran): an older merge is not news.
+      if (s.end_pending && await endIfPrDone(s)) continue;
       // Any session with a PR, while it is the thread's current one: a continued
       // session inherits the PR, and two followers would post each review twice.
       if (!(s.state === 'pr_open' || s.pr_url) || s.pr_follow_done || sessions.get(s.channel, s.thread_ts)?.key !== s.key) continue;
@@ -2297,7 +2298,7 @@ async function followPrs() {
       if (!fresh(s.key)?.muted) await updatePrCard(s, cur).catch((e) => lost(s, e, 'pr card'));
       const prev = s.pr_seen;
       pp({ pr_seen: cur, pr_follow_since: since, ci_pass_at: ciPassAt, ...(nudge ? { nudged_at: ciPassAt } : {}),
-        ...(['MERGED', 'CLOSED'].includes(cur.state) ? { pr_follow_done: true, pr_ended: cur.state } : {}) });
+        ...(['MERGED', 'CLOSED'].includes(cur.state) ? { pr_follow_done: true, pr_ended: cur.state, end_pending: true } : {}) });
       if (['MERGED', 'CLOSED'].includes(cur.state) && await endIfPrDone(fresh(s.key))) continue; // in this pass, not the next one 30 s on
       if (cur.state === 'OPEN') await autoRound(prView(fresh(s.key), s.repo), prev, cur).catch((e) => console.error('auto round', s.key, e.message));
     }
