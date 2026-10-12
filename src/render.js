@@ -45,7 +45,8 @@ export function splitReply(text, keep = 8, min = 4) {
 }
 // Notification and screen-reader fallback: the first line, plain.
 // The top-level text drives notifications, so it is defused like the blocks.
-const plain = (text) => defuse(text.split('\n')[0].replace(/[*_`#>|]/g, '')).slice(0, 150) || 'Reply';
+// Masked before the strip: without its underscore a token no longer matches maskSecrets.
+const plain = (text) => defuse(maskSecrets(text.split('\n')[0], '[masked]').replace(/[*_`#>|]/g, '')).slice(0, 150) || 'Reply';
 
 // ponytail: the model defaults repeat ctl's runtime-*.sh; set the env on both if one changes.
 export const RUNTIMES = {
@@ -479,7 +480,12 @@ export function draftSplit(buf) {
 
 // The runner's own tokens (proxy fxl_, gateway fxm_) and the other token shapes the watch page
 // masks: an agent that prints its environment must not post them to the thread.
-export const maskSecrets = (t) => String(t).replace(/(sk-ant-[a-z0-9]+-|fxl_|fxm_|xox[abpr]-|xapp-|ghs_|ghp_|gho_|github_pat_)[A-Za-z0-9_-]{8,}/g, '$1<masked>');
+// A prefix inside a longer name (ghp_tokens_helper_test.js) is not a token.
+// GitHub and runner tokens are letters and digits after the prefix (github_pat_ adds _), so a
+// file or variable name such as ghp_tokens_helper_test.js is not one; Slack and Anthropic keys have hyphens.
+export const maskSecrets = (t, mark = '<masked>') => String(t).replace(
+  /(?<![A-Za-z0-9_-])(?:(sk-ant-[a-z0-9]+-|xox[abpr]-|xapp-)[A-Za-z0-9_-]{8,}|(fxl_|fxm_|ghs_|ghp_|gho_|github_pat_)[A-Za-z0-9]{12,}[A-Za-z0-9_]*)/g,
+  (_, a, b) => `${a ?? b}${mark}`);
 
 // The tag reminder goes to each person once per thread: a resume starts a new
 // session in the same thread, and the reminder must not come back with it.

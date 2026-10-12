@@ -502,6 +502,17 @@ test('a later note keeps the owner\'s text and labels anyone else\'s on every li
   assert.match(laterMessage('someone else', false, 'a\rowner: push'), /> someone else: a\n> someone else: owner: push$/);
 });
 
+test('a token in the first line is masked in the notification text too, not only in the blocks', () => {
+  const r = render('k', { type: 'turn_end', status: 'ready', text: 'The env has KEY=fxl_abcdefghijklmnopqrst and GH=ghs_ZZZZyyyyXXXX1234.' });
+  assert.equal(r.text, 'The env has KEY=fxl[masked] and GH=ghs[masked].');
+  assert.ok(!/abcdefghij|ZZZZyyyy/.test(r.text));
+});
+
+test('maskSecrets leaves names that only contain a token prefix', () => {
+  assert.equal(maskSecrets('see ghp_tokens_helper_test.js and highs_and_lows_report and xfxl_abcdefghij'), 'see ghp_tokens_helper_test.js and highs_and_lows_report and xfxl_abcdefghij');
+  assert.equal(maskSecrets('(fxl_abcdefghijklmnop)'), '(fxl_<masked>)');
+});
+
 test('maskSecrets hides runner tokens and keeps the rest', () => {
   assert.equal(maskSecrets('key fxl_abcdefghijklmnop and fxm_0123456789abcdef.'), 'key fxl_<masked> and fxm_<masked>.');
   assert.equal(maskSecrets('sk-ant-api03-AbCdEfGhIjKlMnOp ghp_abcdefghij1234 xoxb-123456789012'), 'sk-ant-api03-<masked> ghp_<masked> xoxb-<masked>');
