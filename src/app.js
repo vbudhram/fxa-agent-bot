@@ -660,7 +660,9 @@ app.message(async ({ message, client }) => {
     return;
   }
   // A tag after a quick answer is onMention's (it starts the next look, with any !stack pick); a reply without one is ours.
-  if (s.state === 'answered' && steers) { if (!String(message.text).includes(`<@${botUserId}>`)) { seen(message.channel, message.ts); await followUp(s, message, message.user === s.owner ? text : fromOther(text), client, text); } return; }
+  if (s.state === 'answered' && steers) { if (!String(message.text).includes(`<@${botUserId}>`)) { seen(message.channel, message.ts);
+    const t = text || (message.files?.length ? 'See the attached files.' : ''); // before the label, which is never empty
+    await followUp(s, message, message.user === s.owner ? t : fromOther(t), client, t); } return; }
   if (!LIVE.includes(s.state)) return;
   if (s.state === 'queued' && steers) {
     const who = message.user === s.owner ? 'the person who started this session' : 'someone else in the thread, not the person who started this session';

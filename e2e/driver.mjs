@@ -69,14 +69,16 @@ export async function runScenario(app, view, scenario) {
 
   async function act(person, a, t, i) {
     const p = uid(person), root = roots[t];
-    if (typeof a === 'string') {
-      const text = mentions(a, scenario.people);
+    // {says, files}: a message with attached files (names only; the URLs are fake).
+    if (typeof a === 'string' || a.says !== undefined) {
+      const text = mentions(a.says ?? a, scenario.people);
+      const files = (a.files ?? []).map((name, n) => ({ id: `F${i}${n}`, name, size: 100, url_private_download: `https://files.slack.fake/${name}` }));
       const m = view.personSays(p, CHANNEL, text, root);
       m.step = i;
       if (!root) roots[t] = m.ts;
       said.push(m);
       // Slack sends a tagged message twice: as a message and as an app_mention.
-      const ev = { type: 'message', channel: CHANNEL, channel_type: 'channel', user: p, text, ts: m.ts, event_ts: m.ts, ...(root ? { thread_ts: root } : {}) };
+      const ev = { type: 'message', channel: CHANNEL, channel_type: 'channel', user: p, text, ts: m.ts, event_ts: m.ts, ...(root ? { thread_ts: root } : {}), ...(files.length ? { files } : {}) };
       const evs = text.includes(`<@${BOT.user_id}>`) ? [ev, { ...ev, type: 'app_mention' }] : [ev];
       if ((a.order ?? order) === 'mention_first') evs.reverse();
       for (const e of evs) send(envelope(e));
