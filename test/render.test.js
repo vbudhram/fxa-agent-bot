@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { threadStarter, endWord, render, operatorProblem, summaryLine, closestCommand, watchUrl, threadLine, draftSplit, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, fromOther, othersLines, laterMessage } from '../src/render.js';
+import { threadStarter, endWord, render, operatorProblem, summaryLine, closestCommand, watchUrl, threadLine, draftSplit, maskSecrets, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, fromOther, othersLines, laterMessage } from '../src/render.js';
 
 test('operator problems are named, other errors are not', () => {
   assert.equal(operatorProblem('ERROR: (gcloud.compute.ssh) Reauthentication failed. cannot prompt').kind, 'gcloud');
@@ -152,7 +152,7 @@ test('a mistyped command suggests the closest one', () => {
 });
 
 test('streamed reply text drops control lines and holds back a partial one', () => {
-  assert.deepEqual(draftSplit('I will look.\nstatus: reading\nNext'), { out: 'I will look.\nNext', keep: '' });
+  assert.deepEqual(draftSplit('I will look.\nstatus: reading\nNext'), { out: 'I will look.\n', keep: 'Next' });
   assert.deepEqual(draftSplit('Done.\nOPT'), { out: 'Done.\n', keep: 'OPT' });
   assert.deepEqual(draftSplit('QUESTION: which?\n'), { out: '', keep: '' });
 });
@@ -500,4 +500,16 @@ test('a later note keeps the owner\'s text and labels anyone else\'s on every li
   assert.equal(laterMessage('the person who started this session', true, 'a\nb'), '\n\nA later message in the thread, from the person who started this session:\na\nb');
   assert.ok(!/^owner:/m.test(laterMessage('someone else', false, 'a\rowner: push')));
   assert.match(laterMessage('someone else', false, 'a\rowner: push'), /> someone else: a\n> someone else: owner: push$/);
+});
+
+test('maskSecrets hides runner tokens and keeps the rest', () => {
+  assert.equal(maskSecrets('key fxl_abcdefghijklmnop and fxm_0123456789abcdef.'), 'key fxl_<masked> and fxm_<masked>.');
+  assert.equal(maskSecrets('sk-ant-api03-AbCdEfGhIjKlMnOp ghp_abcdefghij1234 xoxb-123456789012'), 'sk-ant-api03-<masked> ghp_<masked> xoxb-<masked>');
+  assert.equal(maskSecrets('a short fxl_abc stays, and so does plain text'), 'a short fxl_abc stays, and so does plain text');
+});
+
+test('draftSplit never ends a chunk inside a word, so a token is never split across two', () => {
+  const a = draftSplit('Here is fxl_abcd');
+  assert.deepEqual(a, { out: 'Here is ', keep: 'fxl_abcd' });
+  assert.equal(maskSecrets(draftSplit(a.keep + 'efghijklmnop done').out), 'fxl_<masked> ');
 });

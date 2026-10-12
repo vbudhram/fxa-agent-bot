@@ -470,10 +470,16 @@ export function errorDigest(rows) {
 const CONTROL = ['status:', 'OPTION:', 'QUESTION:'];
 export function draftSplit(buf) {
   const lines = buf.split('\n'), tail = lines.pop();
-  const keep = CONTROL.some((c) => c.startsWith(tail) || tail.startsWith(c)) ? tail : '';
-  const out = lines.filter((l) => !CONTROL.some((c) => l.startsWith(c))).map((l) => `${l}\n`).join('') + (keep ? '' : tail);
+  // The unfinished last word waits for the next chunk, so maskSecrets always sees a token whole.
+  const word = tail.match(/\S*$/)[0];
+  const keep = CONTROL.some((c) => c.startsWith(tail) || tail.startsWith(c)) ? tail : word;
+  const out = lines.filter((l) => !CONTROL.some((c) => l.startsWith(c))).map((l) => `${l}\n`).join('') + tail.slice(0, tail.length - keep.length);
   return { out, keep };
 }
+
+// The runner's own tokens (proxy fxl_, gateway fxm_) and the other token shapes the watch page
+// masks: an agent that prints its environment must not post them to the thread.
+export const maskSecrets = (t) => String(t).replace(/(sk-ant-[a-z0-9]+-|fxl_|fxm_|xox[abpr]-|xapp-|ghs_|ghp_|gho_|github_pat_)[A-Za-z0-9_-]{8,}/g, '$1<masked>');
 
 // The tag reminder goes to each person once per thread: a resume starts a new
 // session in the same thread, and the reminder must not come back with it.

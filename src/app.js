@@ -18,7 +18,7 @@ import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel
 import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
-import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT, fileRefs, distinctFiles } from './render.js';
+import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT, fileRefs, distinctFiles, maskSecrets } from './render.js';
 
 const { App } = bolt;
 installErrorLog(ctl.errorsPush);
@@ -40,7 +40,11 @@ if (process.env.SLACK_CALL_LOG) {
 // No link previews on the bot's own posts: a PR link drew GitHub's large preview under each card.
 {
   const proto = bolt.webApi.WebClient.prototype, call = proto.apiCall;
+  // Every string the bot posts, edits or streams goes through maskSecrets.
+  const mask = (v) => (typeof v === 'string' ? maskSecrets(v) : Array.isArray(v) ? v.map(mask)
+    : v && typeof v === 'object' && v.constructor === Object ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, mask(x)])) : v);
   proto.apiCall = function (method, args = {}) {
+    if (/^chat\./.test(method)) args = mask(args);
     return call.call(this, method, method === 'chat.postMessage' ? { unfurl_links: false, unfurl_media: false, ...args } : args);
   };
 }
