@@ -13,7 +13,7 @@ export function stepChecks(expect = {}, ctx) {
   const touched = view.msgs.filter((m) => m.chg > snap.chg);
   const ctlStep = ctl.slice(snap.ctl);
   const cmdOf = (l) => l.argv.find((a) => !a.startsWith('--') && !/^(gce|fxa|pyfxa-team|monitor)$/.test(a));
-  const ctlMatch = (l, c) => (!c.cmd || cmdOf(l) === c.cmd) && (!c.match || c.match.test(JSON.stringify([l.argv, l.files]).replace(/\\n/g, '\n')))
+  const ctlMatch = (l, c) => (!c.cmd || cmdOf(l) === c.cmd) && (!c.match || c.match.test(JSON.stringify([l.argv, l.files]).replace(/\\n/g, '\n').replace(/\\r/g, '\r')))
     && (!c.thread || JSON.stringify(l.argv).includes(roots[c.thread]));
   const bad = [];
   const need = (ok, msg) => { if (!ok) bad.push(msg); };
