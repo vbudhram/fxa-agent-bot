@@ -843,8 +843,15 @@ app.action('stack_go', async ({ ack, body, client }) => {
 // !stack checkout <PR link>: continue a PR in this thread. The bot's own: its session resumes
 // here, and the old thread stops following it (a move). A person's: a new session on its branch,
 // which pushes only after the PR's author agrees (the controller checks).
+// The first checkout in a thread wins: a second one while it starts changes nothing.
+const checkingOut = new Map(); // "channel:thread" -> who
 async function stackCheckout(s, p, text, m, client, note, teams) {
-  if ([...pending.values()].some((x) => x.channel === m.channel && x.thread_ts === m.thread_ts)) return;
+  const at = `${m.channel}:${m.thread_ts}`, first = checkingOut.get(at) ?? [...pending.values()].find((x) => `${x.channel}:${x.thread_ts}` === at)?.owner;
+  if (first) { await note(`<@${first}> already took this thread's checkout.`); return; }
+  checkingOut.set(at, m.user);
+  try { await checkout(s, p, text, m, client, note, teams); } finally { checkingOut.delete(at); }
+}
+async function checkout(s, p, text, m, client, note, teams) {
   const rest = text.replace(/^!stack\s+checkout\s+\S+/i, '').trim();
   const prompt = rest || `Continue ${p.url}. Read the PR and its review, and say what is left to do.`;
   const found = await ctl.findPr(p.url).catch((e) => { console.error('find-pr', e.message); return null; });

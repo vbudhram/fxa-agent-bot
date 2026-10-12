@@ -189,7 +189,7 @@ export async function runScenario(app, view, scenario) {
       } else if (w.buttons) {
         await until(() => view.msgs.some((m) => m.bot && elements(m).some(({ e }) => w.buttons.test(label(e.text)))), `a button matching ${w.buttons}`);
       }
-      await settled();
+      if (w !== 'none') await settled(); // 'none': the next step goes at once, as a second person pressing at the same moment
       for (let s = snap.seq + 1; s <= Math.max(0, ...view.msgs.map((m) => m.seq)); s++) stepSeq[s] = i;
       const started = ctlLines().slice(snap.ctl).filter((l) => l.argv[0] === 'task');
       if (started.length > 1) failures.push(`step ${i + 1}: ${started.length} sessions started by one step`);
