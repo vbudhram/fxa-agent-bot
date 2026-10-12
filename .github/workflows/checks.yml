@@ -1,0 +1,38 @@
+name: checks
+on:
+  push:
+    branches: [main, 'improve/**']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: fxa-agent-bot
+      - name: Pick the controller branch (the same name if it exists, else main)
+        id: ctl
+        run: |
+          b="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
+          git ls-remote --exit-code --heads https://github.com/vbudhram/fxa-sandbox-ctl "$b" >/dev/null || b=main
+          echo "ref=$b" >> "$GITHUB_OUTPUT"
+      # The e2e runs fake-ctl from ../fxa-sandbox-ctl.
+      - uses: actions/checkout@v4
+        with:
+          repository: vbudhram/fxa-sandbox-ctl
+          ref: ${{ steps.ctl.outputs.ref }}
+          path: fxa-sandbox-ctl
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: fxa-agent-bot/package-lock.json
+      - run: npm ci
+        working-directory: fxa-agent-bot
+      - run: npm test
+        working-directory: fxa-agent-bot
+      - run: npm run e2e
+        working-directory: fxa-agent-bot
