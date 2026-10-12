@@ -9,7 +9,7 @@ export default {
     { A: '!pause', expect: { ctl: { cmd: 'session', match: /pause/ } } },
     { A: { tap: 'Stop' }, expect: { ephemeral: { to: 'A', match: /paused.*nothing to stop/ }, noCtl: 'stop' } },
     { A: '!status', wait: { text: /^Session is paused/ },
-      expect: { postCount: { match: /^Session is paused/, n: 1 } } },
+      expect: { postCount: { match: /^Session is paused/, n: 1 }, buttons: { match: /^Session is paused/, none: /^(stop|interrupt)$/ } } },
   ],
   judge: 'A stale Stop tap gets a private line that the session is paused. The new status card has Diff and no Stop or Interrupt.',
 };
