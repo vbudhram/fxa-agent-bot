@@ -237,11 +237,12 @@ function _sessions(d) {
 
 function _end(d) {
   const p = d.pr, head = sec(`*Session ended.*${d.reason ? ` ${cut(d.reason, 200)}` : ''}`);
-  const facts = ctx(dot(`${num(d.minutes)} min`, `${num(d.turns)} turns`, p ? `PR ${link(p.url, `#${p.number}`)} ${pill(p.state)}` : (d.files ? 'branch not pushed' : 'no change')));
+  // Unknown turns or changes are left out, never shown as 0. No feedback buttons until something handles them.
+  const facts = ctx(dot(`${num(d.minutes)} min`, d.turns != null && `${num(d.turns)} turns`,
+    p ? `PR ${link(p.url, `#${p.number}`)} ${pill(p.state)}` : d.files != null && (d.files ? 'branch not pushed' : 'no change')));
   return {
-    text: plain(`Session ended. ${num(d.minutes)} min, ${num(d.turns)} turns${p ? `, PR #${p.number} ${p.state ?? ''}` : ''}.`),
-    blocks: [head, facts, { type: 'context_actions', elements: [{ type: 'feedback_buttons', action_id: 'feedback',
-      positive_button: { text: pt('Good'), value: `${d.key}:up` }, negative_button: { text: pt('Not good'), value: `${d.key}:down` } }] }],
+    text: plain(`Session ended. ${num(d.minutes)} min${d.turns != null ? `, ${num(d.turns)} turns` : ''}${p ? `, PR #${p.number} ${p.state ?? ''}` : ''}.`),
+    blocks: [head, facts],
     fallback: [head, facts],
   };
 }

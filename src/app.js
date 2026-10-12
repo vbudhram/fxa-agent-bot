@@ -484,9 +484,10 @@ const say = (s, text) => app.client.chat.postMessage({ channel: s.channel, threa
 // once, then turn that message into the result, so the thread is never silent meanwhile.
 async function sayWhile(s, now, work) {
   const r = await say(s, now).catch(() => null);
-  const text = await work();
+  const out = await work(), msg = typeof out === 'string' ? { text: out } : out; // text, or a card's {text, blocks}
   // The ts of the message that ends up holding the result.
-  return (r?.ts ? app.client.chat.update({ channel: s.channel, ts: r.ts, text }).then(() => r.ts) : Promise.reject()).catch(() => say(s, text).then((x) => x.ts));
+  return (r?.ts ? app.client.chat.update({ channel: s.channel, ts: r.ts, ...msg }).then(() => r.ts) : Promise.reject())
+    .catch(() => app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...msg }).then((x) => x.ts));
 }
 const ordinal = (n) => { const t = n % 100, u = n % 10; return `${n}${t >= 11 && t <= 13 ? 'th' : u === 1 ? 'st' : u === 2 ? 'nd' : u === 3 ? 'rd' : 'th'}`; };
 
@@ -1106,7 +1107,11 @@ async function sweepOnce() {
   let paused = [], stopped = [];
   try { ({ paused, stopped } = await ctl.idleSweep()); } catch (e) { console.error('idle-sweep', e.stderr || e.message); return; }
   // Paused a day with no reply: stopped, quietly. A reply still resumes it.
-  for (const key of stopped) if (fresh(key)?.state === 'paused') sessions.patch(key, { state: 'stopped' });
+  for (const key of stopped) {
+    if (fresh(key)?.state !== 'paused') continue;
+    sessions.patch(key, { state: 'stopped' });
+    await postEnd(key, 'Paused a day with no reply, so I closed it. A reply here still picks it up.');
+  }
   for (const key of paused) {
     const s = fresh(key);
     if (!s) continue;
@@ -2114,11 +2119,24 @@ async function stopSession(key) {
 }
 const STOPPED_TEXT = (ok) => ok ? 'Stopped. The work so far is kept.'
   : "I couldn't stop the sandbox cleanly. It shuts down at its time limit anyway; `!stop` tries again.";
-// Stop, then the session's one-line summary, which the stop recorded before the runner went.
+// Stop, then the end card with the session's summary, which the stop recorded before the runner went.
 async function stoppedText(key) {
   const ok = await stopSession(key);
-  const sm = ok ? summaryLine(await ctl.summary(key)) : '';
-  return STOPPED_TEXT(ok) + (sm ? `\n_${sm}_` : '');
+  return ok ? endCard(key, STOPPED_TEXT(true), await ctl.summary(key)) ?? STOPPED_TEXT(true) : STOPPED_TEXT(false);
+}
+// The session-end card (cards.end), once per session: a person's stop, the idle close, or its PR
+// merging or closing. A pause is not an end. null when it was already posted.
+function endCard(key, reason, sm) {
+  const s = fresh(key);
+  if (!s || s.end_posted) return null;
+  sessions.patch(key, { end_posted: true });
+  const n = Number(String(s.pr_url ?? '').match(/\/pull\/(\d+)$/)?.[1]) || 0;
+  return cards.end({ key, reason, minutes: sm?.minutes ?? Math.max(0, Math.round((Date.now() - (s.started_at ?? Date.now())) / 60_000)),
+    turns: sm?.turns, pr: s.pr_url ? { url: s.pr_url, number: n, state: String(s.pr_seen?.state ?? s.pr_ended ?? '').toLowerCase() } : null });
+}
+async function postEnd(key, reason) {
+  const s = fresh(key), c = s && !s.muted && endCard(key, reason, null);
+  if (c) await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: c.text, blocks: c.blocks }).catch((e) => lost(s, e, 'end card'));
 }
 
 // The 5 s poll owns state (replies, questions, errors, PR links); the watch
@@ -2227,6 +2245,16 @@ setInterval(() => {
   }
 }, 1_000);
 
+// The PR merged or closed while its session still runs: the work is done, so stop it and free
+// the sandbox, once no turn is running. Not a stack's: its other repos may still be at work.
+async function endIfPrDone(s) {
+  if (!s || s.repo || !s.pr_ended || !['active', 'pr_open'].includes(s.state) || s.status_ts || busy.has(s.key) || sessions.get(s.channel, s.thread_ts)?.key !== s.key) return false;
+  const ok = await stopSession(s.key);
+  if (ok) await postEnd(s.key, `${prEndedNote({ ...s.pr_seen, state: s.pr_ended })} Tag me here to start fresh from main.`);
+  else if (!s.muted) await say(s, prEndedNote({ ...s.pr_seen, state: s.pr_ended }, ok)).catch(() => {});
+  return true;
+}
+
 // 4: after Open PR the thread follows the PR: CI results, reviews, and the merge
 // or close, for two weeks. One gh call per open PR every two minutes.
 const FOLLOW_MS = 14 * 86_400_000;
@@ -2239,13 +2267,7 @@ async function followPrs() {
     // PR fields are written back to that repo (pp).
     for (const s of sessions.all().filter(here).flatMap(followTargets)) {
       const pp = (fields) => sessions.patch(s.key, prPatch(fresh(s.key), s.repo, fields));
-      // The PR merged or closed while its session still runs: the work is done,
-      // so stop it and free the sandbox, once no turn is running. Not a stack's: its other repos may still be at work.
-      if (!s.repo && s.pr_ended && s.state === 'active' && !s.status_ts && !busy.has(s.key) && sessions.get(s.channel, s.thread_ts)?.key === s.key) {
-        const ok = await stopSession(s.key);
-        if (!s.muted) await say(s, prEndedNote({ ...s.pr_seen, state: s.pr_ended }, ok)).catch(() => {});
-        continue;
-      }
+      if (await endIfPrDone(s)) continue;
       // Any session with a PR, while it is the thread's current one: a continued
       // session inherits the PR, and two followers would post each review twice.
       if (!(s.state === 'pr_open' || s.pr_url) || s.pr_follow_done || sessions.get(s.channel, s.thread_ts)?.key !== s.key) continue;
@@ -2263,7 +2285,7 @@ async function followPrs() {
       // One message per event: an automatic round (autoRound) posts a CI failure with its
       // checks, and the stop above posts the merge or close. These mirror their conditions.
       const ciByRound = Boolean(s.pr_pushed_at && !s.pr_ended && cur.state === 'OPEN' && cur.links?.length);
-      const endByStop = s.state === 'active' && sessions.get(s.channel, s.thread_ts)?.key === s.key;
+      const endByStop = !s.repo && ['active', 'pr_open'].includes(s.state) && sessions.get(s.channel, s.thread_ts)?.key === s.key;
       // A new message only where a person must act: a button (fix, rebase, mark ready) or the
       // day-old review reminder. The rest (CI, approvals, merge) is edited into the PR's card.
       for (const item of [...prChanges(s.pr_seen, cur, { ciByRound, endByStop, jiraOffer: process.env.JIRA_OFFER === '1' }).filter((x) => typeof x !== 'string'), ...(nudge ? [nudge] : [])]) {
@@ -2273,6 +2295,7 @@ async function followPrs() {
       const prev = s.pr_seen;
       pp({ pr_seen: cur, pr_follow_since: since, ci_pass_at: ciPassAt, ...(nudge ? { nudged_at: ciPassAt } : {}),
         ...(['MERGED', 'CLOSED'].includes(cur.state) ? { pr_follow_done: true, pr_ended: cur.state } : {}) });
+      if (['MERGED', 'CLOSED'].includes(cur.state) && await endIfPrDone(fresh(s.key))) continue; // in this pass, not the next one 30 s on
       if (cur.state === 'OPEN') await autoRound(prView(fresh(s.key), s.repo), prev, cur).catch((e) => console.error('auto round', s.key, e.message));
     }
   } finally { following = false; }

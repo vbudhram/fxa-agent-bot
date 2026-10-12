@@ -173,11 +173,12 @@ test('sessions: one linked line per session, unsafe links stay plain', () => {
   assert.equal(bad.blocks[1].text.text, 't · s · 0 min');
 });
 
-test('end: feedback buttons only in the primary layout', () => {
+test('end: no feedback buttons, and unknown turns or changes are left out', () => {
   const c = C.end(SAMPLES.end);
-  assert.equal(c.blocks.at(-1).type, 'context_actions');
-  assert.equal(c.blocks.at(-1).elements[0].positive_button.value, 'k1:up');
-  assert.ok(!c.fallback.some((b) => b.type === 'context_actions'));
+  assert.ok(c.blocks.every((b) => b.type !== 'context_actions'));
+  assert.match(JSON.stringify(c.blocks), /6 turns/);
+  const bare = JSON.stringify(C.end({ key: 'k', reason: 'Stopped.', minutes: 3 }).blocks);
+  assert.doesNotMatch(bare, /turns|no change|not pushed/);
 });
 
 test('bot: what is down first, the rest on one line', () => {

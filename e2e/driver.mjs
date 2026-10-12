@@ -169,6 +169,7 @@ export async function runScenario(app, view, scenario) {
         writeFileSync(nowFile, String(Number(readFileSync(nowFile, 'utf8')) + s));
         notes.push({ t, seq: snap.seq + 0.5, text: `[advance ${step.advance}]` });
       }
+      if (step.pause) await new Promise((r) => setTimeout(r, step.pause * 1000)); // real seconds: the PR follower runs every 30 s
       if (person) {
         // soft (persona steps): a button that went away before the tap is a note, as for a person.
         const what = await act(person, step[person], t, i).catch((e) => { if (!step.soft) throw e; return `${e.message}; nothing happens`; });
