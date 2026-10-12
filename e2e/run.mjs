@@ -1,6 +1,6 @@
 // npm run e2e [-- name-filter]: run each scenario against the real bot, fake Slack and fake-ctl.
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -90,6 +90,10 @@ if (flags.has('--judge')) {
   await Promise.all(Array.from({ length: 4 }, async () => { while (j < results.length) { const r = results[j++];
     try { console.log(judgeLine(r.name, await judge(join(HERE, 'out', r.name)))); } catch (e) { console.log(`ERR  ${r.name}: ${e.message.slice(0, 300)}`); } } }));
 }
-const bad = results.filter((r) => !r.ok).length;
-console.log(`${results.length - bad}/${results.length} pass, ${results.reduce((n, r) => n + (r.xfail?.length ?? 0), 0)} known failures`);
+const failed = results.filter((r) => !r.ok), bad = failed.length;
+// A failed run's folder is overwritten by the next run: keep a copy, so a flake can be read later (CI uploads it).
+const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+for (const r of failed) try { cpSync(join(HERE, 'out', r.name), join(HERE, 'out', 'failed', `${stamp}-${r.name}`), { recursive: true }); } catch {}
+console.log(`${results.length - bad}/${results.length} pass, ${results.reduce((n, r) => n + (r.xfail?.length ?? 0), 0)} known failures`
+  + (bad ? `; failed: ${failed.map((r) => r.name).join(', ')} (kept in e2e/out/failed/)` : ''));
 process.exit(bad ? 1 : 0);

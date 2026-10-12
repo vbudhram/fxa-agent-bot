@@ -36,3 +36,10 @@ jobs:
         working-directory: fxa-agent-bot
       - run: npm run e2e
         working-directory: fxa-agent-bot
+      # A failed scenario's thread, bot log and controller calls, to read a flake after the run.
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failed
+          path: fxa-agent-bot/e2e/out/failed/
+          if-no-files-found: ignore
