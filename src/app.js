@@ -2125,8 +2125,9 @@ const STOPPED_TEXT = (ok) => ok ? 'Stopped. The work so far is kept.'
   : "I couldn't stop the sandbox cleanly. It shuts down at its time limit anyway; `!stop` tries again.";
 // Stop, then the end card with the session's summary, which the stop recorded before the runner went.
 async function stoppedText(key) {
+  const live = LIVE.includes(fresh(key)?.state);
   const ok = await stopSession(key);
-  return ok ? endCard(key, STOPPED_TEXT(true), await ctl.summary(key)) ?? STOPPED_TEXT(true) : STOPPED_TEXT(false);
+  return ok ? endCard(key, STOPPED_TEXT(true), await ctl.summary(key), live) ?? STOPPED_TEXT(true) : STOPPED_TEXT(false);
 }
 // The session-end card (cards.end), once per session: a person's stop, the idle close, or its PR
 // merging or closing. A pause is not an end. null when it was already posted. live: it was at
