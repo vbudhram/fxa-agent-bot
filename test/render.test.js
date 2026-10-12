@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { threadStarter, endWord, render, operatorProblem, summaryLine, closestCommand, watchUrl, threadLine, draftSplit, maskSecrets, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, fromOther, othersLines, laterMessage } from '../src/render.js';
+import { threadStarter, endWord, render, operatorProblem, summaryLine, closestCommand, watchUrl, threadLine, draftSplit, maskSecrets, maskUpload, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, fromOther, othersLines, laterMessage } from '../src/render.js';
 
 test('operator problems are named, other errors are not', () => {
   assert.equal(operatorProblem('ERROR: (gcloud.compute.ssh) Reauthentication failed. cannot prompt').kind, 'gcloud');
@@ -523,4 +523,13 @@ test('draftSplit never ends a chunk inside a word, so a token is never split acr
   const a = draftSplit('Here is fxl_abcd');
   assert.deepEqual(a, { out: 'Here is ', keep: 'fxl_abcd' });
   assert.equal(maskSecrets(draftSplit(a.keep + 'efghijklmnop done').out), 'fxl_<masked> ');
+});
+
+test('maskUpload masks a text upload and leaves media as it is', () => {
+  const tok = 'ghp_0123456789abcdefABCD';
+  assert.deepEqual(maskUpload({ filename: 'FXA-1.diff', content: `+key=${tok}\n`, initial_comment: `1 file ${tok}` }),
+    { filename: 'FXA-1.diff', content: '+key=ghp_<masked>\n', initial_comment: '1 file ghp_<masked>' });
+  assert.equal(maskUpload({ filename: 'fix.patch', file: Buffer.from(`+${tok}`) }).file.toString(), '+ghp_<masked>');
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x67, 0x68, 0x70, 0x5f]);
+  assert.equal(maskUpload({ filename: 'shot.png', file: png }).file, png);
 });

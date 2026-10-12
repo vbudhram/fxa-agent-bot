@@ -18,7 +18,7 @@ import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel
 import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
-import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT, fileRefs, distinctFiles, maskSecrets } from './render.js';
+import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT, fileRefs, distinctFiles, maskSecrets, maskUpload } from './render.js';
 
 const { App } = bolt;
 installErrorLog(ctl.errorsPush);
@@ -47,6 +47,9 @@ if (process.env.SLACK_CALL_LOG) {
     if (/^chat\./.test(method)) args = mask(args);
     return call.call(this, method, method === 'chat.postMessage' ? { unfurl_links: false, unfurl_media: false, ...args } : args);
   };
+  // An upload sends its bytes outside apiCall, so it gets its own wrapper.
+  const upload = proto.filesUploadV2;
+  proto.filesUploadV2 = function (args = {}) { return upload.call(this, maskUpload(args)); };
 }
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
