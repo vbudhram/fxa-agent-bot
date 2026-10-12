@@ -928,7 +928,7 @@ async function bang(s, text, m, client) {
     // One repo: the status card (cards.status), with the owner's Diff, Interrupt and Stop. A team stack keeps the text, one line per PR.
     if (!cur.prs) {
       const n = Number(String(cur.pr_url ?? '').match(/\/pull\/(\d+)$/)?.[1]) || 0;
-      const c = cards.status({ key: cur.key, state: STATE_WORD[cur.state] ?? cur.state, minutes: mins, owner: cur.owner, now: cur.last_act,
+      const c = cards.status({ key: cur.key, state: STATE_WORD[cur.state] ?? cur.state, minutes: mins, owner: cur.owner, now: cur.last_act, live: LIVE.includes(cur.state),
         pr: cur.pr_url ? { url: cur.pr_url, number: n, state: String(cur.pr_seen?.state ?? '').toLowerCase(), ci: cur.pr_seen?.ci } : null });
       const extra = notes.length ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: notes.join(' ') }] }] : [];
       await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: c.text, blocks: [...c.blocks.slice(0, -1), ...extra, c.blocks.at(-1)] });
@@ -1791,7 +1791,9 @@ async function shipAfterResume(key, what, ev) {
 const stopping = new Set();
 ownerAction('stop', async (s, client, action, body) => {
   // Checked before any await: two fast taps both passed a later check.
-  if (stopping.has(s.key) || !LIVE.includes(fresh(s.key)?.state)) return;
+  if (stopping.has(s.key)) return;
+  const st = fresh(s.key)?.state;
+  if (!LIVE.includes(st)) { working(s, body, `This session is ${STATE_WORD[st] ?? st ?? 'gone'}, so there is nothing to stop.`); return; }
   stopping.add(s.key);
   sessions.patch(s.key, { hand_stopped: true });
   await client.chat.update({ channel: s.channel, ts: body.message.ts, text: body.message.text,

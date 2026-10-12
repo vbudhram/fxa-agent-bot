@@ -265,3 +265,9 @@ test('the status card leaves out turns when it does not know them', () => {
   assert.match(JSON.stringify(C.status({ key: 'k', state: 'working', minutes: 3, turns: 2 }).blocks), /2 turns/);
   assert.deepEqual(c.blocks.at(-1).elements.map((b) => b.action_id), ['diff', 'interrupt', 'stop']);
 });
+
+test('the status card offers Interrupt and Stop only while the session runs', () => {
+  const ids = (live) => C.status({ key: 'k', state: 'paused', minutes: 3, live }).blocks.at(-1).elements.map((b) => b.action_id);
+  assert.deepEqual(ids(false), ['diff']);
+  assert.deepEqual(ids(true), ['diff', 'interrupt', 'stop']);
+});
