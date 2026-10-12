@@ -1687,8 +1687,16 @@ app.action('more', async ({ ack, body, action, client }) => {
   await ack();
   const s = fresh(action.value);
   if (!s?.more_text || !allowed(s.channel, body.user.id)) return;
-  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: defuse(s.more_text.split('\n')[0]).slice(0, 150), blocks: [md(s.more_text)] })
+  // Once: a second tap, or a client that still shows the button, must not post the rest again.
+  const more = s.more_text; sessions.patch(s.key, { more_text: null });
+  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: defuse(more.split('\n')[0]).slice(0, 150), blocks: [md(more)] })
     .catch((e) => console.error('more', s.key, e.data?.error ?? e.message));
+  const m = body.message;
+  if (m?.blocks) {
+    const blocks = m.blocks.map((b) => (b.type === 'actions' ? { ...b, elements: b.elements.filter((e) => e.action_id !== 'more') } : b))
+      .filter((b) => b.type !== 'actions' || b.elements.length);
+    await client.chat.update({ channel: body.channel.id, ts: m.ts, text: m.text, blocks }).catch((e) => console.error('more', s.key, e.data?.error ?? e.message));
+  }
 });
 
 // 7: stop the running turn but keep the session and everything done so far.

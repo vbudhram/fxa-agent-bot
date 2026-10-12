@@ -1,0 +1,25 @@
+{
+  "source": "synthetic: one long ready reply, so the bot splits it behind Show more",
+  "sessions": [
+    {
+      "turns": [
+        {
+          "steps": [
+            "Editing packages/fxa-settings/src/components/FormVerifyCode/index.tsx"
+          ],
+          "diff": [
+            {
+              "file": "packages/fxa-settings/src/components/FormVerifyCode/index.tsx",
+              "added": 4,
+              "removed": 2
+            }
+          ],
+          "end": {
+            "status": "ready",
+            "text": "I changed the verify code input so the check runs on submit.\n\nDetail 1: line one of this part.\nline two of this part.\n\nDetail 2: line one of this part.\nline two of this part.\n\nDetail 3: line one of this part.\nline two of this part.\n\nDetail 4: line one of this part.\nline two of this part.\n\nDetail 5: line one of this part.\nline two of this part.\n\nDetail 6: line one of this part.\nline two of this part.\n\nThe last part says REST-MARKER so the test can find it.\nAnd one more line."
+          }
+        }
+      ]
+    }
+  ]
+}

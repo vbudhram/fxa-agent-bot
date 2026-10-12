@@ -36,7 +36,7 @@ export function stepChecks(expect = {}, ctx) {
     else if (k === 'noPublicPost') need(!inStep.some((m) => m.bot && !m.to), 'no new public bot message');
     else if (k === 'noButtonsLeft') need(!view.msgs.some((m) => !m.deleted && ids(m).some((i) => v.test ? v.test(i) : /^answer_/.test(i))), 'no buttons left');
     // buttons: the bot messages of this step that match carry no button whose action_id matches none.
-    else if (k === 'buttons') { const ms = inStep.filter((m) => m.bot && (!v.match || v.match.test(said(m))));
+    else if (k === 'buttons') { const ms = touched.filter((m) => m.bot && (!v.match || v.match.test(said(m))));
       need(ms.length && ms.every((m) => !ids(m).some((i) => v.none.test(i))), `a bot message${v.match ? ` matching ${v.match}` : ''} with no button ${v.none}, saw ${ms.map((m) => `[${ids(m).join(',')}]`).join(' ') || 'none'}`); }
     else if (k === 'postCount') { const n = view.msgs.filter((m) => m.bot && !m.to && !m.deleted && (!v.thread || (m.thread_ts ?? m.ts) === roots[v.thread]) && v.match.test(said(m))).length;
       need(n === v.n, `${v.n} public bot message(s) matching ${v.match}${v.thread ? ` in ${v.thread}` : ''}, saw ${n}`); }
