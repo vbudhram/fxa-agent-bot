@@ -938,7 +938,7 @@ async function bang(s, text, m, client) {
     if (ENDED.includes(fresh(s.key).state)) { await resumeToShip(fresh(s.key), client, cmd === 'push' ? 'push' : 'pr', repo); return; }
     if (!readyToShip()) return;
     const what = cmd === 'push' ? 'Push branch' : prView(fresh(s.key), repo).pr_url ? 'Update PR' : 'Open PR';
-    const busy = await startWrap(s, client, what, m.user);
+    const busy = await startWrap(s, client, what, m.user, undefined, repo);
     if (busy) { await note(busy); return; }
     await (cmd === 'push' ? pushBranch(s, client, repo) : openPr(s, client, repo)).catch((e) => fail(client, s, e));
   } else if (cmd === 'rebase') {
@@ -1697,23 +1697,26 @@ async function interrupt(s, client, body) {
 }
 const wrapping = new Set();
 // A tap must show at once: swap the clicked buttons for a line that says what started.
-async function wrapTap(s, client, body, what) {
-  const busy = await startWrap(s, client, what, body.user.id, body.message);
+async function wrapTap(s, client, body, what, repo) {
+  const busy = await startWrap(s, client, what, body.user.id, body.message, repo);
   if (busy) working(s, body, busy);
   return !busy;
 }
 // Open PR and Push branch start the same way from a button or a command: the
 // tapped message, or else the newest button row, loses its buttons and says
-// who started it. Returns why it cannot start, or null.
-async function startWrap(s, client, what, user, msg) {
+// who started it. Returns why it cannot start, or null. A stack's repo loses only its own
+// Open PR and Push: the other repos' buttons stay, since each tree ships on its own.
+async function startWrap(s, client, what, user, msg, repo) {
   if (wrapping.has(s.key) || fresh(s.key)?.state === 'wrapping') return 'Already wrapping up. I will post here when it is done.';
   wrapping.add(s.key); setTimeout(() => wrapping.delete(s.key), 30_000);
   const target = msg ?? fresh(s.key)?.buttons_msg;
   if (target?.ts) {
+    const keep = (e) => repo && !(['open_pr', 'push_branch'].includes(e.action_id) && valueRepo(e.value) === repo);
+    const blocks = (target.blocks ?? []).map((x) => (x.type === 'actions' ? { ...x, elements: (x.elements ?? []).filter(keep) } : x))
+      .filter((x) => x.type !== 'actions' || x.elements.length);
     await client.chat.update({ channel: s.channel, ts: target.ts, text: target.text,
-      blocks: [...(target.blocks ?? []).filter((x) => x.type !== 'actions'),
-        { type: 'context', elements: [{ type: 'mrkdwn', text: `${what} · started by <@${user}>` }] }] }).catch(() => {});
-    if (fresh(s.key)?.buttons_msg?.ts === target.ts) sessions.patch(s.key, { buttons_msg: null });
+      blocks: [...blocks, { type: 'context', elements: [{ type: 'mrkdwn', text: `${what} · started by <@${user}>` }] }] }).catch(() => {});
+    if (fresh(s.key)?.buttons_msg?.ts === target.ts && !blocks.some((x) => x.type === 'actions')) sessions.patch(s.key, { buttons_msg: null });
   }
   return null;
 }
@@ -1729,12 +1732,12 @@ async function pushBranch(s, client, repo) {
 }
 ownerAction('open_pr', async (s, client, action, body) => {
   const repo = valueRepo(action.value);
-  if (!(await wrapTap(s, client, body, `${prView(fresh(s.key), repo)?.pr_url ? 'Update PR' : 'Open PR'}${repo ? ` · ${repo}` : ''}`))) return;
+  if (!(await wrapTap(s, client, body, `${prView(fresh(s.key), repo)?.pr_url ? 'Update PR' : 'Open PR'}${repo ? ` · ${repo}` : ''}`, repo))) return;
   await (ENDED.includes(fresh(s.key)?.state) ? resumeToShip(fresh(s.key), client, 'pr', repo) : openPr(s, client, repo));
 });
 ownerAction('push_branch', async (s, client, action, body) => {
   const repo = valueRepo(action.value);
-  if (!(await wrapTap(s, client, body, `Push branch${repo ? ` · ${repo}` : ''}`))) return;
+  if (!(await wrapTap(s, client, body, `Push branch${repo ? ` · ${repo}` : ''}`, repo))) return;
   await (ENDED.includes(fresh(s.key)?.state) ? resumeToShip(fresh(s.key), client, 'push', repo) : pushBranch(s, client, repo));
 });
 // Open PR or Push on a paused or stopped session: resume it on a new runner, and
@@ -1770,7 +1773,7 @@ async function shipAfterResume(key, what, ev) {
     return;
   }
   const repo = s.then_wrap_repo ?? undefined;
-  if (await startWrap(s, app.client, what === 'push' ? 'Push branch' : prView(s, repo).pr_url ? 'Update PR' : 'Open PR', s.owner)) return;
+  if (await startWrap(s, app.client, what === 'push' ? 'Push branch' : prView(s, repo).pr_url ? 'Update PR' : 'Open PR', s.owner, undefined, repo)) return;
   await (what === 'push' ? pushBranch(s, app.client, repo) : openPr(s, app.client, repo)).catch((e) => fail(app.client, s, e));
 }
 const stopping = new Set();
