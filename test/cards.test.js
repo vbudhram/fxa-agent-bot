@@ -276,3 +276,10 @@ test('the end card leaves out minutes it does not know', () => {
   const c = C.end({ key: 'k', reason: 'Closed.' });
   assert.doesNotMatch(JSON.stringify(c.blocks) + c.text, /min/);
 });
+
+test('an end card with no facts has no empty context block, and its text reads well', () => {
+  const c = C.end({ key: 'k', reason: 'Closed.' });
+  assert.ok(c.blocks.every((b) => b.type !== 'context' || b.elements.length));
+  assert.equal(c.text, 'Session ended.');
+  assert.equal(C.end({ key: 'k', turns: 3 }).text, 'Session ended. 3 turns.');
+});

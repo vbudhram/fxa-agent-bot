@@ -239,12 +239,15 @@ function _sessions(d) {
 function _end(d) {
   const p = d.pr, head = sec(`*Session ended.*${d.reason ? ` ${cut(d.reason, 200)}` : ''}`);
   // Unknown turns or changes are left out, never shown as 0. No feedback buttons until something handles them.
-  const facts = ctx(dot(d.minutes != null && `${num(d.minutes)} min`, d.turns != null && `${num(d.turns)} turns`,
-    p ? `PR ${link(p.url, `#${p.number}`)} ${pill(p.state)}` : d.files != null && (d.files ? 'branch not pushed' : 'no change')));
+  const line = dot(d.minutes != null && `${num(d.minutes)} min`, d.turns != null && `${num(d.turns)} turns`,
+    p ? `PR ${link(p.url, `#${p.number}`)} ${pill(p.state)}` : d.files != null && (d.files ? 'branch not pushed' : 'no change'));
+  // Slack refuses a context block with no elements, and then the whole card.
+  const blocks = line ? [head, ctx(line)] : [head];
+  const said = [d.minutes != null && `${num(d.minutes)} min`, d.turns != null && `${num(d.turns)} turns`, p && `PR #${p.number} ${p.state ?? ''}`.trim()].filter(Boolean);
   return {
-    text: plain(`Session ended.${d.minutes != null ? ` ${num(d.minutes)} min` : ''}${d.turns != null ? `, ${num(d.turns)} turns` : ''}${p ? `, PR #${p.number} ${p.state ?? ''}` : ''}.`),
-    blocks: [head, facts],
-    fallback: [head, facts],
+    text: plain(`Session ended.${said.length ? ` ${said.join(', ')}.` : ''}`),
+    blocks,
+    fallback: blocks,
   };
 }
 
