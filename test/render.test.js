@@ -532,6 +532,8 @@ test('maskUpload masks a text upload and leaves media as it is', () => {
   assert.equal(maskUpload({ filename: 'fix.patch', file: Buffer.from(`+${tok}`) }).file.toString(), '+ghp_<masked>');
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x67, 0x68, 0x70, 0x5f]);
   assert.equal(maskUpload({ filename: 'shot.png', file: png }).file, png);
+  assert.deepEqual(maskUpload({ filename: `${tok}.png`, title: `shot ${tok}`, file: png }),
+    { filename: 'ghp__masked.png', title: 'shot ghp_<masked>', file: png });
 });
 
 test('a failed ship says the work is kept and how to retry, not !restart', () => {

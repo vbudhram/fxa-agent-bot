@@ -491,11 +491,14 @@ export const maskSecrets = (t, mark = '<masked>') => String(t).replace(
   /(?<![A-Za-z0-9_-])(?:(sk-ant-[a-z0-9]+-|xox[abpr]-|xapp-)[A-Za-z0-9_-]{8,}|(fxl_|fxm_|ghs_|ghp_|gho_|github_pat_)[A-Za-z0-9]{12,}[A-Za-z0-9_]*)/g,
   (_, a, b) => `${a ?? b}${mark}`);
 
-// An upload's text (a Diff's content, an agent's .patch or .diff file, the comment) through maskSecrets.
+// An upload's text (a Diff's content, an agent's .patch or .diff file, the comment, the name and title) through maskSecrets.
 // Media bytes stay as they are. The Diff is for reading: Apply and Open PR work from the branch.
 export const maskUpload = (args) => ({ ...args,
   ...(typeof args.content === 'string' && { content: maskSecrets(args.content) }),
   ...(typeof args.initial_comment === 'string' && { initial_comment: maskSecrets(args.initial_comment) }),
+  // The runner picks media file names, and Slack shows the name and the title.
+  ...(typeof args.filename === 'string' && { filename: maskSecrets(args.filename, '_masked') }),
+  ...(typeof args.title === 'string' && { title: maskSecrets(args.title) }),
   ...(Buffer.isBuffer(args.file) && /\.(patch|diff)$/.test(args.filename ?? '') && { file: Buffer.from(maskSecrets(args.file.toString('utf8'))) }) });
 
 // The tag reminder goes to each person once per thread: a resume starts a new
