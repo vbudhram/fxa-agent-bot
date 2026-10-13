@@ -18,6 +18,8 @@ export default {
     { advance: 'finish', wait: { text: /mozilla\/fxa\/pull\/999999/ } },
     { advance: 1, wait: { text: /Merged/ }, expect: { noCtl: 'stop' } },
     { A: { tap: 'Diff · pyfxa' }, expect: { ctl: { cmd: 'diff', match: /--repo","mozilla\/PyFxA"/, n: 2 }, calls: { method: 'files.uploadV2', match: /-PyFxA\.diff"/, n: 2 }, noCtl: 'stop' } },
+    // !status: one row for each repo, with its PR or diff and its changes.
+    { A: '!status', wait: { text: /^(?=[\s\S]*`pyfxa` · ships as a diff · 1 file changed)(?=[\s\S]*`fxa` · PR \S*#999999\S* · merged)/ } },
     { A: '@bot !stop', expect: { ctl: { cmd: 'stop', n: 1 } } },
   ],
   judge: 'Each repo button acts on its own repo. The fxa PR card shows the merge, the session keeps running, and PyFxA still gives a diff. Only !stop ends it.',

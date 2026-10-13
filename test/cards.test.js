@@ -272,6 +272,17 @@ test('the status card offers Interrupt and Stop only while the session runs', ()
   assert.deepEqual(ids(true), ['diff', 'interrupt', 'stop']);
 });
 
+test('the status card of a team stack has a row for each repo: its PR or diff, and its changes', () => {
+  const c = C.status({ key: 'k', state: 'waiting', minutes: 4, owner: 'U12345678', trees: [
+    { name: 'fxa', out: 'pr', changes: 3, pr: { url: 'https://github.com/mozilla/fxa/pull/12', number: 12, state: 'open', ci: 'passed' } },
+    { name: 'pyfxa', out: 'diff', changes: 1, pr: null },
+    { name: 'docs', out: 'pr', changes: 0, pr: null }] });
+  const rows = c.blocks.filter((b) => b.type === 'context').map((b) => b.elements[0].text);
+  assert.deepEqual(rows, ['`fxa` · PR <https://github.com/mozilla/fxa/pull/12|#12> · open · CI passed · 3 files changed',
+    '`pyfxa` · ships as a diff · 1 file changed', '`docs` · no PR yet · 0 files changed', '<@U12345678>']);
+  assert.deepEqual(c.blocks.at(-1).elements.map((b) => b.action_id), ['diff', 'interrupt', 'stop']);
+});
+
 test('the end card leaves out minutes it does not know', () => {
   const c = C.end({ key: 'k', reason: 'Closed.' });
   assert.doesNotMatch(JSON.stringify(c.blocks) + c.text, /min/);

@@ -941,19 +941,14 @@ async function bang(s, text, m, client) {
     const cur = fresh(s.key), mins = cur.started_at ? Math.round((Date.now() - cur.started_at) / 60_000) : 0;
     const notes = [cur.state === 'active' && !cur.status_ts ? 'Waiting for you. I pause after 10 minutes without a message; a reply picks it up again.' : null,
       cur.muted ? 'Replies are muted here. `!unmute` to hear from me.' : null, cur.boot_s ? `Setup took ${cur.boot_s}s.` : null].filter(Boolean);
-    // One repo: the status card (cards.status), with the owner's Diff, Interrupt and Stop. A team stack keeps the text, one line per PR.
-    if (!cur.prs) {
-      const n = Number(String(cur.pr_url ?? '').match(/\/pull\/(\d+)$/)?.[1]) || 0;
-      const c = cards.status({ key: cur.key, state: STATE_WORD[cur.state] ?? cur.state, minutes: mins, owner: cur.owner, now: cur.last_act, live: LIVE.includes(cur.state),
-        pr: cur.pr_url ? { url: cur.pr_url, number: n, state: String(cur.pr_seen?.state ?? '').toLowerCase(), ci: cur.pr_seen?.ci } : null });
-      const extra = notes.length ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: notes.join(' ') }] }] : [];
-      await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: c.text, blocks: [...c.blocks.slice(0, -1), ...extra, c.blocks.at(-1)] });
-    } else await say(s, [`*${STATE_WORD[cur.state] ?? cur.state}* · ${mins} min · started by <@${cur.owner}>`,
-      cur.last_act ? `Now: ${defuse(String(cur.last_act)).slice(0, 200)}` : null,
-      ...(cur.prs ? Object.entries(cur.prs).filter(([, x]) => x.pr_url).map(([r, x]) => `PR in ${r}: ${x.pr_url}`) : [cur.pr_url ? `PR: ${cur.pr_url}` : null]),
-      cur.boot_s ? `Setup took ${cur.boot_s}s.` : null,
-      cur.state === 'active' && !cur.status_ts ? 'Waiting for you. I pause after 10 minutes without a message; a reply picks it up again.' : null,
-      cur.muted ? 'Replies are muted here. `!unmute` to hear from me.' : null].filter(Boolean).join('\n'));
+    // The status card (cards.status), with the owner's Diff, Interrupt and Stop. A team stack gets a row for each repo.
+    const prOf = (url, seen) => (url ? { url, number: Number(String(url).match(/\/pull\/(\d+)$/)?.[1]) || 0, state: String(seen?.state ?? '').toLowerCase(), ci: seen?.ci } : null);
+    const trees = Array.isArray(cur.trees) && cur.trees.length ? cur.trees.map((t) => ({ name: t.name || String(t.slug).split('/')[1], out: t.out, changes: t.changes,
+      pr: prOf(cur.prs?.[t.slug]?.pr_url, cur.prs?.[t.slug]?.pr_seen) })) : null;
+    const c = cards.status({ key: cur.key, state: STATE_WORD[cur.state] ?? cur.state, minutes: mins, owner: cur.owner, now: cur.last_act, live: LIVE.includes(cur.state),
+      pr: trees ? null : prOf(cur.pr_url, cur.pr_seen), trees });
+    const extra = notes.length ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: notes.join(' ') }] }] : [];
+    await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: c.text, blocks: [...c.blocks.slice(0, -1), ...extra, c.blocks.at(-1)] });
   } else if (cmd === 'pr' || cmd === 'push') {
     if (ownerOnly()) return;
     // A team stack ships one repo: !pr <name> or !pr <owner/repo>.
@@ -2235,7 +2230,7 @@ async function pollOne(key) {
         if (r) sessions.patch(key, { pr_url: ev.url });
       }
       // The repos of a stack, for !pr <repo> and the buttons.
-      if (ev.type === 'turn_end' && Array.isArray(ev.trees)) sessions.patch(key, { trees: ev.trees.map(({ name, slug, out }) => ({ name, slug, out })) });
+      if (ev.type === 'turn_end' && Array.isArray(ev.trees)) sessions.patch(key, { trees: ev.trees.map(({ name, slug, out, changes }) => ({ name, slug, out, changes })) });
       // The wrap-up's status line closes later in this poll; it says what the wrap-up did.
       if ((ev.type === 'pr' || ev.type === 'pushed') && fresh(key)?.status_ts) sessions.patch(key, { wrap_done: ev.type });
       const msg = render(s.key, { ...ev, desktop: Boolean(process.env.DESKTOP_GATEWAY), read_only: Boolean(s.read_only) });

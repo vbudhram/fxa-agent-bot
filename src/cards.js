@@ -217,7 +217,12 @@ function _status(d) {
   return {
     text: plain(`Session is ${d.state}, ${num(d.minutes)} min.${d.now ? ` Now: ${d.now}` : ''}`),
     blocks: [sec(`${dot(`*${cap(pill(d.state))}*`, `${num(d.minutes)} min`, d.turns != null && `${num(d.turns)} turns`)}${d.now ? `\nNow: ${cut(d.now, 300)}` : ''}`),
-    ctx(dot(p && `PR ${link(url, `#${p.number}`)}`, p && pill(p.state), p?.ci && `CI ${cut(p.ci, 20)}`, /^[UW][A-Z0-9]+$/.test(d.owner ?? '') && `<@${d.owner}>`) || '-'),
+    // A team stack: one row for each repo, with its PR or "ships as a diff", and its changes.
+    ...(d.trees?.length ? d.trees.slice(0, 20).map((t) => ctx(dot(`\`${cut(t.name, 30)}\``,
+      t.pr ? `PR ${link(t.pr.url, `#${t.pr.number}`)}` : t.out === 'pr' ? 'no PR yet' : 'ships as a diff', t.pr && pill(t.pr.state),
+      t.pr?.ci && `CI ${cut(t.pr.ci, 20)}`, Number.isFinite(t.changes) && `${t.changes} file${t.changes === 1 ? '' : 's'} changed`)))
+      .concat(/^[UW][A-Z0-9]+$/.test(d.owner ?? '') ? [ctx(`<@${d.owner}>`)] : [])
+      : [ctx(dot(p && `PR ${link(url, `#${p.number}`)}`, p && pill(p.state), p?.ci && `CI ${cut(p.ci, 20)}`, /^[UW][A-Z0-9]+$/.test(d.owner ?? '') && `<@${d.owner}>`) || '-')]),
     // Interrupt and Stop only while it runs (live): on a paused or PR-open session they do nothing.
     ...actions([btn('Diff', 'diff', d.key), ...(d.live === false ? [] : [btn('Interrupt', 'interrupt', d.key), btn('Stop', 'stop', d.key, { style: 'danger',
       confirm: { title: pt('Stop the session?'), text: pt('The sandbox stops. The branch stays.'), confirm: pt('Stop'), deny: pt('Keep') } })])])],
