@@ -955,7 +955,7 @@ async function bang(s, text, m, client) {
     const what = cmd === 'push' ? 'Push branch' : prView(fresh(s.key), repo).pr_url ? 'Update PR' : 'Open PR';
     const busy = await startWrap(s, client, what, m.user, undefined, repo);
     if (busy) { await note(busy); return; }
-    await (cmd === 'push' ? pushBranch(s, client, repo) : openPr(s, client, repo)).catch((e) => fail(client, s, e));
+    await (cmd === 'push' ? pushBranch(s, client, repo) : openPr(s, client, repo)).catch((e) => shipFailed(client, s, e, what));
   } else if (cmd === 'rebase') {
     // The agent owns its git: it rebases and resolves; the host only pushes.
     if (ownerOnly() || !readyToShip()) return;
@@ -1730,6 +1730,8 @@ async function interrupt(s, client, body) {
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Interrupted. The work so far is kept. Tell me what to do instead.' });
 }
 const wrapping = new Set();
+// The row each wrap took buttons from, so a refused ship can put them back.
+const unwrap = new Map();
 // A tap must show at once: swap the clicked buttons for a line that says what started.
 async function wrapTap(s, client, body, what, repo) {
   const busy = await startWrap(s, client, what, body.user.id, body.message, repo);
@@ -1745,6 +1747,7 @@ async function startWrap(s, client, what, user, msg, repo) {
   wrapping.add(s.key); setTimeout(() => wrapping.delete(s.key), 30_000);
   const bm = fresh(s.key)?.buttons_msg, target = msg ?? (bm && { ...bm, blocks: bm.full ?? bm.blocks });
   if (target?.ts) {
+    unwrap.set(s.key, { ts: target.ts, text: target.text, blocks: target.blocks, bm: fresh(s.key)?.buttons_msg ?? null });
     const keep = (e) => repo && !(['open_pr', 'push_branch'].includes(e.action_id) && valueRepo(e.value) === repo);
     let blocks = (target.blocks ?? []).map((x) => (x.type === 'actions' ? { ...x, elements: (x.elements ?? []).filter(keep) } : x))
       .filter((x) => x.type !== 'actions' || x.elements.length);
@@ -1756,6 +1759,17 @@ async function startWrap(s, client, what, user, msg, repo) {
     if (cur?.ts === target.ts) sessions.patch(s.key, { buttons_msg: blocks.some((x) => x.type === 'actions') ? { ...cur, full: blocks } : null });
   }
   return null;
+}
+// A ship the controller refused or that failed at once: the row gets its buttons back, a retry is
+// not "Already wrapping up", and the message says to tap again (a !restart would leave the work behind).
+async function shipFailed(client, s, e, what) {
+  wrapping.delete(s.key);
+  const u = unwrap.get(s.key); unwrap.delete(s.key);
+  if (u) {
+    await client.chat.update({ channel: s.channel, ts: u.ts, text: u.text, blocks: u.blocks }).catch(() => {});
+    if (u.bm?.ts === u.ts) sessions.patch(s.key, { buttons_msg: u.bm });
+  }
+  return fail(client, s, Object.assign(e, { wrap: what }));
 }
 // repo: the one repo of a team stack to ship; the controller refuses a stack's ship without it.
 async function openPr(s, client, repo) {
@@ -1770,12 +1784,14 @@ async function pushBranch(s, client, repo) {
 ownerAction('open_pr', async (s, client, action, body) => {
   const repo = valueRepo(action.value);
   if (!(await wrapTap(s, client, body, `${prView(fresh(s.key), repo)?.pr_url ? 'Update PR' : 'Open PR'}${repo ? ` · ${repo}` : ''}`, repo))) return;
-  await (ENDED.includes(fresh(s.key)?.state) ? resumeToShip(fresh(s.key), client, 'pr', repo) : openPr(s, client, repo));
+  await (ENDED.includes(fresh(s.key)?.state) ? resumeToShip(fresh(s.key), client, 'pr', repo) : openPr(s, client, repo))
+    .catch((e) => shipFailed(client, s, e, prView(fresh(s.key), repo)?.pr_url ? 'Update PR' : 'Open PR'));
 });
 ownerAction('push_branch', async (s, client, action, body) => {
   const repo = valueRepo(action.value);
   if (!(await wrapTap(s, client, body, `Push branch${repo ? ` · ${repo}` : ''}`, repo))) return;
-  await (ENDED.includes(fresh(s.key)?.state) ? resumeToShip(fresh(s.key), client, 'push', repo) : pushBranch(s, client, repo));
+  await (ENDED.includes(fresh(s.key)?.state) ? resumeToShip(fresh(s.key), client, 'push', repo) : pushBranch(s, client, repo))
+    .catch((e) => shipFailed(client, s, e, 'Push branch'));
 });
 // Open PR or Push on a paused or stopped session: resume it on a new runner, and
 // ship once its first turn says the work carried over (shipAfterResume).
@@ -1811,7 +1827,8 @@ async function shipAfterResume(key, what, ev) {
   }
   const repo = s.then_wrap_repo ?? undefined;
   if (await startWrap(s, app.client, what === 'push' ? 'Push branch' : prView(s, repo).pr_url ? 'Update PR' : 'Open PR', s.owner, undefined, repo)) return;
-  await (what === 'push' ? pushBranch(s, app.client, repo) : openPr(s, app.client, repo)).catch((e) => fail(app.client, s, e));
+  await (what === 'push' ? pushBranch(s, app.client, repo) : openPr(s, app.client, repo))
+    .catch((e) => shipFailed(app.client, s, e, what === 'push' ? 'Push branch' : 'Open PR'));
 }
 const stopping = new Set();
 ownerAction('stop', async (s, client, action, body) => {
@@ -1908,6 +1925,7 @@ function explain(e, key) {
   if (/is (paused|stopped); reply in the thread to resume it/.test(err)) return 'This session is paused. Reply here to pick it up, then try that again.';
   if (/nothing to push: no files changed/.test(err)) return 'There is nothing to push or open a PR for: I have not changed any files in this session.';
   if (/no Claude session id/.test(err)) return "I'm still starting up. Send that again in a minute.";
+  if (e.wrap && line) return `${line}. The work is kept: tap ${e.wrap} again when it is ready.`;
   if (/ETIMEDOUT|timed out|SIGTERM/.test(err)) return 'The sandbox did not answer in time. Try again, or `!restart` to start fresh.';
   return `Something went wrong${line ? `: ${line}` : ''}. Try again, or \`!restart\` to start fresh.`;
 }

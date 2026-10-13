@@ -533,3 +533,11 @@ test('maskUpload masks a text upload and leaves media as it is', () => {
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x67, 0x68, 0x70, 0x5f]);
   assert.equal(maskUpload({ filename: 'shot.png', file: png }).file, png);
 });
+
+test('a failed ship says the work is kept and how to retry, not !restart', () => {
+  const t = render('k', { type: 'error', text: 'Open PR failed: push failed' }).text;
+  assert.match(t, /Open PR failed: push failed\. The work is kept: reply to fix it, then `!pr` to try again\./);
+  assert.doesNotMatch(t, /restart/);
+  assert.match(render('k', { type: 'error', text: 'Push branch failed: x' }).text, /`!push` to try again/);
+  assert.match(render('k', { type: 'error', text: 'disk full' }).text, /!restart/);
+});

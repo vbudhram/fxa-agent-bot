@@ -313,7 +313,11 @@ export function render(key, ev) {
     case 'pushed': return { text: `Pushed \`${esc(ev.branch).replace(/`/g, '')}\`${repoOf(ev)}.${gh(ev.url) ? ` <${gh(ev.url)}|Open a PR from it> when you are ready, or keep steering here.` : ' Keep steering here, or open a PR from it on GitHub.'}${noteLines(ev.notes)}` };
     case 'error': {
       const op = operatorProblem(ev.text);
-      return op ? { text: op.text, operator: op.kind } : { text: `Something went wrong: ${esc(ev.text)} Try again, or \`!restart\` to start fresh.` };
+      if (op) return { text: op.text, operator: op.kind };
+      // A failed ship keeps the session and its work; a !restart would leave that work behind.
+      const ship = String(ev.text ?? '').match(/^(Open PR|Push branch) failed/);
+      if (ship) return { text: `${esc(ev.text)}. The work is kept: reply to fix it, then \`!${ship[1] === 'Push branch' ? 'push' : 'pr'}\` to try again.` };
+      return { text: `Something went wrong: ${esc(ev.text)} Try again, or \`!restart\` to start fresh.` };
     }
     default: return null;
   }
