@@ -7,14 +7,26 @@ import { mayStart } from './profile.js';
 const SLUG = /^[\w.-]+\/[\w.-]+$/;
 const PR = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)\/?$/;
 
-// "!stack", "!stack checkout <PR link>". Slack wraps a link as <url> or <url|label>.
+// "!stack", "!stack <team>", "!stack checkout <PR link>", "!stack help". Slack wraps a link as
+// <url> or <url|label>. "add" and "help" are words, not teams.
+export const STACK_ADD = '`!stack add` is not a command. To add a repo to this thread\'s session: `!stop` it if it runs, send `!stack`, pick the same team and tick the repo to add, then tag me. The session resumes with that repo too.';
 export function parseStack(text) {
   const [, sub = '', arg = ''] = String(text ?? '').trim().match(/^!stack(?:\s+(\S+))?(?:\s+(\S+))?/i) ?? [];
   if (!sub) return { sub: 'pick' };
+  if (sub.toLowerCase() === 'add') return { sub: 'add', error: STACK_ADD };
+  if (sub.toLowerCase() === 'help') return { sub: 'help' };
   if (sub.toLowerCase() !== 'checkout') return { sub: 'pick', team: sub.toLowerCase() };
   const url = arg.replace(/^<([^|>]+)(\|[^>]*)?>$/, '$1');
   const m = url.match(PR);
   return m ? { sub: 'checkout', url: url.replace(/\/$/, ''), slug: m[1] } : { sub: 'checkout', error: 'Give me a GitHub PR link: `!stack checkout https://github.com/<owner>/<repo>/pull/<n>`.' };
+}
+
+// The !stack commands, and the teams this person may pick.
+export function stackHelp(teams) {
+  return ['`!stack`: pick a team and its repos for this thread. Your next tag starts the session with them.',
+    '`!stack <team>`: skip the team step.',
+    '`!stack checkout <PR link>`: continue a PR in this thread.',
+    `Your teams: ${teams.map((t) => `\`${t.profile}\``).join(', ')}.`].join('\n');
 }
 
 // The teams a person may pick: every profile, less the gated ones they are not on.

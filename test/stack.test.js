@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseStack, teamsFor, stackTeamCard, stackRepoCard, treeRows, valueRepo, prView, prPatch, followTargets, carryPrs } from '../src/stack.js';
+import { parseStack, stackHelp, STACK_ADD, teamsFor, stackTeamCard, stackRepoCard, treeRows, valueRepo, prView, prPatch, followTargets, carryPrs } from '../src/stack.js';
 
 test('parseStack: pick, a team, a checkout, a bad link', () => {
   assert.deepEqual(parseStack('!stack'), { sub: 'pick' });
@@ -8,6 +8,8 @@ test('parseStack: pick, a team, a checkout, a bad link', () => {
   assert.deepEqual(parseStack('!stack checkout <https://github.com/mozilla/PyFxA/pull/12|PyFxA#12>'),
     { sub: 'checkout', url: 'https://github.com/mozilla/PyFxA/pull/12', slug: 'mozilla/PyFxA' });
   assert.match(parseStack('!stack checkout https://example.com/x').error, /GitHub PR link/);
+  assert.deepEqual(parseStack('!stack add mozilla/PyFxA'), { sub: 'add', error: STACK_ADD });
+  assert.deepEqual(parseStack('!stack Help'), { sub: 'help' });
 });
 
 test('teamsFor: fxa and open teams for all, gated ones only for their people', () => {
@@ -67,4 +69,10 @@ test('followTargets and carryPrs: each repo PR; a move leaves the cards behind',
   assert.deepEqual(followTargets({ key: 'k', prs: { a: { pr_url: 'u1' }, b: { pr_url: 'u2' } } }).map((t) => `${t.repo}:${t.pr_url}`), ['a:u1', 'b:u2']);
   assert.deepEqual(carryPrs({ a: { pr_url: 'u', pr_card_ts: '1' } }, true), { a: { pr_url: 'u', pr_card_ts: null, pr_card_head: null, pr_card_text: null } });
   assert.deepEqual(carryPrs({ a: { pr_card_ts: '1' } }, false), { a: { pr_card_ts: '1' } });
+});
+
+test('stackHelp: the commands and the person\'s teams', () => {
+  const t = stackHelp([{ profile: 'fxa' }, { profile: 'pyfxa-team' }]);
+  assert.match(t, /!stack checkout <PR link>/);
+  assert.match(t, /Your teams: `fxa`, `pyfxa-team`\./);
 });
