@@ -1695,14 +1695,20 @@ app.action('more', async ({ ack, body, action, client }) => {
   const s = fresh(action.value);
   if (!s?.more_text || !allowed(s.channel, body.user.id)) return;
   // Once: a second tap, or a client that still shows the button, must not post the rest again.
+  // A failed post puts the rest back, so the button that stays can post it.
   const more = s.more_text; sessions.patch(s.key, { more_text: null });
-  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: defuse(more.split('\n')[0]).slice(0, 150), blocks: [md(more)] })
-    .catch((e) => console.error('more', s.key, e.data?.error ?? e.message));
+  try {
+    await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: defuse(more.split('\n')[0]).slice(0, 150), blocks: [md(more)] });
+  } catch (e) { console.error('more', s.key, e.data?.error ?? e.message); sessions.patch(s.key, { more_text: more }); return; }
   const m = body.message;
   if (m?.blocks) {
     const blocks = m.blocks.map((b) => (b.type === 'actions' ? { ...b, elements: b.elements.filter((e) => e.action_id !== 'more') } : b))
       .filter((b) => b.type !== 'actions' || b.elements.length);
     await client.chat.update({ channel: body.channel.id, ts: m.ts, text: m.text, blocks }).catch((e) => console.error('more', s.key, e.data?.error ?? e.message));
+    // startWrap rebuilds the row from full: without this, a later !pr <repo> puts Show more back.
+    const bm = fresh(s.key)?.buttons_msg;
+    if (bm?.ts === m.ts && bm.full) sessions.patch(s.key, { buttons_msg: { ...bm, full: bm.full.map((b) => (b.type === 'actions' ? { ...b, elements: b.elements.filter((e) => e.action_id !== 'more') } : b))
+      .filter((b) => b.type !== 'actions' || b.elements.length) } });
   }
 });
 
@@ -1740,8 +1746,10 @@ async function startWrap(s, client, what, user, msg, repo) {
   const bm = fresh(s.key)?.buttons_msg, target = msg ?? (bm && { ...bm, blocks: bm.full ?? bm.blocks });
   if (target?.ts) {
     const keep = (e) => repo && !(['open_pr', 'push_branch'].includes(e.action_id) && valueRepo(e.value) === repo);
-    const blocks = (target.blocks ?? []).map((x) => (x.type === 'actions' ? { ...x, elements: (x.elements ?? []).filter(keep) } : x))
+    let blocks = (target.blocks ?? []).map((x) => (x.type === 'actions' ? { ...x, elements: (x.elements ?? []).filter(keep) } : x))
       .filter((x) => x.type !== 'actions' || x.elements.length);
+    // The answer hint points at buttons: with none left, it goes too.
+    if (!blocks.some((x) => x.type === 'actions')) blocks = blocks.filter((x) => x.block_id !== 'answer_hint');
     await client.chat.update({ channel: s.channel, ts: target.ts, text: target.text,
       blocks: [...blocks, { type: 'context', elements: [{ type: 'mrkdwn', text: `${what} · started by <@${user}>` }] }] }).catch(() => {});
     const cur = fresh(s.key)?.buttons_msg;

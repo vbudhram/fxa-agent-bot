@@ -10,6 +10,7 @@ export function createView({ names = {} } = {}) {
   const touch = (m) => { m.chg = ++chg; return m; };
   const nextTs = () => { clock += 100; return `${Math.floor(clock / 1e6)}.${String(clock % 1e6).padStart(6, '0')}`; };
   const find = (channel, ts) => msgs.find((m) => m.channel === channel && m.ts === ts);
+  let failPost = process.env.E2E_FAIL_POST ? new RegExp(process.env.E2E_FAIL_POST) : null;
   const err = (code) => Object.assign(new Error(`An API error occurred: ${code}`), { code: 'slack_webapi_platform_error', data: { ok: false, error: code } });
 
   // A message from a person, posted by the harness. Returns its ts.
@@ -37,6 +38,8 @@ export function createView({ names = {} } = {}) {
     switch (method) {
       case 'auth.test': return { ok: true, ...BOT, user: 'fxa-agent', url: 'https://fake.slack.com/' };
       case 'chat.postMessage': {
+        // E2E_FAIL_POST: the first post whose text or blocks match fails, as a Slack outage does.
+        if (failPost && failPost.test(JSON.stringify([args.text, args.blocks]))) { failPost = null; throw err('internal_error'); }
         const m = { ts: nextTs(), channel, thread_ts: args.thread_ts, bot: true, text: args.text ?? '', blocks: args.blocks, edits: 0, reactions: new Set(), seq: ++seq };
         msgs.push(touch(m));
         return { ok: true, channel, ts: m.ts, message: { ...m, reactions: undefined } };
