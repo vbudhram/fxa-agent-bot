@@ -488,7 +488,7 @@ export function draftSplit(buf) {
 // GitHub and runner tokens are letters and digits after the prefix (github_pat_ adds _), so a
 // file or variable name such as ghp_tokens_helper_test.js is not one; Slack and Anthropic keys have hyphens.
 export const maskSecrets = (t, mark = '<masked>') => String(t).replace(
-  /(?<![A-Za-z0-9_-])(?:(sk-ant-[a-z0-9]+-|xox[abpr]-|xapp-)[A-Za-z0-9_-]{8,}|(fxl_|fxm_|ghs_|ghp_|gho_|github_pat_)[A-Za-z0-9]{12,}[A-Za-z0-9_]*)/g,
+  /(?<![A-Za-z0-9])(?:(sk-ant-[a-z0-9]+-|xox[abpr]-|xapp-)[A-Za-z0-9_-]{8,}|(fxl_|fxm_|ghs_|ghp_|gho_|github_pat_)[A-Za-z0-9]{12,}[A-Za-z0-9_]*)/g,
   (_, a, b) => `${a ?? b}${mark}`);
 
 // An upload's text (a Diff's content, an agent's .patch or .diff file, the comment, the name and title) through maskSecrets.

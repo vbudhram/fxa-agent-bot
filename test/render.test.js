@@ -513,6 +513,13 @@ test('maskSecrets leaves names that only contain a token prefix', () => {
   assert.equal(maskSecrets('(fxl_abcdefghijklmnop)'), '(fxl_<masked>)');
 });
 
+test('maskSecrets masks a token after an underscore or a hyphen: Slack italics, snake_case, file names', () => {
+  assert.equal(maskSecrets('_fxl_AbCdEf0123456789AbCdEf0123456789_'), '_fxl_<masked>');
+  assert.equal(maskSecrets('token_ghs_AbCdEf0123456789xyz'), 'token_ghs_<masked>');
+  assert.equal(maskSecrets('shot_ghp_0123456789abcdefABCD.png'), 'shot_ghp_<masked>.png');
+  assert.equal(maskSecrets('run-fxm_0123456789abcdef'), 'run-fxm_<masked>');
+});
+
 test('maskSecrets hides runner tokens and keeps the rest', () => {
   assert.equal(maskSecrets('key fxl_abcdefghijklmnop and fxm_0123456789abcdef.'), 'key fxl_<masked> and fxm_<masked>.');
   assert.equal(maskSecrets('sk-ant-api03-AbCdEfGhIjKlMnOp ghp_abcdefghij1234 xoxb-123456789012'), 'sk-ant-api03-<masked> ghp_<masked> xoxb-<masked>');

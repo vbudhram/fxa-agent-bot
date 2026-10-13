@@ -10,7 +10,14 @@
           "end": {
             "status": "ready",
             "text": "The env has ANTHROPIC_API_KEY=fxl_abcdefghijklmnopqrst and FXA_MCP_TOKEN=fxm_0123456789abcdef0123.\n\nNothing else looks odd."
-          }
+          },
+          "diff": [
+            {
+              "file": "packages/fxa-settings/src/index.tsx",
+              "added": 2,
+              "removed": 1
+            }
+          ]
         }
       ]
     }
