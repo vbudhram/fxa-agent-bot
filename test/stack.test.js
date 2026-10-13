@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseStack, stackHelp, STACK_ADD, teamsFor, stackTeamCard, stackRepoCard, treeRows, valueRepo, prView, prPatch, followTargets, carryPrs } from '../src/stack.js';
+import { parseStack, stackHelp, STACK_ADD, stackRepos, teamsFor, stackTeamCard, stackRepoCard, treeRows, valueRepo, prView, prPatch, followTargets, carryPrs } from '../src/stack.js';
 
 test('parseStack: pick, a team, a checkout, a bad link', () => {
   assert.deepEqual(parseStack('!stack'), { sub: 'pick' });
@@ -10,6 +10,19 @@ test('parseStack: pick, a team, a checkout, a bad link', () => {
   assert.match(parseStack('!stack checkout https://example.com/x').error, /GitHub PR link/);
   assert.deepEqual(parseStack('!stack add mozilla/PyFxA'), { sub: 'add', error: STACK_ADD });
   assert.deepEqual(parseStack('!stack Help'), { sub: 'help' });
+});
+
+test('parseStack: a team and a task start at once, with the named repos or the defaults', () => {
+  assert.deepEqual(parseStack('!stack pyfxa-team make the tests read env'), { sub: 'start', team: 'pyfxa-team', repos: undefined, task: 'make the tests read env' });
+  assert.deepEqual(parseStack('!stack pyfxa-team repos=PyFxA,mozilla/fxa fix\nthe build'), { sub: 'start', team: 'pyfxa-team', repos: ['PyFxA', 'mozilla/fxa'], task: 'fix\nthe build' });
+  assert.match(parseStack('!stack fxa repos=fxa').error, /Add the task after the repos/);
+});
+
+test('stackRepos: a slug or a name, any case, from the team\'s work repos; else which one is wrong', () => {
+  const team = { profile: 'pyfxa-team', defaults: ['mozilla/PyFxA'], repos: [{ slug: 'mozilla/fxa', role: 'work' }, { slug: 'mozilla/PyFxA', role: 'work' }, { slug: 'mozilla/docs', role: 'read' }] };
+  assert.deepEqual(stackRepos(team), { repos: ['mozilla/PyFxA'] });
+  assert.deepEqual(stackRepos(team, ['pyfxa', 'mozilla/FXA', 'PyFxA']), { repos: ['mozilla/PyFxA', 'mozilla/fxa'] });
+  assert.match(stackRepos(team, ['docs']).error, /`docs` is not one of pyfxa-team's repos: `mozilla\/fxa`, `mozilla\/PyFxA`/);
 });
 
 test('teamsFor: fxa and open teams for all, gated ones only for their people', () => {

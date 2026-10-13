@@ -12,7 +12,7 @@ import * as live from './live.js';
 import { pollEvery, reachable } from './poll.js';
 import * as unfurl from './unfurl.js';
 import { resolveProfile } from './profile.js';
-import { parseStack, stackHelp, teamsFor, stackTeamCard, stackRepoCard, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
+import { parseStack, stackHelp, teamsFor, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
 import { parseGates, gateAllows, loadMembers } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, LINE_BREAK, laterMessage } from './render.js';
 import * as cards from './cards.js';
@@ -809,6 +809,14 @@ async function stackCmd(s, text, m, client, note) {
   if (p.sub === 'checkout') { await stackCheckout(s, p, text, m, client, note, teams); return; }
   const team = p.team && teams.find((t) => t.profile === p.team);
   if (p.team && !team) { await note(`There is no team \`${p.team}\` for you. Teams: ${teams.map((t) => `\`${t.profile}\``).join(', ')}.`); return; }
+  // The pick and the tag in one message: the same choice the picker sets, then the tag's start path.
+  if (p.sub === 'start') {
+    const r = stackRepos(team, p.repos);
+    if (r.error) { await note(r.error); return; }
+    stackChoice.set(`${m.channel}:${m.thread_ts}`, { profile: team.profile, repos: r.repos, user: m.user });
+    await onMention({ event: { channel: m.channel, user: m.user, ts: m.ts, text: p.task, ...(m.thread_ts !== m.ts ? { thread_ts: m.thread_ts } : {}) }, client });
+    return;
+  }
   const { ts } = await client.chat.postMessage({ channel: m.channel, thread_ts: m.thread_ts, ...(team ? stackRepoCard(team) : stackTeamCard(teams)) });
   stackPicks.set(ts, { user: m.user, channel: m.channel, thread_ts: m.thread_ts, teams, team: team?.profile,
     repos: team ? (team.defaults?.length ? team.defaults : team.repos.filter((r) => r.role === 'work').slice(0, 1).map((r) => r.slug)) : null });
