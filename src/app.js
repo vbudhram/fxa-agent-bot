@@ -1746,6 +1746,7 @@ async function wrapTap(s, client, body, what, repo) {
 async function startWrap(s, client, what, user, msg, repo) {
   if (wrapping.has(s.key) || fresh(s.key)?.state === 'wrapping') return 'Already wrapping up. I will post here when it is done.';
   wrapping.add(s.key); setTimeout(() => wrapping.delete(s.key), 30_000);
+  unwrap.delete(s.key); // An earlier wrap's row must not come back on this wrap's refusal.
   const bm = fresh(s.key)?.buttons_msg, target = msg ?? (bm && { ...bm, blocks: bm.full ?? bm.blocks });
   if (target?.ts) {
     unwrap.set(s.key, { ts: target.ts, text: target.text, blocks: target.blocks, bm: fresh(s.key)?.buttons_msg ?? null });
