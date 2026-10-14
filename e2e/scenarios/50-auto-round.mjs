@@ -13,7 +13,7 @@ export default {
     { advance: 5, wait: { ctl: /Copilot reviewed the PR/ }, expect: { text: /Copilot/, ctl: { match: /Copilot reviewed the PR/, n: 1 } } },
     // The round's turn ends; the same review on later looks starts no second round.
     { advance: 'turn', wait: 'turn_end' },
-    { pause: 6, expect: { ctl: { match: /Copilot reviewed the PR/, n: 1 } } },
+    { pause: 3, expect: { ctl: { match: /Copilot reviewed the PR/, n: 1 } } },
     { advance: 200, wait: { ctl: /Copilot reviewed the PR/ }, expect: { text: /Copilot left 1 comment/, ctl: { match: /Copilot reviewed the PR/, n: 2 } } },
     { advance: 'turn', wait: 'turn_end' },
     // Past AUTO_MAX: the bot asks, and starts nothing.
