@@ -9,6 +9,10 @@ jobs:
   test:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ['1/3', '2/3', '3/3']
     steps:
       - uses: actions/checkout@v4
         with:
@@ -36,10 +40,12 @@ jobs:
         working-directory: fxa-agent-bot
       - run: npm run e2e
         working-directory: fxa-agent-bot
+        env:
+          E2E_SHARD: ${{ matrix.shard }}
       # A failed scenario's thread, bot log and controller calls, to read a flake after the run.
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-failed
+          name: e2e-failed-${{ strategy.job-index }}
           path: fxa-agent-bot/e2e/out/failed/
           if-no-files-found: ignore

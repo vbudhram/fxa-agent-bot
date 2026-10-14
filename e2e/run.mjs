@@ -70,6 +70,9 @@ if (nPersonas) {
   const files = readdirSync(join(HERE, SCEN)).filter((f) => f.endsWith('.mjs') && f.includes(filter)).sort();
   for (const file of files) { const sc = (await import(join(HERE, SCEN, file))).default; for (const vary of variants(sc)) jobs.push({ file, sc, vary }); }
 }
+// E2E_SHARD=i/n: CI's jobs each run every n-th scenario, so the e2e takes about 1/n of the time.
+const [shard, shards] = (process.env.E2E_SHARD ?? '1/1').split('/').map(Number);
+if (shards > 1) jobs.splice(0, jobs.length, ...jobs.filter((_, k) => k % shards === shard - 1));
 // A pool of PARALLEL runs at a time.
 const results = [];
 let next = 0;
