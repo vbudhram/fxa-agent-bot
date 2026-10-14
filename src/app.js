@@ -102,6 +102,7 @@ const START_DELAY_S = process.env.CODEX_ENABLED === '1' ? 10 : 0;
 const DESKTOP_EMAILS = new Map((process.env.DESKTOP_EMAILS || '').split(',').map((p) => p.trim().split(':')).filter(([u, e]) => /^[UW][A-Z0-9]+$/.test(u ?? '') && /^[^@\s]+@[^@\s]+$/.test(e ?? '')));
 // Codex needs a Codex login on the controller host; off unless CODEX_ENABLED=1.
 const CODEX = process.env.CODEX_ENABLED === '1';
+const CODEX_OFF = 'Codex is not available here yet, so Claude runs this.';
 // A read-only answer before any sandbox; QUICK_ANSWERS=0 turns it off.
 const QUICK = process.env.QUICK_ANSWERS !== '0';
 
@@ -168,7 +169,11 @@ async function onMention({ event, body, client }) {
   // Phones autocorrect "--" to an em or en dash.
   const flag = prompt.match(/(^|\s)(?:--|\u2014|\u2013)(codex|claude)(?=\s|$)/i);
   let runtime = flag ? flag[2].toLowerCase() : (process.env.AGENT_RUNTIME || 'claude');
-  if (!CODEX) runtime = 'claude'; // Codex is off: --codex is ignored
+  if (!CODEX && runtime === 'codex') {
+    runtime = 'claude';
+    // Said, not ignored: the person asked for Codex and gets Claude.
+    if (flag) client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: thread, text: CODEX_OFF }).catch(() => {});
+  }
   if (flag) prompt = prompt.replace(flag[0], ' ').trim();
   // The team profile: profile:<name>, a Jira key's prefix, or the channel. A resume keeps its own.
   const prof = resolveProfile({ text: prompt, channel: event.channel, user: event.user });
