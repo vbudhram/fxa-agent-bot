@@ -12,7 +12,7 @@ import * as live from './live.js';
 import { pollEvery, reachable, missed } from './poll.js';
 import * as unfurl from './unfurl.js';
 import { resolveProfile } from './profile.js';
-import { parseStack, stackHelp, teamsFor, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
+import { parseStack, teamAlias, stackHelp, teamsFor, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
 import { parseGates, gateAllows, loadMembers } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, LINE_BREAK, laterMessage } from './render.js';
 import * as cards from './cards.js';
@@ -848,7 +848,7 @@ async function stackPickOf(body, client) {
   const pick = stackPicks.get(body.message?.ts);
   if (pick && pick.user === body.user.id) return pick;
   await client.chat.postEphemeral({ channel: body.channel?.id, thread_ts: body.message?.thread_ts, user: body.user.id,
-    text: pick ? `Only <@${pick.user}> can use this picker.` : 'This picker is from before a restart. Send `!stack` again.' }).catch(() => {});
+    text: pick ? `Only <@${pick.user}> can use this picker.` : 'This picker is from before a restart. Send `!team` again.' }).catch(() => {});
   return null;
 }
 app.action('stack_team', async ({ ack, body, action, client }) => {
@@ -937,6 +937,7 @@ function treeArg(s, text) {
 // Bang commands, as in Claude Tag: @fxa-agent !status, !help, and so on. The
 // ones that change the session are for its owner.
 async function bang(s, text, m, client) {
+  text = teamAlias(text);
   const cmd = text.slice(1).split(/\s+/)[0].toLowerCase();
   const note = (t) => client.chat.postEphemeral({ channel: m.channel, thread_ts: m.thread_ts, user: m.user, text: t }).catch((e) => console.error('note', e.data?.error ?? e.message));
   if (!allowed(m.channel, m.user)) { await note("Sorry, you're not on the list of people who can use the agent here."); return; }

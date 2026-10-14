@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseStack, stackHelp, STACK_ADD, stackRepos, teamsFor, stackTeamCard, stackRepoCard, treeRows, valueRepo, prView, prPatch, followTargets, carryPrs } from '../src/stack.js';
+import { parseStack, teamAlias, stackHelp, STACK_ADD, stackRepos, teamsFor, stackTeamCard, stackRepoCard, treeRows, valueRepo, prView, prPatch, followTargets, carryPrs } from '../src/stack.js';
 
 test('parseStack: pick, a team, a checkout, a bad link', () => {
   assert.deepEqual(parseStack('!stack'), { sub: 'pick' });
@@ -9,6 +9,10 @@ test('parseStack: pick, a team, a checkout, a bad link', () => {
     { sub: 'checkout', url: 'https://github.com/mozilla/PyFxA/pull/12', slug: 'mozilla/PyFxA' });
   assert.match(parseStack('!stack checkout https://example.com/x').error, /GitHub PR link/);
   assert.deepEqual(parseStack('!stack add mozilla/PyFxA'), { sub: 'add', error: STACK_ADD });
+  // !team is the same command: each form parses as its !stack twin.
+  for (const t of ['!team', '!TEAM monitor', '!team pyfxa-team repos=PyFxA fix it', '!team checkout https://github.com/mozilla/fxa/pull/7'])
+    assert.deepEqual(parseStack(teamAlias(t)), parseStack(t.replace(/^!team/i, '!stack')));
+  assert.equal(teamAlias('!teammate hi'), '!teammate hi');
   assert.deepEqual(parseStack('!stack Help'), { sub: 'help' });
 });
 
@@ -86,6 +90,7 @@ test('followTargets and carryPrs: each repo PR; a move leaves the cards behind',
 
 test('stackHelp: the commands and the person\'s teams', () => {
   const t = stackHelp([{ profile: 'fxa' }, { profile: 'pyfxa-team' }]);
-  assert.match(t, /!stack checkout <PR link>/);
+  assert.match(t, /!team checkout <PR link>/);
+  assert.match(t, /`!stack` works too/);
   assert.match(t, /Your teams: `fxa`, `pyfxa-team`\./);
 });

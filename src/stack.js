@@ -9,7 +9,10 @@ const PR = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)\/?$/;
 
 // "!stack", "!stack <team>", "!stack <team> [repos=a,b] <task>", "!stack checkout <PR link>",
 // "!stack help". Slack wraps a link as <url> or <url|label>. "add" and "help" are words, not teams.
-export const STACK_ADD = '`!stack add` is not a command. To add a repo to this thread\'s session: `!stop` it if it runs, send `!stack`, pick the same team and tick the repo to add, then tag me. The session resumes with that repo too.';
+export const STACK_ADD = '`!team add` is not a command. To add a repo to this thread\'s session: `!stop` it if it runs, send `!team`, pick the same team and tick the repo to add, then tag me. The session resumes with that repo too.';
+// !team is the name people see; !stack, its first name, still works the same.
+export const teamAlias = (text) => String(text ?? '').replace(/^!team(?=\s|$)/i, '!stack');
+
 export function parseStack(text) {
   const [, sub = '', rest = ''] = String(text ?? '').trim().match(/^!stack(?:\s+(\S+))?(?:\s+([\s\S]*))?$/i) ?? [];
   const arg = rest.trim().split(/\s+/)[0];
@@ -21,19 +24,19 @@ export function parseStack(text) {
     const team = sub.toLowerCase(), rm = rest.trim().match(/^repos=(\S+)\s*/i);
     const repos = rm ? rm[1].split(',').filter(Boolean) : undefined, task = rest.trim().slice(rm ? rm[0].length : 0).trim();
     if (task) return { sub: 'start', team, repos, task };
-    return repos ? { sub: 'pick', team, error: `Add the task after the repos: \`!stack ${team} repos=${rm[1]} <task>\`.` } : { sub: 'pick', team };
+    return repos ? { sub: 'pick', team, error: `Add the task after the repos: \`!team ${team} repos=${rm[1]} <task>\`.` } : { sub: 'pick', team };
   }
   const url = arg.replace(/^<([^|>]+)(\|[^>]*)?>$/, '$1');
   const m = url.match(PR);
-  return m ? { sub: 'checkout', url: url.replace(/\/$/, ''), slug: m[1] } : { sub: 'checkout', error: 'Give me a GitHub PR link: `!stack checkout https://github.com/<owner>/<repo>/pull/<n>`.' };
+  return m ? { sub: 'checkout', url: url.replace(/\/$/, ''), slug: m[1] } : { sub: 'checkout', error: 'Give me a GitHub PR link: `!team checkout https://github.com/<owner>/<repo>/pull/<n>`.' };
 }
 
 // The !stack commands, and the teams this person may pick.
 export function stackHelp(teams) {
-  return ['`!stack`: pick a team and its repos for this thread. Your next tag starts the session with them.',
-    '`!stack <team>`: skip the team step.',
-    '`!stack <team> [repos=a,b] <task>`: start at once, with the team\'s default repos or the named ones.',
-    '`!stack checkout <PR link>`: continue a PR in this thread.',
+  return ['`!team`: pick a team and its repos for this thread. Your next tag starts the session with them. (`!stack` works too.)',
+    '`!team <team>`: skip the team step.',
+    '`!team <team> [repos=a,b] <task>`: start at once, with the team\'s default repos or the named ones.',
+    '`!team checkout <PR link>`: continue a PR in this thread.',
     `Your teams: ${teams.map((t) => `\`${t.profile}\``).join(', ')}.`].join('\n');
 }
 
