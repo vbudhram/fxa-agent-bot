@@ -484,11 +484,11 @@ export function draftSplit(buf) {
 
 // The runner's own tokens (proxy fxl_, gateway fxm_) and the other token shapes the watch page
 // masks: an agent that prints its environment must not post them to the thread.
-// A prefix inside a longer name (ghp_tokens_helper_test.js) is not a token.
-// GitHub and runner tokens are letters and digits after the prefix (github_pat_ adds _), so a
+// GitHub and runner tokens are 12+ letters and digits after the prefix (github_pat_ adds _), so a
 // file or variable name such as ghp_tokens_helper_test.js is not one; Slack and Anthropic keys have hyphens.
+// Any character may come before the prefix: JSON output escapes a newline as \n, a letter.
 export const maskSecrets = (t, mark = '<masked>') => String(t).replace(
-  /(?<![A-Za-z0-9])(?:(sk-ant-[a-z0-9]+-|xox[abpr]-|xapp-)[A-Za-z0-9_-]{8,}|(fxl_|fxm_|ghs_|ghp_|gho_|github_pat_)[A-Za-z0-9]{12,}[A-Za-z0-9_]*)/g,
+  /(?:(sk-ant-[a-z0-9]+-|xox[abpr]-|xapp-)[A-Za-z0-9_-]{8,}|(fxl_|fxm_|ghs_|ghp_|gho_|github_pat_)[A-Za-z0-9]{12,}[A-Za-z0-9_]*)/g,
   (_, a, b) => `${a ?? b}${mark}`);
 
 // An upload's text (a Diff's content, an agent's .patch or .diff file, the comment, the name and title) through maskSecrets.
