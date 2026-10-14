@@ -9,11 +9,12 @@ export default {
     { advance: 'setup' }, { advance: 'turn', wait: { buttons: /Open PR/ } },
     { A: { tap: 'Open PR' } },
     { advance: 'finish', wait: { text: /pull\/999999/ } },
-    { advance: 5, wait: { text: /Copilot/ }, expect: { ctl: { match: /Copilot reviewed the PR/, n: 1 } } },
+    // Wait for the round's controller call: its card can come first on a slow machine.
+    { advance: 5, wait: { ctl: /Copilot reviewed the PR/ }, expect: { text: /Copilot/, ctl: { match: /Copilot reviewed the PR/, n: 1 } } },
     // The round's turn ends; the same review on later looks starts no second round.
     { advance: 'turn', wait: 'turn_end' },
     { pause: 6, expect: { ctl: { match: /Copilot reviewed the PR/, n: 1 } } },
-    { advance: 200, wait: { text: /Copilot left 1 comment/ }, expect: { ctl: { match: /Copilot reviewed the PR/, n: 2 } } },
+    { advance: 200, wait: { ctl: /Copilot reviewed the PR/ }, expect: { text: /Copilot left 1 comment/, ctl: { match: /Copilot reviewed the PR/, n: 2 } } },
     { advance: 'turn', wait: 'turn_end' },
     // Past AUTO_MAX: the bot asks, and starts nothing.
     { advance: 200, wait: { buttons: /Run a round/ }, expect: { ctl: { match: /Copilot reviewed the PR/, n: 2 } } },

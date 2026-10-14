@@ -187,6 +187,9 @@ export async function runScenario(app, view, scenario) {
           () => `a turn to end (✅ or ⚠️, and no 👀 left${waiting().length ? `; waiting: #${waiting().map((m) => m.seq).join(', #')}` : ''})`);
       } else if (w.text) {
         await until(() => view.msgs.some((m) => m.bot && w.text.test(`${m.text} ${JSON.stringify(m.blocks ?? '')}`)), `a bot message matching ${w.text}`);
+      } else if (w.ctl) {
+        // A controller call that this step caused, such as a round's steer: a message can come first.
+        await until(() => ctlLines().slice(snap.ctl).some((l) => w.ctl.test(JSON.stringify(l))), `a controller call matching ${w.ctl}`);
       } else if (w.buttons) {
         await until(() => view.msgs.some((m) => m.bot && elements(m).some(({ e }) => w.buttons.test(label(e.text)))), `a button matching ${w.buttons}`);
       }
