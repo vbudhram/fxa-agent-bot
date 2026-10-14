@@ -9,7 +9,7 @@ import { quickFirst, askId, answerBlocks, findingsOf, stepRows, lastRow, doneLin
 import { installErrorLog } from './errors.js';
 import * as sessions from './sessions.js';
 import * as live from './live.js';
-import { pollEvery, reachable } from './poll.js';
+import { pollEvery, reachable, missed } from './poll.js';
 import * as unfurl from './unfurl.js';
 import { resolveProfile } from './profile.js';
 import { parseStack, stackHelp, teamsFor, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
@@ -603,7 +603,7 @@ async function crowded(client, s) {
 }
 const untaggedOwner = (m, s) => m.user === s.owner && STEER_MODE === 'mention' && botUserId && !String(m.text ?? '').includes(`<@${botUserId}`);
 const LIVE = ['queued', 'starting', 'active', 'wrapping'];
-app.message(async ({ message, client }) => {
+async function onMessage({ message, client }) {
   // Deleting the thread's first message closes its session, as in Claude Tag.
   // A parent with replies does not disappear; Slack turns it into a tombstone.
   const gone = message.subtype === 'message_deleted' ? message.deleted_ts
@@ -623,6 +623,9 @@ app.message(async ({ message, client }) => {
   // Starting (no session yet, or a resume of one): the reply joins the start. A tag's app_mention returns on the reservation.
   if (allowed(message.channel, message.user) && !strip(message.text).startsWith('!') && joinStarting(message, strip(message.text))) return;
   if (!s) return;
+  // The newest reply handled: a restart passes on the ones after it (replayMissed), and Slack's redelivery is dropped.
+  if (s.last_ts && message.ts <= s.last_ts) return;
+  sessions.patch(s.key, { last_ts: message.ts });
   let text = strip(message.text);
   if (!text && !message.files?.length) return;
   if (text.startsWith('!')) { await bang(s, text, { user: message.user, channel: message.channel, thread_ts: message.thread_ts, ts: message.ts }, client); return; }
@@ -708,7 +711,21 @@ app.message(async ({ message, client }) => {
     text = `${text || 'See the attached files.'}${note}`;
   }
   await steerAndAck(s, message.user === s.owner ? text : fromOther(text), client, message.user, message.ts);
-});
+}
+app.message(onMessage);
+
+// Replies sent while the bot restarted (a promote) never arrived: pass them on now, oldest first.
+async function replayMissed() {
+  const now = Date.now() / 1000;
+  for (const s of sessions.all()) {
+    if (!s.last_ts || !here(s) || ![...LIVE, 'answered', 'paused', 'pr_open'].includes(s.state)) continue;
+    const r = await app.client.conversations.replies({ channel: s.channel, ts: s.thread_ts, oldest: s.last_ts, limit: 200 }).catch(() => null);
+    for (const m of missed(s, r?.messages ?? [], now).filter((m) => !fromBot(m)).sort((a, b) => (a.ts < b.ts ? -1 : 1))) {
+      console.log(`replay ${s.key} ${m.ts}`);
+      await onMessage({ message: { ...m, channel: s.channel }, client: app.client }).catch((e) => console.error('replay', s.key, e.message));
+    }
+  }
+}
 
 async function steerEdit(message, client) {
   const m = message.message ?? {};
@@ -2522,4 +2539,5 @@ await app.start();
 if (GATES.size) { await loadMembers(app.client, GATES, gateMembers); setInterval(() => loadMembers(app.client, GATES, gateMembers), 600_000).unref(); }
 // A request waiting for capacity lived only in a timer; pick it up again.
 for (const s of sessions.all()) if (s.state === 'queued') launch(s.key, app.client).catch((e) => console.error('launch', s.key, e.message));
+replayMissed().catch((e) => console.error('replay', e.message));
 console.log('fxa-agent is running (Socket Mode)');

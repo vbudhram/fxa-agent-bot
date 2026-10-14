@@ -12,3 +12,14 @@ export function pollEvery(s, now, lastWorkAt) {
 // A session in a channel no longer allowed (another workspace, after a token change): the bot
 // cannot post there, so its loops leave it alone. Adding the channel back resumes it.
 export const reachable = (s, channels) => !channels.length || channels.includes(s.channel);
+
+// A reply sent while the bot restarted never arrives as an event. missed(s, messages, now): the
+// thread's replies newer than the last one the bot handled (last_ts) and at most REPLAY_S old, so a
+// long outage replays nothing stale. Slack ts strings have six decimals: string order is time order.
+export const REPLAY_S = 900;
+export function missed(s, messages, now) {
+  if (!s.last_ts) return [];
+  const floor = (now - REPLAY_S).toFixed(6), from = s.last_ts > floor ? s.last_ts : floor;
+  return messages.filter((m) => m.ts !== s.thread_ts && m.ts > from && m.user
+    && (!m.subtype || ['thread_broadcast', 'file_share'].includes(m.subtype)));
+}

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pollEvery, IDLE_MS, reachable } from '../src/poll.js';
+import { pollEvery, IDLE_MS, reachable, missed, REPLAY_S } from '../src/poll.js';
 
 test('a session waiting for its person polls slowly; one with work polls every 5 s', () => {
   const now = 1_000_000;
@@ -16,4 +16,18 @@ test('the loops leave alone a session in a channel no longer allowed', () => {
   assert.equal(reachable({ channel: 'C0C4RBW02Q1' }, ['CLV3KMZ8B', 'CD02L9Z1Q']), false);
   assert.equal(reachable({ channel: 'CLV3KMZ8B' }, ['CLV3KMZ8B', 'CD02L9Z1Q']), true);
   assert.equal(reachable({ channel: 'C1' }, []), true);
+});
+
+test('missed: replies after the last handled one, within the replay window', () => {
+  const s = { thread_ts: '1000.000000', last_ts: '1900.000000' };
+  const msgs = [
+    { ts: '1000.000000', user: 'U1' },                       // the thread's first message
+    { ts: '1900.000000', user: 'U1' },                       // already handled
+    { ts: '1950.000000', user: 'U1' },                       // missed
+    { ts: '1960.000000', user: 'U1', subtype: 'channel_join' },
+    { ts: '1970.000000', user: 'U1', subtype: 'file_share' }, // missed, with a file
+  ];
+  assert.deepEqual(missed(s, msgs, 2000).map((m) => m.ts), ['1950.000000', '1970.000000']);
+  assert.deepEqual(missed(s, msgs, 1950 + REPLAY_S).map((m) => m.ts), ['1970.000000'], 'older than the window: dropped');
+  assert.deepEqual(missed({ thread_ts: '1000.000000' }, msgs, 2000), [], 'no mark yet: nothing replays');
 });
