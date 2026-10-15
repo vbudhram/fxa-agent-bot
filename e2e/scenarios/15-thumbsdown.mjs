@@ -5,7 +5,7 @@ export default {
     { A: '@bot fix the blur' },
     { advance: 'setup' },
     { C: { react: '-1', on: 'status' }, expect: { noCtl: 'interrupt', noEphemeral: 'C' } },
-    { B: { react: '-1', on: 'status' } },
+    { B: { react: '-1', on: 'status' }, expect: { ephemeral: { to: 'B', match: /Muted, and I stopped the current reply/ } } },
     { advance: 'turn', wait: 'turn_end' },
   ],
   judge: 'C cannot stop the turn. What B\'s 👎 did is clear.',

@@ -1062,9 +1062,10 @@ app.event('reaction_added', async ({ event, client }) => {
   if (!s || !LIVE.includes(s.state) || !allowed(channel, event.user)) return;
   if (!STEER_ANYONE && event.user !== s.owner) return;
   sessions.patch(s.key, { muted: true, interrupted: true });
-  await ctl.interrupt(s.key).catch(() => {});
+  const stopped = await ctl.interrupt(s.key).then(() => true, (e) => { console.error('interrupt', s.key, e.stderr || e.message); return false; });
   await client.chat.postEphemeral({ channel, thread_ts: s.thread_ts, user: event.user,
-    text: 'Muted, and I stopped the current reply. `@fxa-agent !unmute` to hear from me again.' }).catch(() => {});
+    text: stopped ? 'Muted, and I stopped the current reply. `@fxa-agent !unmute` to hear from me again.'
+      : 'Muted. I could not stop the current reply, so it can still finish. `@fxa-agent !unmute` to hear from me again.' }).catch(() => {});
 });
 
 // A reply to a paused session continues it on a fresh runner, with its changes
