@@ -12,7 +12,7 @@ import * as live from './live.js';
 import { pollEvery, reachable, missed, replayMark } from './poll.js';
 import * as unfurl from './unfurl.js';
 import { resolveProfile } from './profile.js';
-import { parseStack, teamAlias, stackHelp, teamsFor, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
+import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
 import { parseGates, gateAllows, loadMembers } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, LINE_BREAK, laterMessage } from './render.js';
 import * as cards from './cards.js';
@@ -829,10 +829,8 @@ async function stackCmd(s, text, m, client, note) {
   if (p.error) { await note(p.error); return; }
   if (s && LIVE.includes(fresh(s.key)?.state)) { await note('This thread has a running session. Use a new thread, or `!stop` first: the next session here then starts with your pick.'); return; }
   // Someone else's pick would start a session that replaces the owner's, as their tag must not (onMention).
-  const cur = s && fresh(s.key);
-  if (cur && m.user !== cur.owner && ['paused', 'stopped', 'failed', 'pr_open'].includes(cur.state) && !['MERGED', 'CLOSED'].includes(cur.pr_seen?.state)) {
-    await note(`This is <@${cur.owner}>'s session. Only they can pick a stack here.`); return;
-  }
+  const refusal = pickerRefusal({ user: m.user, cur: s && fresh(s.key) });
+  if (refusal) { await note(refusal); return; }
   const teams = teamsFor(await ctl.profileList().catch((e) => { console.error('profile list', e.message); return []; }), m.user);
   if (!teams.length) { await note('I could not read the teams. Try again in a moment.'); return; }
   if (p.sub === 'help') { await note(stackHelp(teams)); return; }
@@ -851,17 +849,22 @@ async function stackCmd(s, text, m, client, note) {
   stackPicks.set(ts, { user: m.user, channel: m.channel, thread_ts: m.thread_ts, teams, team: team?.profile,
     repos: team ? (team.defaults?.length ? team.defaults : team.repos.filter((r) => r.role === 'work').slice(0, 1).map((r) => r.slug)) : null });
 }
-// A picker tap by anyone but its asker, or on a picker from before a restart, does nothing but say so.
-async function stackPickOf(body, client) {
-  const pick = stackPicks.get(body.message?.ts);
-  if (pick && pick.user === body.user.id) return pick;
-  await client.chat.postEphemeral({ channel: body.channel?.id, thread_ts: body.message?.thread_ts, user: body.user.id,
-    text: pick ? `Only <@${pick.user}> can use this picker.` : 'This picker is from before a restart. Send `!team` again.' }).catch(() => {});
-  return null;
+// A picker tap: anyone the thread allows may use it, and the last one to tap owns the pick, so
+// their next tag starts the session. A refusal, or a picker from before a restart, only says so.
+async function stackPickOf(body, client, profile) {
+  const pick = stackPicks.get(body.message?.ts), user = body.user.id;
+  const say = (text) => client.chat.postEphemeral({ channel: body.channel?.id, thread_ts: body.message?.thread_ts, user, text }).catch(() => {});
+  if (!pick) { await say('This picker is from before a restart. Send `!team` again.'); return null; }
+  if (!allowed(pick.channel, user)) return null;
+  const label = pick.teams.find((t) => t.profile === (profile ?? pick.team))?.label;
+  const refusal = pickerRefusal({ user, profile: profile ?? pick.team, label, cur: fresh(sessions.get(pick.channel, pick.thread_ts)?.key) });
+  if (refusal) { await say(refusal); return null; }
+  pick.user = user;
+  return pick;
 }
 app.action('stack_team', async ({ ack, body, action, client }) => {
   await ack();
-  const pick = await stackPickOf(body, client);
+  const pick = await stackPickOf(body, client, action.selected_option?.value);
   const team = pick?.teams.find((t) => t.profile === action.selected_option?.value);
   if (!team) return;
   Object.assign(pick, { team: team.profile, repos: team.defaults?.length ? team.defaults : team.repos.filter((r) => r.role === 'work').slice(0, 1).map((r) => r.slug) });

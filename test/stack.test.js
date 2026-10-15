@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseStack, teamAlias, stackHelp, STACK_ADD, stackRepos, teamsFor, stackTeamCard, stackRepoCard, treeRows, valueRepo, prView, prPatch, followTargets, carryPrs } from '../src/stack.js';
+import { parseStack, teamAlias, stackHelp, STACK_ADD, stackRepos, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, treeRows, valueRepo, prView, prPatch, followTargets, carryPrs } from '../src/stack.js';
 
 test('parseStack: pick, a team, a checkout, a bad link', () => {
   assert.deepEqual(parseStack('!stack'), { sub: 'pick' });
@@ -96,4 +96,15 @@ test('stackHelp: the commands and the person\'s teams', () => {
   assert.match(t, /!team checkout <PR link>/);
   assert.match(t, /`!stack` works too/);
   assert.match(t, /Your teams: `fxa`, `pyfxa-team`\./);
+});
+
+test('pickerRefusal: anyone may use an open picker, but not over someone else\'s session or for a team they are not on', () => {
+  const env = { PROFILE_USERS: 'monitor:U1' };
+  assert.equal(pickerRefusal({ user: 'U2', profile: 'fxa', env }), null, 'a second person in the thread may pick');
+  assert.equal(pickerRefusal({ user: 'U1', profile: 'monitor', env }), null);
+  assert.match(pickerRefusal({ user: 'U2', profile: 'monitor', label: 'Monitor Team', env }), /You are not on Monitor Team/);
+  const cur = { owner: 'U1', state: 'paused' };
+  assert.match(pickerRefusal({ user: 'U2', cur, env }), /<@U1>'s session/);
+  assert.equal(pickerRefusal({ user: 'U1', cur, env }), null, 'the owner may pick again');
+  assert.equal(pickerRefusal({ user: 'U2', cur: { ...cur, pr_seen: { state: 'MERGED' } }, env }), null, 'a merged PR frees the thread');
 });

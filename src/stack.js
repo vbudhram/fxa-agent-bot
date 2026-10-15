@@ -42,6 +42,16 @@ export function stackHelp(teams) {
     `Your teams: ${teams.map((t) => `\`${t.profile}\``).join(', ')}.`].join('\n');
 }
 
+// Why a person may not use an open !team picker, or null. Anyone in the thread may, as anyone may
+// tag here; the one who uses it owns the pick. Never over someone else's session, which their pick
+// would replace, and never for a team the person is not on.
+export function pickerRefusal({ user, profile, label, cur, env = process.env }) {
+  if (cur && user !== cur.owner && ['paused', 'stopped', 'failed', 'pr_open'].includes(cur.state) && !['MERGED', 'CLOSED'].includes(cur.pr_seen?.state))
+    return `This is <@${cur.owner}>'s session. Only they can pick a stack here.`;
+  if (profile && !mayStart(profile, user, env)) return `You are not on ${label || profile}. Pick another team.`;
+  return null;
+}
+
 // The teams a person may pick: every profile, less the gated ones they are not on.
 export function teamsFor(profiles, user, env = process.env) {
   return profiles.filter((p) => mayStart(p.profile, user, env));
