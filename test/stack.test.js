@@ -4,6 +4,9 @@ import { parseStack, teamAlias, stackHelp, STACK_ADD, stackRepos, teamsFor, stac
 
 test('parseStack: pick, a team, a checkout, a bad link', () => {
   assert.deepEqual(parseStack('!stack'), { sub: 'pick' });
+  assert.deepEqual(parseStack('!stack monitor --codex repos=a,b fix it'), { sub: 'start', team: 'monitor', repos: ['a', 'b'], task: '--codex fix it' }, 'a flag before repos= keeps both');
+  assert.deepEqual(parseStack('!stack monitor --codex fix it'), { sub: 'start', team: 'monitor', repos: undefined, task: '--codex fix it' });
+  assert.deepEqual(parseStack('!stack monitor --codex'), { sub: 'start', team: 'monitor', repos: undefined, task: '--codex' });
   assert.deepEqual(parseStack('!stack PyFxA-Team'), { sub: 'pick', team: 'pyfxa-team' });
   assert.deepEqual(parseStack('!stack checkout <https://github.com/mozilla/PyFxA/pull/12|PyFxA#12>'),
     { sub: 'checkout', url: 'https://github.com/mozilla/PyFxA/pull/12', slug: 'mozilla/PyFxA' });
