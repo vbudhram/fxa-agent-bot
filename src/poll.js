@@ -17,9 +17,12 @@ export const reachable = (s, channels) => !channels.length || channels.includes(
 // thread's replies newer than the last one the bot handled (last_ts) and at most REPLAY_S old, so a
 // long outage replays nothing stale. Slack ts strings have six decimals: string order is time order.
 export const REPLAY_S = 900;
-export function missed(s, messages, now) {
-  if (!s.last_ts) return [];
-  const floor = (now - REPLAY_S).toFixed(6), from = s.last_ts > floor ? s.last_ts : floor;
+// The mark to replay from: the last reply handled, else the session's start (after the message that
+// started it, so that one does not come again). A quick answer with neither replays nothing.
+export const replayMark = (s) => s.last_ts ?? (s.started_at ? (s.started_at / 1000).toFixed(6) : null);
+export function missed(s, messages, now, mark = replayMark(s)) {
+  if (!mark) return [];
+  const floor = (now - REPLAY_S).toFixed(6), from = mark > floor ? mark : floor;
   return messages.filter((m) => m.ts !== s.thread_ts && m.ts > from && m.user
     && (!m.subtype || ['thread_broadcast', 'file_share'].includes(m.subtype)));
 }

@@ -29,5 +29,7 @@ test('missed: replies after the last handled one, within the replay window', () 
   ];
   assert.deepEqual(missed(s, msgs, 2000).map((m) => m.ts), ['1950.000000', '1970.000000']);
   assert.deepEqual(missed(s, msgs, 1950 + REPLAY_S).map((m) => m.ts), ['1970.000000'], 'older than the window: dropped');
-  assert.deepEqual(missed({ thread_ts: '1000.000000' }, msgs, 2000), [], 'no mark yet: nothing replays');
+  assert.deepEqual(missed({ thread_ts: '1000.000000' }, msgs, 2000), [], 'no mark and no start: nothing replays');
+  assert.deepEqual(missed({ thread_ts: '1000.000000', started_at: 1960_000 }, msgs, 2000).map((m) => m.ts), ['1970.000000'], 'no reply handled yet: from the session start');
+  assert.deepEqual(missed({ ...s, last_ts: '1975.000000' }, msgs, 2000, s.last_ts).map((m) => m.ts), ['1950.000000', '1970.000000'], 'the mark from before a live reply moved last_ts');
 });

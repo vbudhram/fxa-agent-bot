@@ -9,7 +9,7 @@ import { quickFirst, askId, answerBlocks, findingsOf, stepRows, lastRow, doneLin
 import { installErrorLog } from './errors.js';
 import * as sessions from './sessions.js';
 import * as live from './live.js';
-import { pollEvery, reachable, missed } from './poll.js';
+import { pollEvery, reachable, missed, replayMark } from './poll.js';
 import * as unfurl from './unfurl.js';
 import { resolveProfile } from './profile.js';
 import { parseStack, teamAlias, stackHelp, teamsFor, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
@@ -608,7 +608,7 @@ async function crowded(client, s) {
 }
 const untaggedOwner = (m, s) => m.user === s.owner && STEER_MODE === 'mention' && botUserId && !String(m.text ?? '').includes(`<@${botUserId}`);
 const LIVE = ['queued', 'starting', 'active', 'wrapping'];
-async function onMessage({ message, client }) {
+async function onMessage({ message, client, replay = false }) {
   // Deleting the thread's first message closes its session, as in Claude Tag.
   // A parent with replies does not disappear; Slack turns it into a tombstone.
   const gone = message.subtype === 'message_deleted' ? message.deleted_ts
@@ -629,8 +629,11 @@ async function onMessage({ message, client }) {
   if (allowed(message.channel, message.user) && !strip(message.text).startsWith('!') && joinStarting(message, strip(message.text))) return;
   if (!s) return;
   // The newest reply handled: a restart passes on the ones after it (replayMissed), and Slack's redelivery is dropped.
-  if (s.last_ts && message.ts <= s.last_ts) return;
-  sessions.patch(s.key, { last_ts: message.ts });
+  // A replay can come after a newer live reply, so it skips the order check; HANDLED drops a second copy.
+  if (!replay && s.last_ts && message.ts <= s.last_ts) return;
+  if (HANDLED.has(`${message.channel}:${message.ts}`)) return;
+  HANDLED.add(`${message.channel}:${message.ts}`);
+  if (!s.last_ts || message.ts > s.last_ts) sessions.patch(s.key, { last_ts: message.ts });
   let text = strip(message.text);
   if (!text && !message.files?.length) return;
   if (text.startsWith('!')) { await bang(s, text, { user: message.user, channel: message.channel, thread_ts: message.thread_ts, ts: message.ts }, client); return; }
@@ -720,14 +723,19 @@ async function onMessage({ message, client }) {
 app.message(onMessage);
 
 // Replies sent while the bot restarted (a promote) never arrived: pass them on now, oldest first.
-async function replayMissed() {
+// marks: each session's replay mark from before the socket opened, so a live reply that comes
+// first does not move the mark past the missed ones.
+// ponytail: HANDLED keeps every reply ts for the process's life; a few per thread, fine until it is not.
+const HANDLED = new Set();
+async function replayMissed(marks) {
   const now = Date.now() / 1000;
   for (const s of sessions.all()) {
-    if (!s.last_ts || !here(s) || ![...LIVE, 'answered', 'paused', 'pr_open'].includes(s.state)) continue;
-    const r = await app.client.conversations.replies({ channel: s.channel, ts: s.thread_ts, oldest: s.last_ts, limit: 200 }).catch(() => null);
-    for (const m of missed(s, r?.messages ?? [], now).filter((m) => !fromBot(m)).sort((a, b) => (a.ts < b.ts ? -1 : 1))) {
+    const mark = marks.get(s.key);
+    if (!mark || !here(s) || ![...LIVE, 'answered', 'paused', 'pr_open'].includes(s.state)) continue;
+    const r = await app.client.conversations.replies({ channel: s.channel, ts: s.thread_ts, oldest: mark, limit: 200 }).catch(() => null);
+    for (const m of missed(s, r?.messages ?? [], now, mark).filter((m) => !fromBot(m)).sort((a, b) => (a.ts < b.ts ? -1 : 1))) {
       console.log(`replay ${s.key} ${m.ts}`);
-      await onMessage({ message: { ...m, channel: s.channel }, client: app.client }).catch((e) => console.error('replay', s.key, e.message));
+      await onMessage({ message: { ...m, channel: s.channel }, client: app.client, replay: true }).catch((e) => console.error('replay', s.key, e.message));
     }
   }
 }
@@ -2536,11 +2544,12 @@ setInterval(watchErrors, 120_000);
 // Watch streams run in their own process groups; end them with the bot.
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { for (const w of watchers.values()) w.stop(); process.exit(0); });
 
+const replayMarks = new Map(sessions.all().map((s) => [s.key, replayMark(s)]));
 await app.start();
 { const me = await app.client.auth.test(); teamId = me.team_id; botUserId = me.user_id; }
 // ponytail: polled, so a person who joins the source channel waits up to 10 minutes.
 if (GATES.size) { await loadMembers(app.client, GATES, gateMembers); setInterval(() => loadMembers(app.client, GATES, gateMembers), 600_000).unref(); }
 // A request waiting for capacity lived only in a timer; pick it up again.
 for (const s of sessions.all()) if (s.state === 'queued') launch(s.key, app.client).catch((e) => console.error('launch', s.key, e.message));
-replayMissed().catch((e) => console.error('replay', e.message));
+replayMissed(replayMarks).catch((e) => console.error('replay', e.message));
 console.log('fxa-agent is running (Socket Mode)');
