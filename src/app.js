@@ -1140,12 +1140,8 @@ async function idleSweep() {
 async function sweepOnce() {
   let paused = [], stopped = [];
   try { ({ paused, stopped } = await ctl.idleSweep()); } catch (e) { console.error('idle-sweep', e.stderr || e.message); return; }
-  // Paused a day with no reply: stopped, quietly. A reply still resumes it.
-  for (const key of stopped) {
-    if (fresh(key)?.state !== 'paused') continue;
-    sessions.patch(key, { state: 'stopped' });
-    await postEnd(key, 'Paused a day with no reply, so I closed it. A reply here still picks it up.', false);
-  }
+  // Paused a day with no reply: stopped, with no message. The pause already said a reply resumes it, and it still does.
+  for (const key of stopped) if (fresh(key)?.state === 'paused') sessions.patch(key, { state: 'stopped' });
   for (const key of paused) {
     const s = fresh(key);
     if (!s) continue;
