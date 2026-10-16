@@ -8,7 +8,7 @@ const pairs = (v) => new Map((v || '').split(',').map((p) => p.trim().split(':')
 export function resolveProfile({ text, channel, user, env = process.env }) {
   let profile;
   // Only as the first word: a pasted log or scope list ("openid profile:email") is not a flag.
-  const flag = text.trim().match(/^profile:(\S+)/i);
+  const flag = text.trim().match(/^(?:profile|team):(\S+)/i);
   if (flag) {
     profile = flag[1].toLowerCase();
     if (!/^[a-z0-9][a-z0-9-]*$/.test(profile)) return { error: `"${flag[1]}" is not a profile name.` };

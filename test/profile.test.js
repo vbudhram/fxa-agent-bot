@@ -9,6 +9,10 @@ test('the flag picks the profile and leaves the request', () => {
   assert.deepEqual(r('profile:monitor explain sign-in'), { profile: 'monitor', text: 'explain sign-in' });
 });
 
+test('team: works as the flag too, the name the !team picker uses', () => {
+  assert.deepEqual(r('team:monitor explain sign-in'), { profile: 'monitor', text: 'explain sign-in' });
+});
+
 test('a Jira key maps by prefix, then the channel, then the default', () => {
   assert.equal(r('look at MNTOR-5384').profile, 'monitor');
   assert.equal(r('explain sign-in', 'CMON').profile, 'monitor');
