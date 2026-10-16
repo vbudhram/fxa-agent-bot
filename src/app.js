@@ -11,7 +11,8 @@ import * as sessions from './sessions.js';
 import * as live from './live.js';
 import { pollEvery, reachable, missed, replayMark } from './poll.js';
 import * as unfurl from './unfurl.js';
-import { resolveProfile } from './profile.js';
+import { resolveProfile, mayStart } from './profile.js';
+import { teamChannels } from './teams.js';
 import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
 import { parseGates, gateAllows, loadMembers } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, LINE_BREAK, laterMessage } from './render.js';
@@ -92,8 +93,10 @@ const busy = new Set();    // sessions with a poll in flight
 // posts with a person's token are that person's, so a test can talk to the bot.
 // The dev bot is that app too: its own posts carry its bot user, a person's carry the person.
 const fromBot = (m) => Boolean(m?.bot_id) && !(process.env.DRIVER_APP_ID && m.app_id === process.env.DRIVER_APP_ID && botUserId && m.user && m.user !== botUserId);
-const allowed = (channel, user) => CHANNELS.includes(channel) && (USERS.includes('*') || USERS.includes(user)) && gateAllows(GATES, gateMembers, channel, user);
-const here = (s) => reachable(s, CHANNELS);
+// A team record's channels count as allowed ones: a new team's channel needs no restart.
+const inChannels = (channel) => CHANNELS.includes(channel) || teamChannels().includes(channel);
+const allowed = (channel, user) => inChannels(channel) && (USERS.includes('*') || USERS.includes(user)) && gateAllows(GATES, gateMembers, channel, user);
+const here = (s) => reachable(s, [...CHANNELS, ...teamChannels()]);
 
 // A pause to switch runtime or cancel. With Codex off there is nothing to switch, so start at once.
 const START_DELAY_S = process.env.CODEX_ENABLED === '1' ? 10 : 0;
@@ -157,7 +160,7 @@ async function onMention({ event, body, client }) {
   if (fromBot(event)) return; // another app's post, as for thread replies
   if (!allowed(event.channel, event.user)) {
     const runs = event.thread_ts && sessions.get(event.channel, event.thread_ts)?.owner;
-    if (CHANNELS.includes(event.channel)) await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts,
+    if (inChannels(event.channel)) await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts,
       text: `Sorry, you're not on the list of people who can use the agent here.${runs ? ` <@${runs}> runs this session: ask them.` : ''}` }).catch(() => {});
     return;
   }
@@ -179,7 +182,10 @@ async function onMention({ event, body, client }) {
   const prof = resolveProfile({ text: prompt, channel: event.channel, user: event.user });
   // !stack in this thread picked a team and its repos: the next tag starts with them (stackChoice).
   const choice = stackChoice.get(`${event.channel}:${thread}`);
-  if (choice?.user === event.user) { prof.profile = choice.profile; delete prof.error; }
+  // The pick is checked again: the person may have left the team since they picked it.
+  if (choice?.user === event.user) {
+    if (mayStart(choice.profile, event.user)) { prof.profile = choice.profile; delete prof.error; } else prof.error = `You can't start a ${choice.profile} session now.`;
+  }
   if (prof.error) { await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts, text: prof.error }).catch(() => {}); return; }
   prompt = prof.text;
   if (!prompt) return;
@@ -281,6 +287,8 @@ async function begin(key, client) {
   if (from?.prs) pr.prs = carryPrs(from.prs, Boolean(rest.moved_from));
   if (rest.moved_from) Object.assign(pr, { pr_card_ts: null, pr_card_head: null, pr_card_text: null });
   if (from?.trees) pr.trees = from.trees;
+  // The team the resumed session ran as: the new record replaces the old one in this thread, and launch checks it.
+  if (from) pr.resumed_profile = from.profile ?? from.resumed_profile;
   sessions.put({ key, ...rest, ...pr, cursor: 0, state: 'queued', started_at: Date.now() });
   pending.delete(key);
   stackChoice.delete(`${rest.channel}:${rest.thread_ts}`);
@@ -315,6 +323,10 @@ async function followUp(s, message, text, client, route = text) {
   if (own.length && !text) text = route = 'See the attached files.';
   // A !stack pick by this person: the follow-up starts that team's session, as a tag would.
   const choice = stackChoice.get(`${s.channel}:${s.thread_ts}`);
+  if (choice?.user === message.user && !mayStart(choice.profile, message.user)) {
+    await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: message.user, text: `You can't start a ${choice.profile} session now.` }).catch(() => {});
+    return;
+  }
   const pick = choice?.user === message.user ? { profile: choice.profile, repos: choice.repos, is_new: true } : {};
   // The owner with no await when the session has one, so the thread is reserved before anything else runs.
   pending.set(key, { prompt: text, request: text, route, owner: s.owner && allowed(s.channel, s.owner) ? s.owner : await ownerOf(client, s.channel, s.thread_ts, message.user), team: message.team ?? s.team, channel: s.channel,
@@ -432,6 +444,14 @@ function dropInbox(key, box) {
 async function launch(key, client, since = Date.now()) {
   const s = fresh(key);
   if (!s || s.state !== 'queued') { dropInbox(key, inboxes.get(key)); return; } // stopped or restarted while waiting
+  // Every start and resume meets here: access can change after a session began, so check it again.
+  const team = s.profile ?? s.resumed_profile;
+  if (team && !mayStart(team, s.owner)) {
+    sessions.patch(key, { state: 'stopped' });
+    dropInbox(key, inboxes.get(key));
+    await say(s, `<@${s.owner}> is not on the ${team} team now, so this session does not start.`).catch(() => {});
+    return;
+  }
   // The dashboard links each session to its thread; a lookup failure only drops the link.
   const linkP = app.client.chat.getPermalink({ channel: s.channel, message_ts: s.thread_ts }).then((r) => r.permalink, () => undefined);
   let inbox;
