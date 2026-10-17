@@ -37,7 +37,7 @@ test('stackRepos: a slug or a name, any case, from the team\'s work repos; else 
 
 test('teamsFor: fxa and open teams for all, gated ones only for their people', () => {
   const p = [{ profile: 'fxa' }, { profile: 'pyfxa-team' }, { profile: 'monitor' }];
-  const env = { PROFILE_OPEN: 'pyfxa-team', PROFILE_USERS: 'monitor:U1+U2' };
+  const env = { FXA_TEAMS_INDEX: '/nonexistent/index.json', PROFILE_OPEN: 'pyfxa-team', PROFILE_USERS: 'monitor:U1+U2' };
   assert.deepEqual(teamsFor(p, 'U9', env).map((t) => t.profile), ['fxa', 'pyfxa-team']);
   assert.deepEqual(teamsFor(p, 'U2', env).map((t) => t.profile), ['fxa', 'pyfxa-team', 'monitor']);
 });
@@ -102,7 +102,7 @@ test('stackHelp: the commands and the person\'s teams', () => {
 });
 
 test('pickerRefusal: anyone may use an open picker, but not over someone else\'s session or for a team they are not on', () => {
-  const env = { PROFILE_USERS: 'monitor:U1' };
+  const env = { FXA_TEAMS_INDEX: '/nonexistent/index.json', PROFILE_USERS: 'monitor:U1' };
   assert.equal(pickerRefusal({ user: 'U2', profile: 'fxa', env }), null, 'a second person in the thread may pick');
   assert.equal(pickerRefusal({ user: 'U1', profile: 'monitor', env }), null);
   assert.match(pickerRefusal({ user: 'U2', profile: 'monitor', label: 'Monitor Team', env }), /You are not on Monitor Team/);

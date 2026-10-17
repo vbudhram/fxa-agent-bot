@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolveProfile } from '../src/profile.js';
 
-const env = { PROFILE_USERS: 'monitor:UMON+UBOTH', PROFILE_JIRA: 'MNTOR:monitor', PROFILE_CHANNELS: 'CMON:monitor' };
+const env = { FXA_TEAMS_INDEX: '/nonexistent/index.json', PROFILE_USERS: 'monitor:UMON+UBOTH', PROFILE_JIRA: 'MNTOR:monitor', PROFILE_CHANNELS: 'CMON:monitor' };
 const r = (text, channel = 'CFXA', user = 'UMON') => resolveProfile({ text, channel, user, env });
 
 test('the flag picks the profile and leaves the request', () => {
@@ -35,7 +35,7 @@ test('fxa needs no listing, and a bad name is refused', () => {
 });
 
 test('PROFILE_OPEN: an open team needs no PROFILE_USERS entry', () => {
-  const env = { PROFILE_OPEN: 'pyfxa-team', PROFILE_USERS: 'monitor:U1' };
+  const env = { FXA_TEAMS_INDEX: '/nonexistent/index.json', PROFILE_OPEN: 'pyfxa-team', PROFILE_USERS: 'monitor:U1' };
   assert.equal(resolveProfile({ text: 'profile:pyfxa-team fix it', user: 'U9', env }).profile, 'pyfxa-team');
   assert.match(resolveProfile({ text: 'profile:monitor fix it', user: 'U9', env }).error, /can't start/);
 });
