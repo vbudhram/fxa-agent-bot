@@ -290,6 +290,11 @@ async function begin(key, client) {
   if (from?.trees) pr.trees = from.trees;
   // The team the resumed session ran as: the new record replaces the old one in this thread, and launch checks it.
   if (from) pr.resumed_profile = from.profile ?? from.resumed_profile;
+  // private (a private repo) on every way a session starts: a resume keeps it, else the team says, and no answer is private.
+  if (rest.private === undefined) {
+    const prof = rest.profile ?? pr.resumed_profile;
+    rest.private = from?.private ?? (prof && prof !== 'fxa' ? await ctl.profileInfo(prof).then((i) => i.private !== false).catch(() => true) : false);
+  }
   sessions.put({ key, ...rest, ...pr, cursor: 0, state: 'queued', started_at: Date.now() });
   pending.delete(key);
   stackChoice.delete(`${rest.channel}:${rest.thread_ts}`);

@@ -38,7 +38,7 @@ function runOne({ file, sc, vary, persona }) {
       PATH: process.env.PATH, HOME: home, TMPDIR: home, LANG: 'C.UTF-8',
       SLACK_BOT_TOKEN: 'xoxb-fake', SLACK_APP_TOKEN: 'xapp-fake',
       FXA_CTL: join(CTL, 'skills/fxa-ctl-dev/fake-ctl.sh'), FAKE_CTL_DIR: join(home, 'ctl'), FAKE_NOW_FILE: join(home, 'now'),
-      FAKE_CTL_LOG: join(out, 'ctl.jsonl'), FAKE_TICK: '0.2', FAKE_PROFILES: join(HERE, 'profiles.json'), PROFILE_OPEN: 'pyfxa-team',
+      FAKE_CTL_LOG: join(out, 'ctl.jsonl'), FAKE_TICK: '0.2', FAKE_PROFILES: join(HERE, 'profiles.json'), PROFILE_OPEN: 'pyfxa-team,secret',
       FXA_AGENT_STATE: join(home, 'sessions.json'), FXA_ERRORS_FILE: join(home, 'errors.jsonl'), FXA_DB: '/nonexistent/fxa.db',
       ERROR_DMS: '0', QUICK_ANSWERS: '0', FXA_FOLLOW_MS: '500', ALLOWED_CHANNELS: 'C_TEST',
       ALLOWED_USERS: people.filter(([, d]) => !/not allowed/.test(d)).map(([p]) => `U${p}`).join(','),
