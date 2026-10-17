@@ -26,7 +26,8 @@ export function parseStack(text) {
     const team = sub.toLowerCase(), rm = body.match(/^repos=(\S+)\s*/i);
     // A flag with no task is no task: the start strips the flag, and an empty prompt gets no reply.
     const repos = rm ? rm[1].split(',').filter(Boolean) : undefined, words = body.slice(rm ? rm[0].length : 0).trim();
-    if (words) return { sub: 'start', team, repos, task: `${fm ? `${fm[1]} ` : ''}${words}` };
+    // The flag can also come after repos= (the start strips it anywhere); only the other words make a task.
+    if (words.replace(/(^|\s)(?:--|\u2014|\u2013)(?:codex|claude)(?=\s|$)/i, ' ').trim()) return { sub: 'start', team, repos, task: `${fm ? `${fm[1]} ` : ''}${words}` };
     return repos ? { sub: 'pick', team, error: `Add the task after the repos: \`!team ${team} repos=${rm[1]} <task>\`.` } : { sub: 'pick', team };
   }
   const url = arg.replace(/^<([^|>]+)(\|[^>]*)?>$/, '$1');

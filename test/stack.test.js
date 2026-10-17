@@ -8,6 +8,8 @@ test('parseStack: pick, a team, a checkout, a bad link', () => {
   assert.deepEqual(parseStack('!stack monitor --codex fix it'), { sub: 'start', team: 'monitor', repos: undefined, task: '--codex fix it' });
   assert.deepEqual(parseStack('!stack monitor --codex'), { sub: 'pick', team: 'monitor' }, 'a flag alone is no task');
   assert.match(parseStack('!stack monitor --codex repos=a').error ?? '', /Add the task after the repos/, 'a flag and repos with no task say to add the task');
+  assert.match(parseStack('!stack monitor repos=a --codex').error ?? '', /Add the task after the repos/, 'so does a flag after the repos');
+  assert.deepEqual(parseStack('!stack monitor repos=a --codex fix it'), { sub: 'start', team: 'monitor', repos: ['a'], task: '--codex fix it' });
   assert.deepEqual(parseStack('!stack PyFxA-Team'), { sub: 'pick', team: 'pyfxa-team' });
   assert.deepEqual(parseStack('!stack checkout <https://github.com/mozilla/PyFxA/pull/12|PyFxA#12>'),
     { sub: 'checkout', url: 'https://github.com/mozilla/PyFxA/pull/12', slug: 'mozilla/PyFxA' });
