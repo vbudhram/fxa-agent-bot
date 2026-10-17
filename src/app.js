@@ -298,6 +298,15 @@ async function begin(key, client) {
     const prof = rest.profile ?? pr.resumed_profile;
     rest.private = from?.private ?? (prof && prof !== 'fxa' ? await ctl.profileInfo(prof).then((i) => i.private !== false).catch(() => true) : false);
   }
+  // A team with a private repo runs only in a private channel: its replies hold its code, not only its diffs.
+  if (rest.private && !(await codeAllowed({ private: true, channel: rest.channel }, client))) {
+    pending.delete(key);
+    const text = 'This team has a private repo, so its sessions run only in a private channel. Start it there.';
+    if (card_ts) await client.chat.update({ channel: rest.channel, ts: card_ts, text, blocks: [] }).catch(() => {});
+    else await client.chat.postMessage({ channel: rest.channel, thread_ts: rest.thread_ts, text }).catch(() => {});
+    for (const ts of [src_ts, ...(rest.acks ?? [])].filter(Boolean)) await client.reactions.remove({ channel: rest.channel, timestamp: ts, name: 'eyes' }).catch(() => {});
+    return;
+  }
   sessions.put({ key, ...rest, ...pr, cursor: 0, state: 'queued', started_at: Date.now() });
   pending.delete(key);
   stackChoice.delete(`${rest.channel}:${rest.thread_ts}`);
