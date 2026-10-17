@@ -227,7 +227,7 @@ async function onMention({ event, body, client }) {
   const tagFiles = fileRefs(event.files);
   // team: the workspace the person wrote from. In an org-wide install the bot's own team (auth.test) is not it.
   // A resume keeps its owner with no await, so the reply handler's resume of the same tag sees this reservation.
-  pending.set(key, { src_ts: event.ts, prompt, request: resume_from ? requestOf(cur) : prompt, owner: resume_from ? cur.owner : await ownerOf(client, event.channel, event.thread_ts, event.user), team: event.team ?? body?.team_id ?? cur?.team, channel: event.channel, thread_ts, resume_from, runtime, profile: resume_from ? undefined : prof.profile, read_only: resume_from ? cur.read_only : undefined, private: resume_from ? cur.private : undefined, deadline,
+  pending.set(key, { src_ts: event.ts, prompt, request: resume_from ? requestOf(cur) : prompt, owner: resume_from ? cur.owner : await ownerOf(client, event.channel, event.thread_ts, event.user, prof.profile), team: event.team ?? body?.team_id ?? cur?.team, channel: event.channel, thread_ts, resume_from, runtime, profile: resume_from ? undefined : prof.profile, read_only: resume_from ? cur.read_only : undefined, private: resume_from ? cur.private : undefined, deadline,
     ...(choice?.user === event.user ? { repos: choice.repos, ...(resume_from ? {} : { is_new: true }) } : {}),
     held_files: [...(resume_from ? cur.held_files ?? [] : []), ...tagFiles], own_files: tagFiles.length > 0 });
   if (event.files?.length > tagFiles.length)
@@ -322,9 +322,11 @@ async function begin(key, client) {
 const STARTERS = new Map();
 // The thread's starter owns it (a teammate often tags the bot for them), but only someone who may
 // use the bot here: a starter who may not, such as a guest from another team, leaves it to the asker.
-async function ownerOf(client, channel, thread_ts, asker) {
+// The owner may use the channel and start the session's team, or launch stops the session.
+const canOwn = (channel, u, team) => !!u && allowed(channel, u) && (!team || mayStart(team, u));
+async function ownerOf(client, channel, thread_ts, asker, team) {
   if (!thread_ts) return asker;
-  const ok = (u) => u && allowed(channel, u);
+  const ok = (u) => canOwn(channel, u, team);
   const prior = sessions.get(channel, thread_ts)?.owner;
   if (ok(prior)) return prior;
   const id = `${channel}:${thread_ts}`;
@@ -349,7 +351,7 @@ async function followUp(s, message, text, client, route = text) {
   }
   const pick = choice?.user === message.user ? { profile: choice.profile, repos: choice.repos, is_new: true } : {};
   // The owner with no await when the session has one, so the thread is reserved before anything else runs.
-  pending.set(key, { prompt: text, request: text, route, owner: s.owner && allowed(s.channel, s.owner) ? s.owner : await ownerOf(client, s.channel, s.thread_ts, message.user), team: message.team ?? s.team, channel: s.channel,
+  pending.set(key, { prompt: text, request: text, route, owner: canOwn(s.channel, s.owner, pick.profile) ? s.owner : await ownerOf(client, s.channel, s.thread_ts, message.user, pick.profile), team: message.team ?? s.team, channel: s.channel,
     thread_ts: s.thread_ts, runtime: 'claude', deadline: Date.now(), acks: message.acks ?? (message.ts ? [message.ts] : []), ...pick }); // a tap has no message to mark
   const ctx = await threadContext(client, { channel: s.channel, thread_ts: s.thread_ts, ts: message.ts, user: pending.get(key).owner }, { withBot: true, files: earlier });
   pending.set(key, { ...pending.get(key), prompt: text + ctx, held_files: [...earlier, ...own], own_files: own.length > 0 });
