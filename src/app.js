@@ -241,7 +241,9 @@ async function onMention({ event, body, client }) {
   // Another team's session: say which repos it can touch, and how, before it starts.
   if (prof.profile && prof.profile !== 'fxa' && !resume_from) {
     const info = await ctl.profileInfo(prof.profile).catch((e) => { console.error('profile_show', prof.profile, e.message); return null; });
-    if (info) await client.chat.postMessage({ channel: event.channel, thread_ts, ...teamCard(info) }).catch(() => {});
+    // The card names a private team's repos, so it waits for the channel check in begin() there.
+    if (info && (info.private === false || await codeAllowed({ private: true, channel: event.channel }, client)))
+      await client.chat.postMessage({ channel: event.channel, thread_ts, ...teamCard(info) }).catch(() => {});
     // Fail closed: with no answer, the session shows no PR buttons; the controller refuses a read-only push anyway.
     // private (a private repo): fail closed too, so its code stays out of public channels.
     if (pending.has(key)) pending.set(key, { ...pending.get(key), read_only: info ? info.read_only : true, private: info ? info.private !== false : true });
@@ -305,7 +307,7 @@ async function begin(key, client) {
     if (card_ts) await client.chat.update({ channel: rest.channel, ts: card_ts, text, blocks: [] }).catch(() => {});
     else await client.chat.postMessage({ channel: rest.channel, thread_ts: rest.thread_ts, text }).catch(() => {});
     for (const ts of [src_ts, ...(rest.acks ?? [])].filter(Boolean)) await client.reactions.remove({ channel: rest.channel, timestamp: ts, name: 'eyes' }).catch(() => {});
-    return;
+    return false;
   }
   sessions.put({ key, ...rest, ...pr, cursor: 0, state: 'queued', started_at: Date.now() });
   pending.delete(key);
@@ -952,7 +954,8 @@ async function checkout(s, p, text, m, client, note, teams) {
       resume_from: found.key, moved_from: found.key, runtime: old?.runtime || 'claude' });
     await say({ channel: m.channel, thread_ts: m.thread_ts }, `Moving ${p.url} here: its branch, its work so far, and its PR card. The old thread stops following it.`);
     const link = await client.chat.getPermalink({ channel: m.channel, message_ts: m.thread_ts }).then((r) => r.permalink, () => null);
-    await begin(key, client);
+    // A refused start (a private team in a public channel) moves nothing: the old thread keeps the PR.
+    if (await begin(key, client) === false) return;
     if (old) {
       sessions.patch(old.key, { pr_follow_done: true, moved_to: link || 'another thread',
         ...(old.prs ? { prs: Object.fromEntries(Object.entries(old.prs).map(([r, x]) => [r, { ...x, pr_follow_done: true }])) } : {}) });
