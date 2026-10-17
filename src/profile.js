@@ -30,11 +30,13 @@ export function resolveProfile({ text, channel, user, env = process.env }) {
   return { profile, text };
 }
 
-// The one gate for a team: fxa for everyone, a PROFILE_OPEN team for everyone allowed here,
-// else only the people PROFILE_USERS lists. The !stack picker (teamsFor) uses it too.
+// The one gate for a team: fxa for everyone; a team record by its own status and access alone, so an
+// env entry left from before the move cannot reopen a draft, disabled or gated team; a team with no
+// record by PROFILE_OPEN (everyone allowed here) or PROFILE_USERS. The !stack picker (teamsFor) uses it too.
 export function mayStart(profile, user, env = process.env) {
-  if (profile === 'fxa' || (env.PROFILE_OPEN || '').split(',').map((x) => x.trim()).includes(profile)) return true;
-  if ((pairs(env.PROFILE_USERS).get(profile) || '').split('+').includes(user)) return true;
+  if (profile === 'fxa') return true;
   const t = teamIndex(env)[profile];
-  return Boolean(t && t.status === 'active' && (t.open || t.users.includes(user)));
+  if (t) return t.status === 'active' && (t.open || t.users.includes(user));
+  if ((env.PROFILE_OPEN || '').split(',').map((x) => x.trim()).includes(profile)) return true;
+  return (pairs(env.PROFILE_USERS).get(profile) || '').split('+').includes(user);
 }

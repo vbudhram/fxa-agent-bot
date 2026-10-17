@@ -30,6 +30,17 @@ test('an open record lets anyone start it; a draft or disabled one lets nobody',
   assert.equal(mayStart('rusty', 'U0OTHER1', env), false);
 });
 
+test('a record decides alone: an old PROFILE_OPEN or PROFILE_USERS entry does not reopen it', () => {
+  const old = { ...env, PROFILE_OPEN: 'rusty', PROFILE_USERS: 'rusty:U0OTHER1' };
+  write({ rusty: rusty({ status: 'disabled' }) });
+  assert.equal(mayStart('rusty', 'U0OTHER1', old), false, 'a disabled record stays shut');
+  write({ rusty: rusty() });
+  assert.equal(mayStart('rusty', 'U0OTHER1', old), false, 'a gated record admits only its users');
+  assert.equal(mayStart('rusty', 'U0RUSTY1', old), true);
+  assert.equal(mayStart('norecord', 'U0OTHER1', { ...old, PROFILE_OPEN: 'norecord' }), true, 'a team with no record still opens through the env');
+  assert.equal(mayStart('norecord', 'U0OTHER1', { ...old, PROFILE_USERS: 'norecord:U0OTHER1' }), true);
+});
+
 test('a change to the index is read with no restart', () => {
   write({ rusty: rusty() });
   assert.equal(mayStart('rusty', 'U0NEW001', env), false);
