@@ -14,7 +14,7 @@ export function stepChecks(expect = {}, ctx) {
   const ctlStep = ctl.slice(snap.ctl);
   const cmdOf = (l) => l.argv.find((a) => !a.startsWith('--') && !/^(gce|fxa|pyfxa-team|monitor)$/.test(a));
   const ctlMatch = (l, c) => (!c.cmd || cmdOf(l) === c.cmd) && (!c.match || c.match.test(JSON.stringify([l.argv, l.files]).replace(/\\n/g, '\n').replace(/\\r/g, '\r')))
-    && (!c.thread || JSON.stringify(l.argv).includes(roots[c.thread]));
+    && (!c.thread || JSON.stringify(l.argv).includes(roots[c.thread])) && (!c.team || l.pipeline === c.team);
   const bad = [];
   const need = (ok, msg) => { if (!ok) bad.push(msg); };
   const norm = (x) => (typeof x === 'string' ? { cmd: x } : x);

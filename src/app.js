@@ -1065,7 +1065,9 @@ async function bang(s, text, m, client) {
     const cur = fresh(s.key), pr = cmd === 'restart' && cur.pr_url && !['MERGED', 'CLOSED'].includes(cur.pr_seen?.state) ? cur.pr_url : null;
     await say(s, pr ? `Starting a new conversation on ${pr}, at its head, with the thread so far as context. \`!new\` starts from main instead.`
       : 'Starting fresh from main, with the thread so far as context.');
-    pending.set(key, { prompt, request, owner: s.owner, team: s.team, channel: s.channel, thread_ts: s.thread_ts, ...(pr ? { resume_from: s.key, fresh: true } : { is_new: true }) });
+    // The thread's team, its read-only and private flags stay: !new starts over in the same team, not as FxA.
+    pending.set(key, { prompt, request, owner: s.owner, team: s.team, channel: s.channel, thread_ts: s.thread_ts, profile: s.profile ?? s.resumed_profile, read_only: s.read_only, private: s.private,
+      ...(pr ? { resume_from: s.key, fresh: true } : { is_new: true }) });
     await begin(key, client);
   } else if (cmd === 'usage') {
     const [sm, tu] = await Promise.all([ctl.cost(s.key), ctl.threadUsage(s.key)]);
