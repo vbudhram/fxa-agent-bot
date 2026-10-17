@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseGates, gateAllows, loadMembers, codeAllowed } from '../src/access.js';
+import { parseGates, gateAllows, loadMembers, codeAllowed, sessionTeam } from '../src/access.js';
 
 test('a gated channel allows only members of its source channel', () => {
   const gates = parseGates('CPUBLIC:CPRIVATE');
@@ -36,4 +36,15 @@ test('a team with a private repo posts code only in a private channel', async ()
   assert.equal(await codeAllowed({ private: true, channel: 'C1' }, client({ is_private: true })), true);
   assert.equal(await codeAllowed({ private: true, channel: 'C1' }, client({ is_private: false })), false);
   assert.equal(await codeAllowed({ private: true, channel: 'C1' }, client(new Error('missing_scope'))), false);
+});
+
+test('a pending resume or move belongs to the earlier session\'s team, not FxA', () => {
+  const rec = { a1: { key: 'a1', profile: 'monitor' }, a2: { key: 'a2', resume_from: 'a1' } };
+  const look = (k) => rec[k];
+  assert.equal(sessionTeam({ profile: 'pyfxa-team' }, look), 'pyfxa-team');
+  assert.equal(sessionTeam({ resume_from: 'a1' }, look), 'monitor');
+  assert.equal(sessionTeam({ moved_from: 'a1' }, look), 'monitor');
+  assert.equal(sessionTeam({ resume_from: 'a2' }, look), 'monitor', 'through a chain of resumes');
+  assert.equal(sessionTeam({ resumed_profile: 'monitor' }, look), 'monitor');
+  assert.equal(sessionTeam({}, look), 'fxa');
 });

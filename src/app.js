@@ -14,7 +14,7 @@ import * as unfurl from './unfurl.js';
 import { resolveProfile, mayStart } from './profile.js';
 import { teamChannels } from './teams.js';
 import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
-import { codeAllowed, PRIVATE_ONLY, parseGates, gateAllows, loadMembers } from './access.js';
+import { codeAllowed, PRIVATE_ONLY, sessionTeam, parseGates, gateAllows, loadMembers } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, LINE_BREAK, laterMessage } from './render.js';
 import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
@@ -98,7 +98,7 @@ const inChannels = (channel) => CHANNELS.includes(channel) || teamChannels().inc
 const allowed = (channel, user) => inChannels(channel) && (USERS.includes('*') || USERS.includes(user)) && gateAllows(GATES, gateMembers, channel, user);
 // The session's owner, or someone on its team: only they may steer, answer, interrupt or resume it. The channel gate
 // alone let a person allowed in the channel but not on a gated team drive that team's repos and secrets.
-const onTeam = (s, user) => user === s?.owner || mayStart(s?.profile ?? s?.resumed_profile ?? 'fxa', user);
+const onTeam = (s, user) => user === s?.owner || mayStart(sessionTeam(s, fresh), user);
 const here = (s) => reachable(s, [...CHANNELS, ...teamChannels()]);
 
 // A pause to switch runtime or cancel. With Codex off there is nothing to switch, so start at once.

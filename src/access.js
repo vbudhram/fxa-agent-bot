@@ -29,3 +29,16 @@ export async function codeAllowed(s, client) {
   if (!s.private) return true;
   return client.conversations.info({ channel: s.channel }).then((r) => Boolean(r.channel?.is_private)).catch(() => false);
 }
+
+// The team a session (or a pending start) belongs to. A pending resume or move has no profile of its
+// own yet, so its team is the earlier session's: falling back to FxA there let anyone in.
+export function sessionTeam(s, lookup) {
+  for (let cur = s, n = 0; cur && n < 5; n++) {
+    const p = cur.profile ?? cur.resumed_profile;
+    if (p) return p;
+    const from = cur.resume_from ?? cur.moved_from;
+    if (!from) break;
+    cur = lookup(from);
+  }
+  return 'fxa';
+}
