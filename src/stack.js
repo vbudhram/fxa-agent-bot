@@ -24,8 +24,9 @@ export function parseStack(text) {
     // A runtime flag (--codex, --claude) may come before repos=: it stays with the task, where the start reads it.
     const fm = rest.trim().match(/^((?:--|\u2014|\u2013)(?:codex|claude))(?=\s|$)\s*/i), body = rest.trim().slice(fm ? fm[0].length : 0);
     const team = sub.toLowerCase(), rm = body.match(/^repos=(\S+)\s*/i);
-    const repos = rm ? rm[1].split(',').filter(Boolean) : undefined, task = `${fm ? `${fm[1]} ` : ''}${body.slice(rm ? rm[0].length : 0).trim()}`.trim();
-    if (task) return { sub: 'start', team, repos, task };
+    // A flag with no task is no task: the start strips the flag, and an empty prompt gets no reply.
+    const repos = rm ? rm[1].split(',').filter(Boolean) : undefined, words = body.slice(rm ? rm[0].length : 0).trim();
+    if (words) return { sub: 'start', team, repos, task: `${fm ? `${fm[1]} ` : ''}${words}` };
     return repos ? { sub: 'pick', team, error: `Add the task after the repos: \`!team ${team} repos=${rm[1]} <task>\`.` } : { sub: 'pick', team };
   }
   const url = arg.replace(/^<([^|>]+)(\|[^>]*)?>$/, '$1');
