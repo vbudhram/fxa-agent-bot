@@ -21,3 +21,11 @@ export async function loadMembers(client, gates, members) {
     }
   }
 }
+
+// A team with a private repo posts code and files only in a private channel. The bot reads only
+// private channels (groups:read), so a public channel's lookup fails, and that counts as public.
+export const PRIVATE_ONLY = 'This team has a private repo, so I post its code and files only in a private channel.';
+export async function codeAllowed(s, client) {
+  if (!s.private) return true;
+  return client.conversations.info({ channel: s.channel }).then((r) => Boolean(r.channel?.is_private)).catch(() => false);
+}

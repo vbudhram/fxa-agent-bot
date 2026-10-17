@@ -14,7 +14,7 @@ import * as unfurl from './unfurl.js';
 import { resolveProfile, mayStart } from './profile.js';
 import { teamChannels } from './teams.js';
 import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
-import { parseGates, gateAllows, loadMembers } from './access.js';
+import { codeAllowed, PRIVATE_ONLY, parseGates, gateAllows, loadMembers } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, LINE_BREAK, laterMessage } from './render.js';
 import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
@@ -224,7 +224,7 @@ async function onMention({ event, body, client }) {
   const tagFiles = fileRefs(event.files);
   // team: the workspace the person wrote from. In an org-wide install the bot's own team (auth.test) is not it.
   // A resume keeps its owner with no await, so the reply handler's resume of the same tag sees this reservation.
-  pending.set(key, { src_ts: event.ts, prompt, request: resume_from ? requestOf(cur) : prompt, owner: resume_from ? cur.owner : await ownerOf(client, event.channel, event.thread_ts, event.user), team: event.team ?? body?.team_id ?? cur?.team, channel: event.channel, thread_ts, resume_from, runtime, profile: resume_from ? undefined : prof.profile, read_only: resume_from ? cur.read_only : undefined, deadline,
+  pending.set(key, { src_ts: event.ts, prompt, request: resume_from ? requestOf(cur) : prompt, owner: resume_from ? cur.owner : await ownerOf(client, event.channel, event.thread_ts, event.user), team: event.team ?? body?.team_id ?? cur?.team, channel: event.channel, thread_ts, resume_from, runtime, profile: resume_from ? undefined : prof.profile, read_only: resume_from ? cur.read_only : undefined, private: resume_from ? cur.private : undefined, deadline,
     ...(choice?.user === event.user ? { repos: choice.repos, ...(resume_from ? {} : { is_new: true }) } : {}),
     held_files: [...(resume_from ? cur.held_files ?? [] : []), ...tagFiles], own_files: tagFiles.length > 0 });
   if (event.files?.length > tagFiles.length)
@@ -240,7 +240,8 @@ async function onMention({ event, body, client }) {
     const info = await ctl.profileInfo(prof.profile).catch((e) => { console.error('profile_show', prof.profile, e.message); return null; });
     if (info) await client.chat.postMessage({ channel: event.channel, thread_ts, ...teamCard(info) }).catch(() => {});
     // Fail closed: with no answer, the session shows no PR buttons; the controller refuses a read-only push anyway.
-    if (pending.has(key)) pending.set(key, { ...pending.get(key), read_only: info ? info.read_only : true });
+    // private (a private repo): fail closed too, so its code stays out of public channels.
+    if (pending.has(key)) pending.set(key, { ...pending.get(key), read_only: info ? info.read_only : true, private: info ? info.private !== false : true });
   }
   // user: whose lines are labelled "owner", the session's owner, not whoever tagged.
   const earlier = [];
@@ -1066,6 +1067,7 @@ async function bang(s, text, m, client) {
     await note([summaryLine(sm) || 'No usage recorded yet.', threadLine(tu), 'I pause this session when it reaches its usage limit.'].filter(Boolean).join('\n'));
   } else if (cmd === 'watch') {
     if (!process.env.DESKTOP_GATEWAY) { await note('Watching needs the gateway (DESKTOP_GATEWAY), and this bot has none.'); return; }
+    if (s.private) { await note('This team has a private repo, so its sessions cannot be watched.'); return; }
     await note(`<${watchUrl(process.env.DESKTOP_GATEWAY, s.channel, s.thread_ts)}|Watch the agent> in this thread: my output, read-only, updated every 5 s. The link stays the same after a pause.`);
   } else if (cmd === 'desktop') {
     if (ownerOnly()) return;
@@ -1736,6 +1738,7 @@ ownerAction('diff', async (s, client, action, body) => {
 });
 // repo: one repo of a team stack; without it, every repo (each under its own name).
 async function postDiff(s, client, repo) {
+  if (!(await codeAllowed(s, client))) { await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: PRIVATE_ONLY }); return; }
   const d = await ctl.diff(s.key, repo);
   if (!d.trim()) { await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: `No changes yet${repo ? ` in ${repo}` : ''}.` }); return; }
   const files = (d.match(/^diff --git /gm) ?? []).length;
@@ -1999,6 +2002,7 @@ async function fail(client, s, e) {
 async function deliverMedia(key) {
   const s = fresh(key);
   try {
+    if (!(await codeAllowed(s, app.client))) return;
     const sent = new Set(s.media_sent ?? []);
     const { dir } = await ctl.media(key);
     try {

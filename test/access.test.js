@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseGates, gateAllows, loadMembers } from '../src/access.js';
+import { parseGates, gateAllows, loadMembers, codeAllowed } from '../src/access.js';
 
 test('a gated channel allows only members of its source channel', () => {
   const gates = parseGates('CPUBLIC:CPRIVATE');
@@ -28,4 +28,12 @@ test('members load across pages, and a failed load keeps the last list', async (
   const down = { conversations: { members: async () => { throw new Error('ratelimited'); } } };
   await loadMembers(down, parseGates('CPUBLIC:CPRIVATE'), members);
   assert.deepEqual([...members.get('CPRIVATE')], ['U1', 'U2']);
+});
+
+test('a team with a private repo posts code only in a private channel', async () => {
+  const client = (info) => ({ conversations: { info: async () => { if (info instanceof Error) throw info; return { channel: info }; } } });
+  assert.equal(await codeAllowed({ private: false, channel: 'C1' }, client(new Error('missing_scope'))), true);
+  assert.equal(await codeAllowed({ private: true, channel: 'C1' }, client({ is_private: true })), true);
+  assert.equal(await codeAllowed({ private: true, channel: 'C1' }, client({ is_private: false })), false);
+  assert.equal(await codeAllowed({ private: true, channel: 'C1' }, client(new Error('missing_scope'))), false);
 });
