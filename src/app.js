@@ -2627,6 +2627,9 @@ setInterval(watchErrors, 120_000);
 async function routineTick() {
   const { runs, skips } = await ctl.routineTick(ROUTINES_ENV);
   for (const k of skips.filter((x) => x.post)) {
+    // A skip names the routine in its channel: the same private-channel rule as a run (D8). Not posted, not marked.
+    const why = await channelRefusal(app.client, k);
+    if (why) { console.error('routine', `run ${k.run}: the skip is not posted: ${why}`); continue; }
     // A skip counts as posted only once its post works, so a failed post does not mute the next one.
     const ok = await app.client.chat.postMessage({ channel: k.channel, text: routineSkip(k) }).then(() => true, (e) => { console.error('routine', `run ${k.run}: the skip post failed: ${e.data?.error ?? e.message}`); return false; });
     if (ok) await ctl.routinePosted(k.run).catch((e) => console.error('routine', `run ${k.run} posted`, e.stderr || e.message));
