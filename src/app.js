@@ -166,8 +166,9 @@ function joinStarting(message, text) {
 async function onMention({ event, body, client }) {
   if (fromBot(event)) return; // another app's post, as for thread replies
   // A routine's thread: a tag gets a hint for that person only, and never steers or starts anything (D24).
+  // The PR hint only while a PR may come, or when one opened; else the thread holds a report.
   const rt = event.thread_ts && sessions.get(event.channel, event.thread_ts)?.routine;
-  if (rt) { await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts, text: routineHint(rt.mode) }).catch(() => {}); return; }
+  if (rt) { await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts, text: routineHint(rt.mode !== 'report' && (!rt.ended || rt.ended === 'ok') ? 'pr' : 'report') }).catch(() => {}); return; }
   if (!allowed(event.channel, event.user)) {
     const runs = event.thread_ts && sessions.get(event.channel, event.thread_ts)?.owner;
     if (inChannels(event.channel)) await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts,
