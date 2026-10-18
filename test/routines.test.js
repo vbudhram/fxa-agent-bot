@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { routineStart, routineEnd, routineSkip, routineHint, routineReport, dateToken } from '../src/render.js';
+import { routineStart, routineEnd, routineEndLine, routineSkip, routineHint, routineReport, dateToken } from '../src/render.js';
 
 const R = { name: 'Code review', team: 'fxa', template: 'code-review', repos: ['mozilla/fxa'], branch: 'main', mode: 'pr+notes', since: 1792414800 };
 const ENDS = [{ state: 'ok', pr: 'https://github.com/mozilla/fxa/pull/12', next: 1792501200 }, { state: 'report', post: true, next: 1792501200 },
   { state: 'report', post: false, next: 1792501200 }, { state: 'nochange', next: 1792501200 }, { state: 'failed', reason: 'the handoff check did not pass', next: 1792501200 },
   { state: 'failed', cost: true, next: 1792501200 }, { state: 'stopped', next: 1792501200 }];
-const ALL = [routineStart(R), routineStart({ ...R, since: null }), ...ENDS.map((e) => routineEnd(R, e)),
+const ALL = [routineStart(R), routineStart({ ...R, since: null }), ...ENDS.map((e) => routineEnd(R, e)), ...ENDS.map((e) => routineEndLine(R, e)),
   routineSkip({ name: 'Code review', reason: 'the team reached its daily spend cap', next: 1792501200 }), routineHint('report'), routineHint('pr')];
 
 test('routine texts show no dollar amount', () => { for (const t of ALL) assert.ok(!t.includes('$'), t); });
@@ -95,4 +95,9 @@ test('a done that did not answer, or changed nothing, says so and never claims t
   assert.match(store, /^Code review: I could not record this run's result, so I post nothing from it\./);
   assert.match(ended, /^Code review: this run had ended already\./);
   for (const t of [store, ended]) { assert.ok(!/holds data/.test(t), t); assert.ok(!t.includes('$'), t); }
+});
+
+test('the start message ends as one line with the result word, and points to the reply (D22)', () => {
+  assert.deepEqual(['ok', 'report', 'nochange', 'failed', 'stopped', 'store'].map((state) => routineEndLine(R, { state })),
+    ['done', 'done', 'no change', 'failed', 'stopped', 'not recorded'].map((w) => `Code review: ${w}. See the reply in this thread.`));
 });

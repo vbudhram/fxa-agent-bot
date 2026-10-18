@@ -642,6 +642,9 @@ export function routineEnd(r, end) {
   if (end.cost) return `${n} stopped at its cost limit.${next}`;
   return `${n} failed: ${esc(end.reason || 'the run did not finish')}. A team admin can see the log in the dashboard: ${historyLink(r.team)}.${next}`;
 }
+// The start message's end state, one line (D22): the full end text goes once, as the broadcast reply.
+const END_WORD = { ok: 'done', report: 'done', nochange: 'no change', stopped: 'stopped', ended: 'ended', store: 'not recorded' };
+export const routineEndLine = (r, end) => `${esc(r.name)}: ${END_WORD[end.state] ?? 'failed'}. See the reply in this thread.`;
 export const routineSkip = (s) => `${esc(s.name ?? 'A routine')} skipped: ${esc(s.reason)}.${nextRun(s.next)}`;
 export const routineHint = (mode) => (mode === 'report'
   ? 'This thread holds a routine\'s report. To work on a finding, tag me in a new thread and paste the finding.'

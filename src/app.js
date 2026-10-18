@@ -20,7 +20,7 @@ import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel
 import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
-import { routineStart, routineSkip, routineEnd, routineReport, routineHint } from './render.js';
+import { routineStart, routineSkip, routineEnd, routineEndLine, routineReport, routineHint } from './render.js';
 import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT, fileRefs, distinctFiles, maskSecrets, maskUpload } from './render.js';
 
 const { App } = bolt;
@@ -2645,7 +2645,7 @@ async function refuseRoutine(r, reason) {
 const lastLine = (t) => String(t ?? '').trim().split('\n').pop().replace(/^ERROR: /, '').slice(0, 300);
 // The end of a routine run (D12, D22). done comes first, before the session stops, so the report and the cost land
 // on a live row (the tick's reconcile waits 10 min after a session ends, as a backstop). Then the session stops, the
-// report posts when ctl's scan allows it, the start message is edited, and the same text goes as a broadcast reply.
+// report posts when ctl's scan allows it, the start message becomes a one-line state, and the full end text goes once, as a broadcast reply.
 // end: {state: ok|report|nochange|failed|stopped, pr, reason, report, cost}
 async function endRoutine(key, end) {
   const s = fresh(key), r = s?.routine;
@@ -2668,7 +2668,7 @@ async function endRoutine(key, end) {
     await (rep.snippet ? app.client.filesUploadV2({ channel_id: s.channel, thread_ts: r.start_ts, content: rep.text, filename: 'report.md', title: `${r.name} report` })
       : app.client.chat.postMessage({ ...at, text: rep.text })).catch((e) => console.error('routine', key, `report post: ${e.data?.error ?? e.message}`));
   }
-  await app.client.chat.update({ channel: s.channel, ts: r.start_ts, text }).catch((e) => console.error('routine', key, `start edit: ${e.data?.error ?? e.message}`));
+  await app.client.chat.update({ channel: s.channel, ts: r.start_ts, text: routineEndLine(r, shown) }).catch((e) => console.error('routine', key, `start edit: ${e.data?.error ?? e.message}`));
   await app.client.chat.postMessage({ ...at, text, reply_broadcast: true }).catch((e) => console.error('routine', key, `end post: ${e.data?.error ?? e.message}`));
 }
 // A routine run's events, as a state machine (D12, D19). Report mode never ships. A pr mode ships only a ready turn

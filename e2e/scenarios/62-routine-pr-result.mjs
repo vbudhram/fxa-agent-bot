@@ -7,7 +7,8 @@ export default {
     { advance: 'setup' },
     { advance: 'turn', wait: { text: /Wrapping up/ }, expect: { ctl: { cmd: 'finish', n: 1 }, noCtl: 'stop' } },
     { advance: 'finish', wait: { text: /^Code review: draft PR/ }, expect: {
-      edited: { match: /^Code review: draft PR <https:\/\/github\.com\/mozilla\/fxa\/pull\/999999\|#999999>\. The findings it did not fix are in the PR description\. Next run: <!date\^\d+\^/ },
+      edited: { match: /^Code review: done\. See the reply in this thread\.$/ },
+      postCount: { match: /^Code review: draft PR <https:\/\/github\.com\/mozilla\/fxa\/pull\/999999\|#999999>\. The findings it did not fix are in the PR description\. Next run: <!date\^\d+\^/, n: 1 },
       calls: { method: 'chat.postMessage', match: /"reply_broadcast":true.*draft PR|draft PR.*"reply_broadcast":true/, n: 1 },
       ctl: { cmd: 'routine', match: /"done","41","--state","ok","--session","agent-[a-z0-9]+","--pr","https:\/\/github\.com\/mozilla\/fxa\/pull\/999999"/, n: 1 },
       ctlOrder: [/"finish"/, /"routine","done","41"/, /^\["stop"/] } },
