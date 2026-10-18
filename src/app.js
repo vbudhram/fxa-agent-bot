@@ -1213,6 +1213,8 @@ async function sweepOnce() {
   for (const key of paused) {
     const s = fresh(key);
     if (!s) continue;
+    // A routine run that went idle has no one to resume it: it ends, with no pause text.
+    if (s.routine) { await endRoutine(key, { state: 'failed', reason: 'the session went idle with no result' }); continue; }
     stopWatch(key);
     await updateStatus(key, 'paused', { busy: false }).catch(() => {});
     sessions.patch(key, { state: 'paused' });
@@ -2193,6 +2195,8 @@ async function mindLifetime(key, state) {
   const s = fresh(key);
   if (state !== 'active' || !s.started_at) return;
   const min = (Date.now() - s.started_at) / 60_000;
+  // A routine run stops at the limit: nobody can reply to continue a pause (D14).
+  if (s.routine) { if (min >= PAUSE_AT_MIN) await endRoutine(key, { state: 'failed', reason: `the run reached the ${RUNNER_MIN}-minute limit of its sandbox` }); return; }
   const say = (text) => app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text });
   if (min >= PAUSE_AT_MIN && !s.life_paused) {
     // A pause saves the work and the conversation, so a reply continues on a new runner.
@@ -2228,6 +2232,7 @@ async function mindCost(key, spent) {
   const s = fresh(key);
   if (!s) return;
   sessions.patch(key, { cost: spent });
+  if (s.routine) { if (spent >= capOf(s)) await endRoutine(key, { state: 'failed', reason: 'stopped at its cost limit', cost: true }); return; }
   if (spent >= capOf(s) && s.state === 'active' && !s.cost_paused) {
     sessions.patch(key, { cost_paused: true });
     if (!(await pauseNow(key, 'cost-pause'))) return;
@@ -2311,6 +2316,8 @@ async function pollOne(key) {
     // Each event posts on its own: ctl has already moved the cursor past this
     // batch, so a failed post is logged and skipped, never re-sent every 5 s.
     for (const [i, ev] of events.entries()) {
+      // A routine run's events end the run; none posts as a turn (its report waits for ctl's scan).
+      if (s.routine) { await routineEvent(key, ev); continue; }
       // The PR outlives the session's state: the thread follows it from here.
       // A team stack's PR names its repo, and its follow state is that repo's (prPatch). pr_url at
       // the top too: "this thread has a PR" reads it.
@@ -2344,6 +2351,9 @@ async function pollOne(key) {
     if (!fresh(key)) return; // restarted or replaced while this poll ran
     // A stop made while this poll ran wins over the state the poll read.
     sessions.patch(key, { cursor, ...(fresh(key).state === 'stopped' ? {} : { state }) });
+    // Stopped by a team admin (routine stop), or ended some other way before a result: the run ends here too.
+    if (fresh(key).routine && !fresh(key).routine.ended && ['stopped', 'failed', 'paused'].includes(state))
+      await endRoutine(key, state === 'stopped' ? { state: 'stopped' } : { state: 'failed', reason: `the session ${state} before it had a result` });
     if (fresh(key).state === 'active' && fresh(key).held_files?.length) deliverHeld(key).catch((e) => console.error('held', key, e.message));
     // Stopped or paused while this poll ran: its state is stale, so it must not
     // open a watch or a new status line that nothing would close.
@@ -2351,6 +2361,8 @@ async function pollOne(key) {
     await mindLifetime(key, state);
     const last = events.findLast((e) => typeof e.cost === 'number');
     if (last) await mindCost(key, last.cost);
+    // A limit that stopped or paused the session: no new status line or watch for it.
+    if (DONE.includes(fresh(key)?.state)) { stopWatch(key); return; }
     // 14: a reply can open a turn while this poll was reading "idle". Its
     // stream is newer than what this poll saw, so leave it open.
     const opened = fresh(key)?.status_opened_at ?? 0;
@@ -2360,7 +2372,7 @@ async function pollOne(key) {
     if (state === 'active' || state === 'wrapping') ensureWatch(key); else if (!stale) stopWatch(key);
     if (!stale) await updateStatus(key, state, activity).catch((e) => console.error('status', key, e.message));
     // After the status and watch: a queued turn that just started must not wait on uploads.
-    if (events.some((e) => e.type === 'turn_end' || e.type === 'question')) await deliverMedia(key);
+    if (!s.routine && events.some((e) => e.type === 'turn_end' || e.type === 'question')) await deliverMedia(key);
   } catch (e) {
     console.error('events', key, e.stderr || e.message);
     await showLost(key, false).catch((x) => console.error('lost', key, x.message));
@@ -2642,6 +2654,25 @@ async function endRoutine(key, end) {
   }
   await app.client.chat.update({ channel: s.channel, ts: r.start_ts, text }).catch((e) => console.error('routine', key, `start edit: ${e.data?.error ?? e.message}`));
   await app.client.chat.postMessage({ ...at, text, reply_broadcast: true }).catch((e) => console.error('routine', key, `end post: ${e.data?.error ?? e.message}`));
+}
+// A routine run's events, as a state machine (D12, D19). Report mode never ships. A pr mode ships only a ready turn
+// with changes, then waits for the PR (ok) or the wrap-up's error (failed). A ready turn with no change in a pr mode
+// is no change; anything else that ends a turn (a question, needs input) is the report.
+async function routineEvent(key, ev) {
+  const r = fresh(key)?.routine;
+  if (!r || r.ended) return;
+  if (r.finishing && ev.type === 'pr' && ev.url) return endRoutine(key, { state: 'ok', pr: ev.url });
+  if (ev.type === 'error') return endRoutine(key, { state: 'failed', reason: String(ev.text ?? '').split('\n')[0].slice(0, 300) || 'the turn failed' });
+  if (ev.type === 'question') return endRoutine(key, { state: 'report', report: ev.text || ev.questions?.map((q) => q.q).join('\n') || '' });
+  if (ev.type !== 'turn_end' || !['ready', 'needs-input'].includes(ev.status)) return;
+  const changed = ev.trees?.length ? ev.trees.filter((t) => t.changes > 0) : ev.changes > 0 ? [{}] : [];
+  if (r.mode !== 'report' && !r.finishing && ev.status === 'ready' && changed.length) {
+    sessions.patch(key, { routine: { ...r, finishing: true } });
+    // One work repo in a pr mode (D11): a team stack names it.
+    return ctl.finish(key, false, changed[0].slug).catch((e) => endRoutine(key, { state: 'failed', reason: lastLine(e.stderr) || 'the wrap-up did not start' }));
+  }
+  if (r.mode !== 'report' && !r.finishing && ev.status === 'ready') return endRoutine(key, { state: 'nochange' });
+  return endRoutine(key, { state: 'report', report: ev.text ?? '' });
 }
 async function startRoutine(r) {
   const why = await channelRefusal(app.client, r);

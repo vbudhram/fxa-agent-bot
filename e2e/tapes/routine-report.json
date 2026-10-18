@@ -1,0 +1,2 @@
+{"sessions": [{"turns": [{"steps": ["Reading packages/fxa-auth-server/lib/routes/account.ts"], "diff": [{"file": "a.ts", "added": 1, "removed": 0}],
+  "end": {"text": "Finding 1, for <!channel>: the account route logs the session token. Finding 2: <@U0SOMEONE> wrote a query with no index."}}]}]}

@@ -42,6 +42,8 @@ export function stepChecks(expect = {}, ctx) {
       need(n === v.n, `${v.n} public bot message(s) matching ${v.match}${v.thread ? ` in ${v.thread}` : ''}, saw ${n}`); }
     // log: lines of the bot's log so far (an error line feeds the operator's DM, ERROR_DMS on the live bot).
     else if (k === 'log') { const n = (ctx.botLog?.() ?? '').split('\n').filter((l) => v.match.test(l)).length; need(n === v.n, `${v.n} bot log line(s) matching ${v.match}, saw ${n}`); }
+    // ctlOrder: [re, re, ...]: the first controller call matching each comes after the one before.
+    else if (k === 'ctlOrder') { const at = v.map((re) => ctl.findIndex((l) => re.test(JSON.stringify(l.argv)))); need(at.every((x, n) => x >= 0 && (n === 0 || x > at[n - 1])), `controller calls in the order ${v.join(', ')}, saw indexes ${at.join(', ')}`); }
     else bad.push(`unknown expect "${k}"`);
   }
   return bad;
