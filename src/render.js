@@ -644,7 +644,7 @@ export function routineEnd(r, end) {
 }
 // The start message's end state, one line (D22): the full end text goes once, as the broadcast reply.
 const END_WORD = { ok: 'done', report: 'done', nochange: 'no change', stopped: 'stopped', ended: 'ended', store: 'not recorded' };
-export const routineEndLine = (r, end) => `${esc(r.name)}: ${END_WORD[end.state] ?? 'failed'}. See the reply in this thread.`;
+export const routineEndLine = (r, end) => `${esc(r.name)}: ${end.cost ? 'stopped' : END_WORD[end.state] ?? 'failed'}. See the reply in this thread.`;
 export const routineSkip = (s) => `${esc(s.name ?? 'A routine')} skipped: ${esc(s.reason)}.${nextRun(s.next)}`;
 export const routineHint = (mode) => (mode === 'report'
   ? 'This thread holds a routine\'s report. To work on a finding, tag me in a new thread and paste the finding.'

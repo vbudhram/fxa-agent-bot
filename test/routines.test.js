@@ -101,3 +101,9 @@ test('the start message ends as one line with the result word, and points to the
   assert.deepEqual(['ok', 'report', 'nochange', 'failed', 'stopped', 'store'].map((state) => routineEndLine(R, { state })),
     ['done', 'done', 'no change', 'failed', 'stopped', 'not recorded'].map((w) => `Code review: ${w}. See the reply in this thread.`));
 });
+
+test('a cost-limit stop ends the start message as stopped, as its reply says, and an ended run as ended', () => {
+  assert.equal(routineEndLine(R, { state: 'failed', cost: true }), 'Code review: stopped. See the reply in this thread.');
+  assert.match(routineEnd(R, { state: 'failed', cost: true }), /^Code review stopped at its cost limit\./);
+  assert.equal(routineEndLine(R, { state: 'ended' }), 'Code review: ended. See the reply in this thread.');
+});
