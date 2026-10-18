@@ -89,3 +89,10 @@ test('a tick that is still running makes the next call do nothing', async () => 
   const third = g(); release(); assert.equal(await third, true);
   assert.equal(n, 2);
 });
+
+test('a done that did not answer, or changed nothing, says so and never claims the report holds personal data', () => {
+  const store = routineEnd(R, { state: 'store' }), ended = routineEnd(R, { state: 'ended', next: 1792501200 });
+  assert.match(store, /^Code review: I could not record this run's result, so I post nothing from it\./);
+  assert.match(ended, /^Code review: this run had ended already\./);
+  for (const t of [store, ended]) { assert.ok(!/holds data/.test(t), t); assert.ok(!t.includes('$'), t); }
+});

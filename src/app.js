@@ -2652,7 +2652,12 @@ async function endRoutine(key, end) {
   const a = await done(key).catch((e) => (/is not session/.test(e.stderr ?? '') ? done(undefined) : Promise.reject(e)))
     .catch((e) => { console.error('routine', key, `run ${r.run} done: ${e.stderr || e.message}`); return null; });
   if (!['stopped', 'failed'].includes(fresh(key)?.state)) await stopSession(key);
-  const post = a?.post === true, text = routineEnd(r, { ...end, post, next: a?.next });
+  // The text follows what ctl recorded: no answer is a store error, and a call that changed nothing shows the
+  // row's own end, never this call's report (its scan did not run on what is kept).
+  const post = a?.changed === true && a.post === true;
+  const shown = !a ? { state: 'store' } : a.changed ? end : a.state === 'stopped' ? { state: 'stopped' }
+    : a.state === 'failed' ? { state: 'failed', reason: 'the run ended before its result came in' } : { state: 'ended' };
+  const text = routineEnd(r, { ...shown, post, next: a?.next });
   const at = { channel: s.channel, thread_ts: r.start_ts };
   if (end.report && post) {
     const rep = routineReport(end.report);

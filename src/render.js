@@ -633,6 +633,10 @@ export function routineEnd(r, end) {
     ? `${n}: the report holds data I do not post in Slack. A team admin can read it in the dashboard ${historyLink(r.team)}.${next}`
     : `${n}: the report is in this thread. No code changed.${next}`;
   if (end.state === 'nochange') return `${n}: no issue to fix.${next}`;
+  // done did not answer: nothing is recorded, so nothing of the run is posted.
+  if (end.state === 'store') return `${n}: I could not record this run's result, so I post nothing from it. A team admin can see the run in the dashboard ${historyLink(r.team)}.`;
+  // done changed nothing: the run had ended before (a reconcile or another end); its row has the result.
+  if (end.state === 'ended') return `${n}: this run had ended already. A team admin can see its result in the dashboard ${historyLink(r.team)}.${next}`;
   if (end.state === 'stopped') return `${n} stopped by a team admin.${next}`;
   if (end.cost) return `${n} stopped at its cost limit.${next}`;
   return `${n} failed: ${esc(end.reason || 'the run did not finish')}. A team admin can see the log in the dashboard: ${historyLink(r.team)}.${next}`;
