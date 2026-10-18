@@ -511,7 +511,8 @@ async function launch(key, client, since = Date.now()) {
       if (routine) { console.error('routine', key, e.stderr || e.message); await endRoutine(key, { state: 'failed', reason: lastLine(e.stderr) || 'the session did not start' }); return; }
       sessions.patch(key, { state: 'failed' }); await fail(client, s, e); return;
     }
-    if (routine && Date.now() - since > QUEUE_GIVE_UP_MS) { await endRoutine(key, { state: 'failed', reason: 'no session freed up in 30 minutes' }); return; }
+    // The tick already waited for a slot (D16), and its reconcile fails a claimed run with no session after 10 min.
+    if (routine) { await endRoutine(key, { state: 'failed', reason: 'no runner free' }); return; }
     if (Date.now() - since > QUEUE_GIVE_UP_MS) {
       console.error('queue_dropped', key, 'no session freed up in 30 minutes');   // counted on the dashboard
       sessions.patch(key, { state: 'stopped' });
