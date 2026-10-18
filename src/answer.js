@@ -58,4 +58,4 @@ export const lastRow = (st) => row(st.t, rowTitle(st), 'complete');
 const secs = (ms) => { const t = Math.round(ms / 1000); return t < 60 ? `${t}s` : `${Math.floor(t / 60)}m ${t % 60}s`; };
 // The summary line a sandbox turn ends with.
 export const doneLine = (word, n, tookMs, askedMs) =>
-  `${word} · ${n ? `${stepCount(n)} · ` : ''}${secs(tookMs)}${askedMs ? ` · reply ${secs(askedMs)} after your message` : ''}`;
+  `${word} · ${n ? `${stepCount(n)} · ` : ''}${secs(tookMs)}${askedMs ? ` · reply ${secs(askedMs)} after the message` : ''}`;

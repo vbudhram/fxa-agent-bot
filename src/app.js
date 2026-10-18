@@ -21,7 +21,7 @@ import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { routineStart, routineSkip, routineEnd, routineEndLine, routineReport, routineHint, routineLabel } from './render.js';
-import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT, fileRefs, distinctFiles, maskSecrets, maskUpload } from './render.js';
+import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT, fileRefs, distinctFiles, maskSecrets, maskUpload } from './render.js';
 
 const { App } = bolt;
 installErrorLog(ctl.errorsPush);
@@ -1503,7 +1503,8 @@ const turnSummary = (s, word) => {
   const n = s.step_n ?? 0, took = secs(Date.now() - (s.busy_since ?? Date.now()));
   // The Slack time of the first message this turn answers.
   const first = Number(ackList(s)[0]);
-  const asked = first ? ` · reply ${secs(Date.now() - first * 1000)} after your message` : '';
+  // It can be a teammate's message, so the line does not say whose.
+  const asked = first ? ` · reply ${secs(Date.now() - first * 1000)} after the message` : '';
   return `${word} · ${n ? `${n} step${n === 1 ? '' : 's'} · ` : ''}${took}${asked}`;
 };
 
@@ -1790,10 +1791,8 @@ async function postDiff(s, client, repo) {
   if (!(await codeAllowed(s, client))) { await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: PRIVATE_ONLY }); return; }
   const d = await ctl.diff(s.key, repo);
   if (!d.trim()) { await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: `No changes yet${repo ? ` in ${repo}` : ''}.` }); return; }
-  const files = (d.match(/^diff --git /gm) ?? []).length;
-  const add = (d.match(/^\+(?!\+\+ )/gm) ?? []).length, del = (d.match(/^-(?!-- )/gm) ?? []).length;
-  await client.files.uploadV2({ channel_id: s.channel, thread_ts: s.thread_ts, filename: `${s.key}${repo ? `-${repo.split('/')[1]}` : ''}.diff`, content: d,
-    snippet_type: 'diff', initial_comment: `${files} file${files === 1 ? '' : 's'} changed, +${add} −${del}` });
+  await client.files.uploadV2({ channel_id: s.channel, thread_ts: s.thread_ts, filename: `${repo ? repo.split('/')[1] : 'changes'}.diff`, content: d,
+    snippet_type: 'diff', initial_comment: diffStat(d) });
 }
 
 // The rest of a long reply. Anyone who may use the bot here can open it.
