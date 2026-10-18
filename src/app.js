@@ -2367,8 +2367,9 @@ async function pollOne(key) {
     await mindLifetime(key, state);
     const last = events.findLast((e) => typeof e.cost === 'number');
     if (last) await mindCost(key, last.cost);
-    // A limit that stopped or paused the session: no new status line or watch for it.
-    if (DONE.includes(fresh(key)?.state)) { stopWatch(key); return; }
+    // A limit stopped or paused the session in this poll (ctl still said it was at work): no new status line or watch.
+    // A state ctl reported itself goes on, so updateStatus closes the status line.
+    if (DONE.includes(fresh(key)?.state) && !DONE.includes(state)) { stopWatch(key); return; }
     // 14: a reply can open a turn while this poll was reading "idle". Its
     // stream is newer than what this poll saw, so leave it open.
     const opened = fresh(key)?.status_opened_at ?? 0;
