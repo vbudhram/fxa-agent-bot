@@ -502,7 +502,7 @@ async function launch(key, client, since = Date.now()) {
       inboxes.set(key, { dir, note, urls: s.held_files.map((f) => f.url) });
     }
     inbox = inboxes.get(key);
-    if (routine) await ctl.routineTask({ key, profile: s.profile, run: s.routine.run, thread: `${s.channel}:${s.thread_ts}`, link, queuedS });
+    if (routine) await ctl.routineTask({ key, profile: s.profile, run: s.routine.run, thread: `${s.channel}:${s.thread_ts}`, link });
     else await ctl.task({ key, owner: s.owner, prompt: s.prompt + (inbox?.note ?? ''), inboxDir: inbox?.note ? inbox.dir : undefined, resumeFrom: s.resume_from, fresh: s.fresh, thread: `${s.channel}:${s.thread_ts}`, isNew: s.is_new, runtime: s.resume_from ? undefined : s.runtime, profile: s.profile, link, who, queuedS, findings: s.findings, repos: s.repos, checkout: s.checkout });
     dropInbox(key, inbox); // task copied them
   } catch (e) {

@@ -47,8 +47,8 @@ export const task = ({ key, owner, prompt, resumeFrom, fresh, thread, isNew, run
 
 // Routines (epic i168). A routine run takes its prompt, repos and owner from its claimed row, so the task
 // call passes only where it runs; ctl refuses any other option for --source routine.
-export const routineTask = ({ key, profile, run: id, thread, link, queuedS }) => run(['--pipeline', profile, 'task', '--source', 'routine', '--routine-run', String(id), '--id', key,
-  ...(thread ? ['--thread', thread] : []), ...(link ? ['--link', link] : []), ...(queuedS ? ['--queued-s', String(queuedS)] : [])]);
+export const routineTask = ({ key, profile, run: id, thread, link }) => run(['--pipeline', profile, 'task', '--source', 'routine', '--routine-run', String(id), '--id', key,
+  ...(thread ? ['--thread', thread] : []), ...(link ? ['--link', link] : [])]);
 // {runs, skips}: the runs to start and the skips to post, for this bot's env (live or dev).
 export const routineTick = async (env) => JSON.parse(await run(['routine', 'tick', '--env', env], { timeout: 5 * 60_000 }));
 // A run's result: {changed, state, post, next}. The report goes in a file, which ctl scans before the bot posts it.
