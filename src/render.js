@@ -605,3 +605,42 @@ export function trimContext(lines, max = 6000, per = 1500) {
   while (out.length > 1 && len > max) { len -= out.shift().length + 1; cut = true; }
   return `${cut ? '...\n' : ''}${out.join('\n')}`;
 }
+
+// Routines (epic i168): the texts a routine run posts. No dollar amounts (the dashboard History has the
+// cost) and no buttons. Each time is a Slack date token, so each reader sees it in their own zone.
+const UTC_FMT = new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
+export const dateToken = (t) => `<!date^${Math.floor(t)}^{date_short_pretty} at {time}|${UTC_FMT.format(new Date(t * 1000)).replace(',', '')} UTC>`;
+const teamName = (t) => (t === 'fxa' ? 'FxA' : t);
+const nextRun = (t) => (t ? ` Next run: ${dateToken(t)}.` : '');
+const WHAT = { 'code-review': 'review the commits', 'ux-review': 'review the UI changes', 'perf-review': 'look for slow paths in the code changed',
+  'security-review': 'review the code changed' };
+// The dashboard page where a team admin reads a run's History; null when the bot knows no dashboard.
+const historyLink = (team) => {
+  const base = process.env.DESKTOP_GATEWAY || process.env.DASHBOARD_URL;
+  return base ? `<${base.replace(/\/+$/, '')}/#team=${encodeURIComponent(team)}|History>` : 'History';
+};
+export function routineStart(r) {
+  const where = `${(r.repos ?? []).map(esc).join(', ')}${r.branch ? ` ${esc(r.branch)}` : ''}`;
+  const what = WHAT[r.template];
+  const body = what ? `I ${what} on ${where} ${r.since ? `since ${dateToken(r.since)}` : 'from the last 24 hours'}.` : `I run its prompt on ${where}.`;
+  return `${esc(r.name)} (routine for ${esc(teamName(r.team))}) started. ${body}`;
+}
+// end: {state: ok|report|nochange|failed|stopped, pr, reason, cost (a cost-limit stop), post, next}
+export function routineEnd(r, end) {
+  const n = esc(r.name), next = nextRun(end.next);
+  if (end.state === 'ok') return `${n}: draft PR ${gh(end.pr) ? `<${end.pr}|#${end.pr.split('/').pop()}>` : 'opened'}.${r.mode === 'pr+notes' ? ' The findings it did not fix are in the PR description.' : ''}${next}`;
+  if (end.state === 'report') return end.post === false
+    ? `${n}: the report holds data I do not post in Slack. A team admin can read it in the dashboard ${historyLink(r.team)}.${next}`
+    : `${n}: the report is in this thread. No code changed.${next}`;
+  if (end.state === 'nochange') return `${n}: no issue to fix.${next}`;
+  if (end.state === 'stopped') return `${n} stopped by a team admin.${next}`;
+  if (end.cost) return `${n} stopped at its cost limit.${next}`;
+  return `${n} failed: ${esc(end.reason || 'the run did not finish')}. A team admin can see the log in the dashboard: ${historyLink(r.team)}.${next}`;
+}
+export const routineSkip = (s) => `${esc(s.name ?? 'A routine')} skipped: ${esc(s.reason)}.${nextRun(s.next)}`;
+export const routineHint = (mode) => (mode === 'report'
+  ? 'This thread holds a routine\'s report. To work on a finding, tag me in a new thread and paste the finding.'
+  : 'To work on this PR, tag me in a new thread with the PR link.');
+// A report as posted: mentions made inert; over the limit it goes as a file (snippet: true).
+export const ROUTINE_SNIPPET_AT = 2900;
+export const routineReport = (text) => { const t = defuse(text).trim(); return { text: t, snippet: t.length > ROUTINE_SNIPPET_AT }; };
