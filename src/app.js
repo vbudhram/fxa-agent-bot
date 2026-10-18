@@ -723,7 +723,8 @@ async function onMessage({ message, client, replay = false }) {
   // After the PR merged or closed, a reply is not a new task (a tag is).
   const resumable = (['paused', 'stopped', 'failed'].includes(s.state) && !prDone) || prOpen;
   // A moved session takes nothing here (resumePaused says where it went), so no 👀 that never settles.
-  if (steers && (LIVE.includes(s.state) || resumable) && !s.moved_to) seen(message.channel, message.ts);
+  // A wrap-up only keeps a message as context and never settles it, so it gets no 👀.
+  if (steers && ((LIVE.includes(s.state) && s.state !== 'wrapping') || resumable) && !s.moved_to) seen(message.channel, message.ts);
   if (resumable && steers && !s.stop_failed) {
     addAck(s.key, message.ts);
     const t = text || 'See the attached files.';
