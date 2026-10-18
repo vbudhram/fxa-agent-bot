@@ -2385,6 +2385,8 @@ async function pollOne(key) {
     const stale = !activity?.busy && opened > polledAt;
     // The watch stays open between turns (tail -F follows the transcript): a new
     // turn's first steps arrive at once, with no spawn and ssh at its start.
+    // Once the controller reports the wrap-up, or its end, the tap's local flag has done its job.
+    if (state !== 'active') wrapping.delete(key);
     if (state === 'active' || state === 'wrapping') ensureWatch(key); else if (!stale) stopWatch(key);
     if (!stale) await updateStatus(key, state, activity).catch((e) => console.error('status', key, e.message));
     // After the status and watch: a queued turn that just started must not wait on uploads.
