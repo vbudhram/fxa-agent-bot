@@ -2077,8 +2077,10 @@ async function statusList(client, channel) {
   const lines = await Promise.all(live.map(async (x) => {
     const link = await client.chat.getPermalink({ channel: x.channel, message_ts: x.thread_ts }).then((r) => r.permalink).catch(() => null);
     const mins = x.started_at ? `${Math.round((Date.now() - x.started_at) / 60_000)}m` : '';
-    const first = (x.prompt ?? '').split('\n')[0].slice(0, 80);
-    return `• <@${x.owner}> · *${STATE_WORD[x.state] ?? x.state}*${mins ? ` · ${mins}` : ''}${x.muted ? ' · muted' : ''} · ${link ? `<${link}|${first || x.key}>` : first || x.key}`;
+    // A routine run has no person and no prompt: its routine names it.
+    const first = x.routine ? defuse(x.routine.name) : (x.prompt ?? '').split('\n')[0].slice(0, 80);
+    const who = x.routine ? `${defuse(x.routine.name)} (routine for ${x.routine.team})` : `<@${x.owner}>`;
+    return `• ${who} · *${STATE_WORD[x.state] ?? x.state}*${mins ? ` · ${mins}` : ''}${x.muted ? ' · muted' : ''} · ${link ? `<${link}|${first || x.key}>` : first || x.key}`;
   }));
   return `${live.length} session${live.length === 1 ? '' : 's'}:\n${lines.join('\n')}`;
 }
