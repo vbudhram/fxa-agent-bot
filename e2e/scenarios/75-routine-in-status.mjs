@@ -6,7 +6,7 @@ export default {
     { root: /^Code review \(routine for FxA\) started/ },
     { advance: 'setup' },
     { A: '@bot !status', thread: 'T2', expect: {
-      ephemeral: { to: 'A', match: /^1 session:\n• Code review \(routine for fxa\) · \*[^*]+\*.* · <[^|>]+\|Code review>$/ } } },
+      ephemeral: { to: 'A', match: /^1 session:\n• Code review \(routine for FxA\) · \*[^*]+\*.* · <[^|>]+\|Code review>$/ } } },
   ],
   judge: 'The status list says which routine is running, with no broken mention.',
 };

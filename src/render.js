@@ -611,6 +611,8 @@ export function trimContext(lines, max = 6000, per = 1500) {
 const UTC_FMT = new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
 export const dateToken = (t) => `<!date^${Math.floor(t)}^{date_short_pretty} at {time}|${UTC_FMT.format(new Date(t * 1000)).replace(',', '')} UTC>`;
 const teamName = (t) => (t === 'fxa' ? 'FxA' : t);
+// A routine run as people read it in the channel: its routine and team, never its sentinel owner.
+export const routineLabel = (r) => `${esc(r.name)} (routine for ${esc(teamName(r.team))})`;
 const nextRun = (t) => (t ? ` Next run: ${dateToken(t)}.` : '');
 const WHAT = { 'code-review': 'review the commits', 'ux-review': 'review the UI changes', 'perf-review': 'look for slow paths in the code changed',
   'security-review': 'review the code changed' };
@@ -624,7 +626,7 @@ export function routineStart(r) {
   const where = `${(r.repos ?? []).map(esc).join(', ')}${r.branch ? ` ${esc(r.branch)}` : ''}`;
   const what = WHAT[r.template];
   const body = what ? `I ${what} on ${where} ${r.since ? `since ${dateToken(r.since)}` : 'from the last 24 hours'}.` : `I run its prompt on ${where}.`;
-  return `${esc(r.name)} (routine for ${esc(teamName(r.team))}) started. ${body}`;
+  return `${routineLabel(r)} started. ${body}`;
 }
 // end: {state: ok|report|nochange|failed|stopped, pr, reason, cost (a cost-limit stop), post, next}
 export function routineEnd(r, end) {

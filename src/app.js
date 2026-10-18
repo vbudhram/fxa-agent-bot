@@ -20,7 +20,7 @@ import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel
 import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
-import { routineStart, routineSkip, routineEnd, routineEndLine, routineReport, routineHint } from './render.js';
+import { routineStart, routineSkip, routineEnd, routineEndLine, routineReport, routineHint, routineLabel } from './render.js';
 import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT, fileRefs, distinctFiles, maskSecrets, maskUpload } from './render.js';
 
 const { App } = bolt;
@@ -2080,7 +2080,7 @@ async function statusList(client, channel) {
     const mins = x.started_at ? `${Math.round((Date.now() - x.started_at) / 60_000)}m` : '';
     // A routine run has no person and no prompt: its routine names it.
     const first = x.routine ? defuse(x.routine.name) : (x.prompt ?? '').split('\n')[0].slice(0, 80);
-    const who = x.routine ? `${defuse(x.routine.name)} (routine for ${x.routine.team})` : `<@${x.owner}>`;
+    const who = x.routine ? routineLabel(x.routine) : `<@${x.owner}>`;
     return `• ${who} · *${STATE_WORD[x.state] ?? x.state}*${mins ? ` · ${mins}` : ''}${x.muted ? ' · muted' : ''} · ${link ? `<${link}|${first || x.key}>` : first || x.key}`;
   }));
   return `${live.length} session${live.length === 1 ? '' : 's'}:\n${lines.join('\n')}`;
