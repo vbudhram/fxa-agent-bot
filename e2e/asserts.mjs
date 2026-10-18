@@ -40,6 +40,8 @@ export function stepChecks(expect = {}, ctx) {
       need(ms.length && ms.every((m) => !ids(m).some((i) => v.none.test(i))), `a bot message${v.match ? ` matching ${v.match}` : ''} with no button ${v.none}, saw ${ms.map((m) => `[${ids(m).join(',')}]`).join(' ') || 'none'}`); }
     else if (k === 'postCount') { const n = view.msgs.filter((m) => m.bot && !m.to && !m.deleted && (!v.thread || (m.thread_ts ?? m.ts) === roots[v.thread]) && v.match.test(said(m))).length;
       need(n === v.n, `${v.n} public bot message(s) matching ${v.match}${v.thread ? ` in ${v.thread}` : ''}, saw ${n}`); }
+    // log: lines of the bot's log so far (an error line feeds the operator's DM, ERROR_DMS on the live bot).
+    else if (k === 'log') { const n = (ctx.botLog?.() ?? '').split('\n').filter((l) => v.match.test(l)).length; need(n === v.n, `${v.n} bot log line(s) matching ${v.match}, saw ${n}`); }
     else bad.push(`unknown expect "${k}"`);
   }
   return bad;

@@ -65,3 +65,27 @@ test('each routine wrapper passes argv with no shell', async () => {
     '--thread', 'C0OUT:1792414800.000100', '--link', 'https://x.slack.com/p1']);
   assert.ok(!existsSync('pwned') && !existsSync(join(d, 'pwned')));
 });
+
+test('the channel check fails closed for a private-repo team and a security review', async () => {
+  const { channelRefusal } = await import('../src/routines.js');
+  const info = (c) => ({ conversations: { info: async () => (c instanceof Error ? Promise.reject(c) : { channel: c }) } });
+  const run = { channel: 'C0OUT', private: true, template: 'code-review' };
+  assert.equal(await channelRefusal(info({ is_private: true, is_shared: false, is_ext_shared: false }), run), null);
+  assert.match(await channelRefusal(info({ is_private: false }), run), /is public/);
+  assert.match(await channelRefusal(info({ is_private: true, is_ext_shared: true }), run), /is shared/);
+  assert.match(await channelRefusal(info({ is_private: true, is_shared: true }), run), /is shared/);
+  assert.match(await channelRefusal(info(new Error('channel_not_found')), run), /cannot read channel C0OUT/);
+  assert.match(await channelRefusal(info(null), { ...run, private: false, template: 'security-review' }), /cannot read/);
+  assert.equal(await channelRefusal(info(new Error('no')), { ...run, private: false }), null, 'a public team code review needs no lookup');
+});
+
+test('a tick that is still running makes the next call do nothing', async () => {
+  const { inFlightGuard } = await import('../src/routines.js');
+  let n = 0, release;
+  const g = inFlightGuard(() => { n++; return new Promise((r) => { release = r; }); });
+  const first = g();
+  assert.equal(await g(), false);
+  release(); assert.equal(await first, true);
+  const third = g(); release(); assert.equal(await third, true);
+  assert.equal(n, 2);
+});

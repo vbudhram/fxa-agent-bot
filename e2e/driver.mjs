@@ -170,6 +170,9 @@ export async function runScenario(app, view, scenario) {
         notes.push({ t, seq: snap.seq + 0.5, text: `[advance ${step.advance}]` });
       }
       if (step.pause) await new Promise((r) => setTimeout(r, step.pause * 1000)); // real seconds: the PR follower runs every 30 s
+      // root: a bot's top-level message (a routine's start) becomes this thread's root, so people can reply in it.
+      if (step.root) { await until(() => view.msgs.some((m) => m.bot && !m.thread_ts && !m.to && step.root.test(m.text)), `a top-level bot message matching ${step.root}`);
+        roots[t] = view.msgs.find((m) => m.bot && !m.thread_ts && !m.to && step.root.test(m.text)).ts; }
       if (person) {
         // soft (persona steps): a button that went away before the tap is a note, as for a person.
         const what = await act(person, step[person], t, i).catch((e) => { if (!step.soft) throw e; return `${e.message}; nothing happens`; });
@@ -197,7 +200,7 @@ export async function runScenario(app, view, scenario) {
       for (let s = snap.seq + 1; s <= Math.max(0, ...view.msgs.map((m) => m.seq)); s++) stepSeq[s] = i;
       const started = ctlLines().slice(snap.ctl).filter((l) => l.argv[0] === 'task');
       if (started.length > 1) failures.push(`step ${i + 1}: ${started.length} sessions started by one step`);
-      const bad = step.expect ? stepChecks(step.expect, { view, snap, ctl: ctlLines(), roots, target: (on) => target(on, person, t) }) : [];
+      const bad = step.expect ? stepChecks(step.expect, { view, snap, ctl: ctlLines(), roots, target: (on) => target(on, person, t), botLog: () => (existsSync(join(out, 'bot.log')) ? readFileSync(join(out, 'bot.log'), 'utf8') : '') }) : [];
       if (bad.length && step.known) xfail.push(`step ${i + 1} (${step.known}): ${bad.join('; ')}`);
       else if (bad.length) failures.push(...bad.map((b) => `step ${i + 1}: expected ${b}`));
       else if (step.known) fixed.push(`step ${i + 1}: passes now; remove known "${step.known}"`);
@@ -214,7 +217,9 @@ export async function runScenario(app, view, scenario) {
   for (const l of all.filter((x) => x.argv[0] === 'task' && banned.includes(arg(x, '--owner')))) failures.push(`a session is owned by ${arg(l, '--owner')}, who is not allowed`);
   const owners = new Set(all.filter((x) => x.argv[0] === 'task').map((x) => arg(x, '--owner')));
   const shipAsks = played.filter((s) => Object.entries(s).some(([p, a]) => owners.has(uid(p)) && (typeof a === 'string' ? /^!(pr|push)\b/.test(a) : /Open PR|Push|Update PR|open_pr|push_branch/.test(String(a.tap ?? ''))))).length;
-  const ships = all.filter((x) => x.argv[0] === 'finish').length;
+  // A routine run ships with no person (the host's mode rules, D19), so its finish needs no owner's action.
+  const routineKeys = new Set(all.filter((x) => x.argv[0] === 'task' && arg(x, '--source') === 'routine').map((x) => arg(x, '--id')));
+  const ships = all.filter((x) => x.argv[0] === 'finish' && !routineKeys.has(arg(x, '--session'))).length;
   if (ships > shipAsks) failures.push(`${ships} ship(s) (finish) but only ${shipAsks} ship action(s) by an owner`);
 
   const botLog = existsSync(join(out, 'bot.log')) ? readFileSync(join(out, 'bot.log'), 'utf8') : '';

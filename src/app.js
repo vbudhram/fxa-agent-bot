@@ -13,12 +13,14 @@ import { pollEvery, reachable, missed, replayMark } from './poll.js';
 import * as unfurl from './unfurl.js';
 import { resolveProfile, mayStart } from './profile.js';
 import { teamChannels } from './teams.js';
+import { ROUTINES_ENV, TICK_MS, channelRefusal, inFlightGuard } from './routines.js';
 import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
 import { codeAllowed, PRIVATE_ONLY, sessionTeam, parseGates, gateAllows, loadMembers } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, LINE_BREAK, laterMessage } from './render.js';
 import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
+import { routineStart, routineSkip } from './render.js';
 import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT, fileRefs, distinctFiles, maskSecrets, maskUpload } from './render.js';
 
 const { App } = bolt;
@@ -2592,6 +2594,33 @@ async function watchErrors() {
   if (fresh_.length) await app.client.chat.postMessage({ channel: OPERATOR, text: errorDigest(fresh_) }).catch((e) => console.error('errors-dm', e.data?.error ?? e.message));
 }
 setInterval(watchErrors, 120_000);
+
+// Routines (epic i168): each tick posts the skips it should and starts the due runs (D4, D22, D23).
+async function routineTick() {
+  const { runs, skips } = await ctl.routineTick(ROUTINES_ENV);
+  for (const k of skips.filter((x) => x.post)) {
+    // A skip counts as posted only once its post works, so a failed post does not mute the next one.
+    const ok = await app.client.chat.postMessage({ channel: k.channel, text: routineSkip(k) }).then(() => true, (e) => { console.error('routine', `run ${k.run}: the skip post failed: ${e.data?.error ?? e.message}`); return false; });
+    if (ok) await ctl.routinePosted(k.run).catch((e) => console.error('routine', `run ${k.run} posted`, e.stderr || e.message));
+  }
+  for (const r of runs) await startRoutine(r).catch((e) => console.error('routine', `run ${r.run}`, e.stderr || e.message));
+}
+// A run the bot cannot start in its channel: failed, with the error for the operator's DM, and nothing in that channel.
+async function refuseRoutine(r, reason) {
+  console.error('routine', `run ${r.run} of routine ${r.routine} (${r.team}): ${reason}`);
+  await ctl.routineDone(r.run, { state: 'failed', reason }).catch((e) => console.error('routine', `run ${r.run} done`, e.stderr || e.message));
+}
+async function startRoutine(r) {
+  const why = await channelRefusal(app.client, r);
+  if (why) return refuseRoutine(r, why);
+  const start = await app.client.chat.postMessage({ channel: r.channel, text: routineStart(r) }).catch((e) => ({ error: e.data?.error ?? e.message }));
+  if (!start.ts) return refuseRoutine(r, `the start message did not post in ${r.channel}: ${start.error}`);
+  const key = sessions.newKey();
+  // owner: the run's sentinel (D26), so nobody has owner buttons; the session's live status goes in this thread.
+  sessions.put({ key, channel: r.channel, thread_ts: start.ts, owner: `routine:${r.team}/${r.routine}`, profile: r.team, source: 'routine', private: Boolean(r.private),
+    routine: { run: r.run, id: r.routine, team: r.team, name: r.name, mode: r.mode, template: r.template, start_ts: start.ts }, prompt: '', cursor: 0, state: 'queued', started_at: Date.now() });
+  await launch(key, app.client);
+}
 // Watch streams run in their own process groups; end them with the bot.
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { for (const w of watchers.values()) w.stop(); process.exit(0); });
 
@@ -2603,4 +2632,5 @@ if (GATES.size) { await loadMembers(app.client, GATES, gateMembers); setInterval
 // A request waiting for capacity lived only in a timer; pick it up again.
 for (const s of sessions.all()) if (s.state === 'queued') launch(s.key, app.client).catch((e) => console.error('launch', s.key, e.message));
 replayMissed(replayMarks).catch((e) => console.error('replay', e.message));
+if (ROUTINES_ENV) { const tick = inFlightGuard(() => routineTick().catch((e) => console.error('routine tick', e.stderr || e.message))); setInterval(tick, TICK_MS); }
 console.log('fxa-agent is running (Socket Mode)');

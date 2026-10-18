@@ -11,6 +11,8 @@ export function createView({ names = {} } = {}) {
   const nextTs = () => { clock += 100; return `${Math.floor(clock / 1e6)}.${String(clock % 1e6).padStart(6, '0')}`; };
   const find = (channel, ts) => msgs.find((m) => m.channel === channel && m.ts === ts);
   let failPost = process.env.E2E_FAIL_POST ? new RegExp(process.env.E2E_FAIL_POST) : null;
+  // E2E_CHANNELS: {C…: {is_private, is_shared, is_ext_shared}} for conversations.info; any other channel is not found.
+  const info = JSON.parse(process.env.E2E_CHANNELS || '{}');
   const err = (code) => Object.assign(new Error(`An API error occurred: ${code}`), { code: 'slack_webapi_platform_error', data: { ok: false, error: code } });
 
   // A message from a person, posted by the harness. Returns its ts.
@@ -93,6 +95,7 @@ export function createView({ names = {} } = {}) {
         touch(m);
         return { ok: true };
       }
+      case 'conversations.info': if (!info[channel]) throw err('channel_not_found'); return { ok: true, channel: { id: channel, ...info[channel] } };
       case 'conversations.replies': {
         const all = msgs.filter((m) => m.channel === channel && !m.to && !m.deleted && (m.ts === args.ts || m.thread_ts === args.ts));
         const from = Number(args.cursor ?? 0), n = Number(args.limit ?? 1000);

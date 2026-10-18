@@ -1,0 +1,5 @@
+[
+  {"run": 21, "routine": 11, "team": "secret", "channel": "C_PUB", "name": "Code review", "mode": "report", "template": "code-review", "repos": ["example/secret"], "branch": null, "private": true, "since": null},
+  {"run": 22, "routine": 12, "team": "fxa", "channel": "C_GONE", "name": "Security review", "mode": "report", "template": "security-review", "repos": ["mozilla/fxa"], "branch": null, "private": false, "since": null},
+  {"run": 23, "routine": 13, "team": "fxa", "channel": "C_EXT", "name": "Security review", "mode": "report", "template": "security-review", "repos": ["mozilla/fxa"], "branch": null, "private": false, "since": null}
+]
