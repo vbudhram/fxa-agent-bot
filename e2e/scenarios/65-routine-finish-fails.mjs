@@ -7,7 +7,7 @@ export default {
     { advance: 'setup' },
     { advance: 'turn', wait: { text: /Wrapping up/ }, expect: { ctl: { cmd: 'finish', n: 1 } } },
     { advance: 'finish', wait: { text: /^Code review failed: / }, expect: {
-      edited: { match: /^Code review failed: the handoff check did not pass\. A team admin can see the log in the dashboard: <https:\/\/dash\.example\.com\/#team=fxa\|History>\./ },
+      edited: { match: /^Code review failed: the handoff check did not pass\. A team admin can see the log in the dashboard: <https:\/\/dash\.example\.com\/#teams\/routines\/fxa\|History>\./ },
       ctl: { cmd: 'routine', match: /"done","43","--state","failed","--session","agent-[a-z0-9]+","--reason","the handoff check did not pass"/, n: 1 },
       ctlOrder: [/"routine","done","43"/, /^\["stop"/] } },
   ],

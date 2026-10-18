@@ -617,7 +617,8 @@ const WHAT = { 'code-review': 'review the commits', 'ux-review': 'review the UI 
 // The dashboard page where a team admin reads a run's History; null when the bot knows no dashboard.
 const historyLink = (team) => {
   const base = process.env.DESKTOP_GATEWAY || process.env.DASHBOARD_URL;
-  return base ? `<${base.replace(/\/+$/, '')}/#team=${encodeURIComponent(team)}|History>` : 'History';
+  // The dashboard's router reads the hash as view/tab/selection: the teams view, its routines tab, this team.
+  return base ? `<${base.replace(/\/+$/, '')}/#teams/routines/${encodeURIComponent(team)}|History>` : 'History';
 };
 export function routineStart(r) {
   const where = `${(r.repos ?? []).map(esc).join(', ')}${r.branch ? ` ${esc(r.branch)}` : ''}`;

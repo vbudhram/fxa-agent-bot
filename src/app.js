@@ -2699,7 +2699,7 @@ async function startRoutine(r) {
   const key = sessions.newKey();
   // owner: the run's sentinel (D26), so nobody has owner buttons; the session's live status goes in this thread.
   sessions.put({ key, channel: r.channel, thread_ts: start.ts, owner: `routine:${r.team}/${r.routine}`, profile: r.team, source: 'routine', private: Boolean(r.private),
-    routine: { run: r.run, id: r.routine, team: r.team, name: r.name, mode: r.mode, template: r.template, start_ts: start.ts }, prompt: '', cursor: 0, state: 'queued', started_at: Date.now() });
+    routine: { run: r.run, team: r.team, name: r.name, mode: r.mode, start_ts: start.ts }, prompt: '', cursor: 0, state: 'queued', started_at: Date.now() });
   await launch(key, app.client);
 }
 // Watch streams run in their own process groups; end them with the bot.
