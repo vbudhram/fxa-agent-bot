@@ -552,3 +552,9 @@ test('a failed ship says the work is kept and how to retry, not !restart', () =>
   assert.match(render('k', { type: 'error', text: 'Push branch failed: x' }).text, /`!push` to try again/);
   assert.match(render('k', { type: 'error', text: 'disk full' }).text, /!restart/);
 });
+
+test('the Diff message counts files from a plain unified diff too', async () => {
+  const { diffStat } = await import('../src/render.js');
+  assert.equal(diffStat('--- a/x.js\n+++ b/x.js\n@@ -1 +1 @@\n-a\n+b\n'), '1 file changed, +1 −1');
+  assert.equal(diffStat('diff --git a/x b/x\n--- a/x\n+++ b/x\n-a\n+b\ndiff --git a/y b/y\n--- a/y\n+++ b/y\n+c\n'), '2 files changed, +2 −1');
+});

@@ -97,6 +97,13 @@ const OPERATOR = [
   [/could not mint a GitHub App installation token/i, 'github-app',
     'The GitHub App could not get a token. The operator must check its key and installation. The work is not lost; try again after that.'],
 ];
+// The Diff message: files from the git headers, or from the +++ lines of a plain unified diff.
+export function diffStat(d) {
+  const files = Math.max((d.match(/^diff --git /gm) ?? []).length, (d.match(/^\+\+\+ /gm) ?? []).length);
+  const add = (d.match(/^\+(?!\+\+ )/gm) ?? []).length, del = (d.match(/^-(?!-- )/gm) ?? []).length;
+  return `${files} file${files === 1 ? '' : 's'} changed, +${add} −${del}`;
+}
+
 export function operatorProblem(text) {
   const hit = OPERATOR.find(([re]) => re.test(String(text ?? '')));
   return hit ? { kind: hit[1], text: hit[2] } : null;
