@@ -34,3 +34,34 @@ test('the end texts: PR link, report kept off Slack, failure with the History li
   assert.match(routineEnd(R, ENDS[5]), /^Code review stopped at its cost limit\./);
   delete process.env.DASHBOARD_URL;
 });
+
+// The wrappers run a stub ctl that saves its argv: each argument arrives whole, with no shell in between.
+test('each routine wrapper passes argv with no shell', async () => {
+  const { mkdtempSync, writeFileSync, readFileSync, chmodSync, existsSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  const d = mkdtempSync(join(tmpdir(), 'routines-test-'));
+  const stub = join(d, 'ctl');
+  writeFileSync(stub, `#!/usr/bin/env bash\nprintf '%s\\0' "$@" >> "${d}/argv"; printf '\\n' >> "${d}/argv"\n`
+    + `for a; do [ -f "$a" ] && cat "$a" > "${d}/file"; done\ncase " $* " in *" tick "*) echo '{"runs":[],"skips":[]}' ;; *" done "*) echo '{"changed":true,"state":"report","post":true,"next":null}' ;; esac\n`);
+  chmodSync(stub, 0o755);
+  process.env.FXA_CTL = stub;
+  const ctl = await import('../src/ctl.js');
+  const evil = 'x $(touch pwned) `id`; rm -rf /tmp/nothing';
+  assert.deepEqual(await ctl.routineTick('dev'), { runs: [], skips: [] });
+  assert.equal((await ctl.routineDone(7, { state: 'report', session: 'agent-abc123', reason: `${evil}\nline 2`, report: 'the report' })).post, true);
+  await ctl.routineDone(8, { state: 'failed', reason: 'refused' });
+  await ctl.routinePosted(9);
+  await ctl.routineTask({ key: 'agent-abc123', profile: 'fxa', run: 7, thread: 'C0OUT:1792414800.000100', link: 'https://x.slack.com/p1' });
+  const calls = readFileSync(join(d, 'argv'), 'utf8').split('\n').filter(Boolean).map((l) => l.split('\0').slice(0, -1));
+  assert.deepEqual(calls[0], ['--backend', 'gce', 'routine', 'tick', '--env', 'dev']);
+  assert.deepEqual(calls[1].slice(0, 10), ['--backend', 'gce', 'routine', 'done', '7', '--state', 'report', '--session', 'agent-abc123', '--reason']);
+  assert.equal(calls[1][10], `${evil} line 2`);
+  assert.equal(calls[1][11], '--report-file');
+  assert.equal(readFileSync(join(d, 'file'), 'utf8'), 'the report');
+  assert.deepEqual(calls[2], ['--backend', 'gce', 'routine', 'done', '8', '--state', 'failed', '--reason', 'refused']);
+  assert.deepEqual(calls[3], ['--backend', 'gce', 'routine', 'posted', '9']);
+  assert.deepEqual(calls[4], ['--backend', 'gce', '--pipeline', 'fxa', 'task', '--source', 'routine', '--routine-run', '7', '--id', 'agent-abc123',
+    '--thread', 'C0OUT:1792414800.000100', '--link', 'https://x.slack.com/p1']);
+  assert.ok(!existsSync('pwned') && !existsSync(join(d, 'pwned')));
+});

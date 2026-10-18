@@ -45,6 +45,19 @@ export const task = ({ key, owner, prompt, resumeFrom, fresh, thread, isNew, run
     ...(MCP !== undefined ? ['--mcp', MCP.replace(/\s+/g, '')] : []),
     ...(who?.name ? ['--owner-name', who.name] : []), ...(who?.image ? ['--owner-image', who.image] : [])])));
 
+// Routines (epic i168). A routine run takes its prompt, repos and owner from its claimed row, so the task
+// call passes only where it runs; ctl refuses any other option for --source routine.
+export const routineTask = ({ key, profile, run: id, thread, link, queuedS }) => run(['--pipeline', profile, 'task', '--source', 'routine', '--routine-run', String(id), '--id', key,
+  ...(thread ? ['--thread', thread] : []), ...(link ? ['--link', link] : []), ...(queuedS ? ['--queued-s', String(queuedS)] : [])]);
+// {runs, skips}: the runs to start and the skips to post, for this bot's env (live or dev).
+export const routineTick = async (env) => JSON.parse(await run(['routine', 'tick', '--env', env], { timeout: 5 * 60_000 }));
+// A run's result: {changed, state, post, next}. The report goes in a file, which ctl scans before the bot posts it.
+// No session: a run refused before it had one.
+export const routineDone = (id, { state, session, pr, reason, report }) => withFile(report ?? '', async (f) => JSON.parse(await run(['routine', 'done', String(id), '--state', state,
+  ...(session ? ['--session', session] : []), ...(pr ? ['--pr', pr] : []), ...(reason ? ['--reason', String(reason).replace(/\s+/g, ' ').trim().slice(0, 300)] : []),
+  ...(report !== undefined ? ['--report-file', f] : [])], { timeout: 2 * 60_000 })));
+// A skip the bot posted: the same reason stays quiet next time.
+export const routinePosted = (id) => run(['routine', 'posted', String(id)], { timeout: 60_000 });
 // A profile's repos and the write access of each, for the team card.
 export const profileInfo = async (profile) => JSON.parse(await run(['--pipeline', profile, 'profile', 'show'], { timeout: 30_000 }));
 // Every team with its repos, for the !stack picker.
