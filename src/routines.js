@@ -3,10 +3,18 @@
 export const ROUTINES_ENV = /^(live|dev)$/.test(process.env.ROUTINES_ENV ?? '') ? process.env.ROUTINES_ENV : null;
 export const TICK_MS = Number(process.env.ROUTINES_TICK_MS) || 60_000;
 
+// A routine with no channel posts nothing in Slack (D32): its session holds this channel, and the bot's Slack
+// client answers every call to it at once, with no request.
+export const NO_CHANNEL = 'history-only';
+let fakeN = 0;
+export const muted = (args) => args?.channel === NO_CHANNEL || args?.channel_id === NO_CHANNEL;
+export const mutedReply = () => ({ ok: true, channel: NO_CHANNEL, ts: `${Math.floor(Date.now() / 1000)}.${String(++fakeN % 1e6).padStart(6, '0')}`, files: [] });
+
 const RULE = 'a team with a private repo, and every security review, posts only to a private channel that is not shared with another workspace';
 // Why the run may not post in its channel, or null (D8). Fail closed: a lookup that fails refuses, and the bot
 // cannot read a public channel (groups:read only), so a public channel refuses too.
 export async function channelRefusal(client, run) {
+  if (!run.channel) return null;
   if (!run.private && run.template !== 'security-review') return null;
   const c = await client.conversations.info({ channel: run.channel }).then((r) => r.channel ?? null, () => null);
   if (!c) return `I cannot read channel ${run.channel}, and ${RULE}`;

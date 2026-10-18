@@ -108,3 +108,15 @@ test('a cost-limit stop ends the start message as stopped, as its reply says, an
   assert.match(routineEnd(R, { state: 'failed', cost: true }), /^Code review stopped at its cost limit\./);
   assert.equal(routineEndLine(R, { state: 'ended' }), 'Code review: ended. See the reply in this thread.');
 });
+
+test('a routine with no channel needs no channel check, and its Slack calls are muted (D32)', async () => {
+  const { channelRefusal, NO_CHANNEL, muted, mutedReply } = await import('../src/routines.js');
+  const never = { conversations: { info: async () => { throw new Error('no lookup for a routine with no channel'); } } };
+  assert.equal(await channelRefusal(never, { private: true, template: 'security-review' }), null);
+  assert.equal(muted({ channel: NO_CHANNEL }), true);
+  assert.equal(muted({ channel_id: NO_CHANNEL }), true);
+  assert.equal(muted({ channel: 'C0OUT' }), false);
+  const a = mutedReply(), b = mutedReply();
+  assert.match(a.ts, /^\d+\.\d{6}$/);
+  assert.notEqual(a.ts, b.ts);
+});

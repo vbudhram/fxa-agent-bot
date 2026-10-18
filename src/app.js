@@ -13,7 +13,7 @@ import { pollEvery, reachable, missed, replayMark } from './poll.js';
 import * as unfurl from './unfurl.js';
 import { resolveProfile, mayStart } from './profile.js';
 import { teamChannels } from './teams.js';
-import { ROUTINES_ENV, TICK_MS, channelRefusal, inFlightGuard } from './routines.js';
+import { ROUTINES_ENV, TICK_MS, NO_CHANNEL, channelRefusal, inFlightGuard, muted, mutedReply } from './routines.js';
 import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
 import { codeAllowed, PRIVATE_ONLY, sessionTeam, parseGates, gateAllows, loadMembers } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, LINE_BREAK, laterMessage } from './render.js';
@@ -47,12 +47,13 @@ if (process.env.SLACK_CALL_LOG) {
   const mask = (v) => (typeof v === 'string' ? maskSecrets(v) : Array.isArray(v) ? v.map(mask)
     : v && typeof v === 'object' && v.constructor === Object ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, mask(x)])) : v);
   proto.apiCall = function (method, args = {}) {
+    if (muted(args)) return Promise.resolve(mutedReply());
     if (/^chat\./.test(method)) args = mask(args);
     return call.call(this, method, method === 'chat.postMessage' ? { unfurl_links: false, unfurl_media: false, ...args } : args);
   };
   // An upload sends its bytes outside apiCall, so it gets its own wrapper.
   const upload = proto.filesUploadV2;
-  proto.filesUploadV2 = function (args = {}) { return upload.call(this, maskUpload(args)); };
+  proto.filesUploadV2 = function (args = {}) { return muted(args) ? Promise.resolve(mutedReply()) : upload.call(this, maskUpload(args)); };
 }
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
@@ -503,7 +504,7 @@ async function launch(key, client, since = Date.now()) {
       inboxes.set(key, { dir, note, urls: s.held_files.map((f) => f.url) });
     }
     inbox = inboxes.get(key);
-    if (routine) await ctl.routineTask({ key, profile: s.profile, run: s.routine.run, thread: `${s.channel}:${s.thread_ts}`, link });
+    if (routine) await ctl.routineTask({ key, profile: s.profile, run: s.routine.run, thread: s.channel === NO_CHANNEL ? undefined : `${s.channel}:${s.thread_ts}`, link });
     else await ctl.task({ key, owner: s.owner, prompt: s.prompt + (inbox?.note ?? ''), inboxDir: inbox?.note ? inbox.dir : undefined, resumeFrom: s.resume_from, fresh: s.fresh, thread: `${s.channel}:${s.thread_ts}`, isNew: s.is_new, runtime: s.resume_from ? undefined : s.runtime, profile: s.profile, link, who, queuedS, findings: s.findings, repos: s.repos, checkout: s.checkout });
     dropInbox(key, inbox); // task copied them
   } catch (e) {
@@ -2630,7 +2631,7 @@ setInterval(watchErrors, 120_000);
 // Routines (epic i168): each tick posts the skips it should and starts the due runs (D4, D22, D23).
 async function routineTick() {
   const { runs, skips } = await ctl.routineTick(ROUTINES_ENV);
-  for (const k of skips.filter((x) => x.post)) {
+  for (const k of skips.filter((x) => x.post && x.channel)) {
     // A skip names the routine in its channel: the same private-channel rule as a run (D8). Not posted, not marked.
     const why = await channelRefusal(app.client, k);
     if (why) { console.error('routine', `run ${k.run}: the skip is not posted: ${why}`); continue; }
@@ -2699,6 +2700,8 @@ async function routineEvent(key, ev) {
 async function startRoutine(r) {
   const why = await channelRefusal(app.client, r);
   if (why) return refuseRoutine(r, why);
+  // No channel (D32): the same path, in NO_CHANNEL, where every Slack call does nothing.
+  r = { ...r, channel: r.channel || NO_CHANNEL };
   const start = await app.client.chat.postMessage({ channel: r.channel, text: routineStart(r) }).catch((e) => ({ error: e.data?.error ?? e.message }));
   if (!start.ts) return refuseRoutine(r, `the start message did not post in ${r.channel}: ${start.error}`);
   const key = sessions.newKey();
