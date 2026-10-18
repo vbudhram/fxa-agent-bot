@@ -20,7 +20,7 @@ import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel
 import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
-import { routineStart, routineSkip, routineEnd, routineReport } from './render.js';
+import { routineStart, routineSkip, routineEnd, routineReport, routineHint } from './render.js';
 import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT, fileRefs, distinctFiles, maskSecrets, maskUpload } from './render.js';
 
 const { App } = bolt;
@@ -100,7 +100,8 @@ const inChannels = (channel) => CHANNELS.includes(channel) || teamChannels().inc
 const allowed = (channel, user) => inChannels(channel) && (USERS.includes('*') || USERS.includes(user)) && gateAllows(GATES, gateMembers, channel, user);
 // The session's owner, or someone on its team: only they may steer, answer, interrupt or resume it. The channel gate
 // alone let a person allowed in the channel but not on a gated team drive that team's repos and secrets.
-const onTeam = (s, user) => user === s?.owner || mayStart(sessionTeam(s, fresh), user);
+// A routine run has no person on it: nobody steers, answers, interrupts or resumes it (D24).
+const onTeam = (s, user) => !s?.routine && (user === s?.owner || mayStart(sessionTeam(s, fresh), user));
 // A routine posts in the channel its admin set (checked at its start), which need not be an allowed one.
 const here = (s) => Boolean(s.routine) || reachable(s, [...CHANNELS, ...teamChannels()]);
 
@@ -164,6 +165,9 @@ function joinStarting(message, text) {
 // A tag of the bot, and the Investigate button on a Work Object card, which makes one (wo_investigate).
 async function onMention({ event, body, client }) {
   if (fromBot(event)) return; // another app's post, as for thread replies
+  // A routine's thread: a tag gets a hint for that person only, and never steers or starts anything (D24).
+  const rt = event.thread_ts && sessions.get(event.channel, event.thread_ts)?.routine;
+  if (rt) { await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts, text: routineHint(rt.mode) }).catch(() => {}); return; }
   if (!allowed(event.channel, event.user)) {
     const runs = event.thread_ts && sessions.get(event.channel, event.thread_ts)?.owner;
     if (inChannels(event.channel)) await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts,
@@ -677,6 +681,8 @@ async function onMessage({ message, client, replay = false }) {
   if (!message.thread_ts || fromBot(message)) return;
   if (message.subtype && !['thread_broadcast', 'file_share'].includes(message.subtype)) return;
   const s = sessions.get(message.channel, message.thread_ts);
+  // People discuss a routine's result in its thread: a plain reply gets no answer and steers nothing.
+  if (s?.routine) return;
   // Starting (no session yet, or a resume of one): the reply joins the start. A tag's app_mention returns on the reservation.
   if (allowed(message.channel, message.user) && !strip(message.text).startsWith('!') && joinStarting(message, strip(message.text))) return;
   if (!s) return;
