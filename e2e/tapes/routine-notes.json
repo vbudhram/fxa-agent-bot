@@ -1,0 +1,2 @@
+{"sessions": [{"turns": [{"steps": ["Reading packages/fxa-auth-server/lib/routes/account.ts"], "diff": [],
+  "end": {"text": "No clear, small fix in these commits.\n\nNot fixed:\n- The account route logs the session token on a failed sign-in."}}]}]}

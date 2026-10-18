@@ -2688,7 +2688,8 @@ async function routineEvent(key, ev) {
     // One work repo in a pr mode (D11): a team stack names it.
     return ctl.finish(key, false, changed[0].slug).catch((e) => endRoutine(key, { state: 'failed', reason: lastLine(e.stderr) || 'the wrap-up did not start' }));
   }
-  if (r.mode !== 'report' && !r.finishing && ev.status === 'ready') return endRoutine(key, { state: 'nochange' });
+  // pr+notes lists what it did not fix: with no fix, those findings are the report.
+  if (r.mode !== 'report' && !r.finishing && ev.status === 'ready') return endRoutine(key, r.mode === 'pr+notes' && ev.text?.trim() ? { state: 'report', report: ev.text } : { state: 'nochange' });
   return endRoutine(key, { state: 'report', report: ev.text ?? '' });
 }
 async function startRoutine(r) {
