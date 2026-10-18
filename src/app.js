@@ -20,7 +20,7 @@ import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel
 import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
-import { routineStart, routineSkip } from './render.js';
+import { routineStart, routineSkip, routineEnd, routineReport } from './render.js';
 import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT, fileRefs, distinctFiles, maskSecrets, maskUpload } from './render.js';
 
 const { App } = bolt;
@@ -101,7 +101,8 @@ const allowed = (channel, user) => inChannels(channel) && (USERS.includes('*') |
 // The session's owner, or someone on its team: only they may steer, answer, interrupt or resume it. The channel gate
 // alone let a person allowed in the channel but not on a gated team drive that team's repos and secrets.
 const onTeam = (s, user) => user === s?.owner || mayStart(sessionTeam(s, fresh), user);
-const here = (s) => reachable(s, [...CHANNELS, ...teamChannels()]);
+// A routine posts in the channel its admin set (checked at its start), which need not be an allowed one.
+const here = (s) => Boolean(s.routine) || reachable(s, [...CHANNELS, ...teamChannels()]);
 
 // A pause to switch runtime or cancel. With Codex off there is nothing to switch, so start at once.
 const START_DELAY_S = process.env.CODEX_ENABLED === '1' ? 10 : 0;
@@ -470,7 +471,9 @@ async function launch(key, client, since = Date.now()) {
   if (!s || s.state !== 'queued') { dropInbox(key, inboxes.get(key)); return; } // stopped or restarted while waiting
   // Every start and resume meets here: access can change after a session began, so check it again.
   const team = s.profile ?? s.resumed_profile;
-  if (team && !mayStart(team, s.owner)) {
+  // A routine run has no person: the tick applied the team's gates, and ctl takes the run from its row (D6).
+  const routine = Boolean(s.routine);
+  if (!routine && team && !mayStart(team, s.owner)) {
     sessions.patch(key, { state: 'stopped' });
     dropInbox(key, inboxes.get(key));
     await say(s, `<@${s.owner}> is not on the ${team} team now, so this session does not start.`).catch(() => {});
@@ -481,7 +484,7 @@ async function launch(key, client, since = Date.now()) {
   let inbox;
   try {
     // Together, not one after the other: both are on the path to the first status.
-    const [link, who] = await Promise.all([linkP, whoIs(app.client, s.owner)]);
+    const [link, who] = await Promise.all([linkP, routine ? null : whoIs(app.client, s.owner)]);
     // A request that waited at the cap reports the wait, for the dashboard's load card.
     const queuedS = s.queued_note ? Math.round((Date.now() - since) / 1000) : undefined;
     // Files from the tag, or from a queued or paused session, ship with the boot: the first turn has them.
@@ -495,11 +498,16 @@ async function launch(key, client, since = Date.now()) {
       inboxes.set(key, { dir, note, urls: s.held_files.map((f) => f.url) });
     }
     inbox = inboxes.get(key);
-    await ctl.task({ key, owner: s.owner, prompt: s.prompt + (inbox?.note ?? ''), inboxDir: inbox?.note ? inbox.dir : undefined, resumeFrom: s.resume_from, fresh: s.fresh, thread: `${s.channel}:${s.thread_ts}`, isNew: s.is_new, runtime: s.resume_from ? undefined : s.runtime, profile: s.profile, link, who, queuedS, findings: s.findings, repos: s.repos, checkout: s.checkout });
+    if (routine) await ctl.routineTask({ key, profile: s.profile, run: s.routine.run, thread: `${s.channel}:${s.thread_ts}`, link, queuedS });
+    else await ctl.task({ key, owner: s.owner, prompt: s.prompt + (inbox?.note ?? ''), inboxDir: inbox?.note ? inbox.dir : undefined, resumeFrom: s.resume_from, fresh: s.fresh, thread: `${s.channel}:${s.thread_ts}`, isNew: s.is_new, runtime: s.resume_from ? undefined : s.runtime, profile: s.profile, link, who, queuedS, findings: s.findings, repos: s.repos, checkout: s.checkout });
     dropInbox(key, inbox); // task copied them
   } catch (e) {
     if (!/cap \d+ \(FXA_SESSION_MAX\)/.test(e.stderr ?? '')) dropInbox(key, inbox);
-    if (!/cap \d+ \(FXA_SESSION_MAX\)/.test(e.stderr ?? '')) { sessions.patch(key, { state: 'failed' }); await fail(client, s, e); return; }
+    if (!/cap \d+ \(FXA_SESSION_MAX\)/.test(e.stderr ?? '')) {
+      if (routine) { console.error('routine', key, e.stderr || e.message); await endRoutine(key, { state: 'failed', reason: lastLine(e.stderr) || 'the session did not start' }); return; }
+      sessions.patch(key, { state: 'failed' }); await fail(client, s, e); return;
+    }
+    if (routine && Date.now() - since > QUEUE_GIVE_UP_MS) { await endRoutine(key, { state: 'failed', reason: 'no session freed up in 30 minutes' }); return; }
     if (Date.now() - since > QUEUE_GIVE_UP_MS) {
       console.error('queue_dropped', key, 'no session freed up in 30 minutes');   // counted on the dashboard
       sessions.patch(key, { state: 'stopped' });
@@ -1300,7 +1308,8 @@ async function startStatusNow(s, verb) {
   steps.delete(s.key); unsent.delete(s.key); stepAt.delete(s.key); said.delete(s.key);
   const first = verb === 'Setting up' ? readyWord(cur) : `${verb} on it`;
   liveTurn.set(s.key, newLive(first));
-  if (streamOk) {
+  // A stream needs a person to stream to; a routine run has none, so its status is a line.
+  if (streamOk && !cur.routine) {
     try {
       const { ts } = await app.client.apiCall('chat.startStream', {
         channel: s.channel, thread_ts: s.thread_ts, recipient_user_id: cur.owner, recipient_team_id: cur.team ?? teamId,
@@ -2609,6 +2618,30 @@ async function routineTick() {
 async function refuseRoutine(r, reason) {
   console.error('routine', `run ${r.run} of routine ${r.routine} (${r.team}): ${reason}`);
   await ctl.routineDone(r.run, { state: 'failed', reason }).catch((e) => console.error('routine', `run ${r.run} done`, e.stderr || e.message));
+}
+const lastLine = (t) => String(t ?? '').trim().split('\n').pop().replace(/^ERROR: /, '').slice(0, 300);
+// The end of a routine run (D12, D22). done comes first, before the session stops, so the report and the cost land
+// on a live row (the tick's reconcile waits 10 min after a session ends, as a backstop). Then the session stops, the
+// report posts when ctl's scan allows it, the start message is edited, and the same text goes as a broadcast reply.
+// end: {state: ok|report|nochange|failed|stopped, pr, reason, report, cost}
+async function endRoutine(key, end) {
+  const s = fresh(key), r = s?.routine;
+  if (!r || r.ended) return;
+  sessions.patch(key, { routine: { ...r, ended: end.state } });
+  const done = (session) => ctl.routineDone(r.run, { state: end.state, session, pr: end.pr, reason: end.reason, report: end.report });
+  // A run that never reached its session (ctl refused the task) has none in its row.
+  const a = await done(key).catch((e) => (/is not session/.test(e.stderr ?? '') ? done(undefined) : Promise.reject(e)))
+    .catch((e) => { console.error('routine', key, `run ${r.run} done: ${e.stderr || e.message}`); return null; });
+  if (!['stopped', 'failed'].includes(fresh(key)?.state)) await stopSession(key);
+  const post = a?.post === true, text = routineEnd(r, { ...end, post, next: a?.next });
+  const at = { channel: s.channel, thread_ts: r.start_ts };
+  if (end.report && post) {
+    const rep = routineReport(end.report);
+    await (rep.snippet ? app.client.filesUploadV2({ channel_id: s.channel, thread_ts: r.start_ts, content: rep.text, filename: 'report.md', title: `${r.name} report` })
+      : app.client.chat.postMessage({ ...at, text: rep.text })).catch((e) => console.error('routine', key, `report post: ${e.data?.error ?? e.message}`));
+  }
+  await app.client.chat.update({ channel: s.channel, ts: r.start_ts, text }).catch((e) => console.error('routine', key, `start edit: ${e.data?.error ?? e.message}`));
+  await app.client.chat.postMessage({ ...at, text, reply_broadcast: true }).catch((e) => console.error('routine', key, `end post: ${e.data?.error ?? e.message}`));
 }
 async function startRoutine(r) {
   const why = await channelRefusal(app.client, r);
