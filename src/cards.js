@@ -224,7 +224,8 @@ function _status(d) {
       .concat(/^[UW][A-Z0-9]+$/.test(d.owner ?? '') ? [ctx(`<@${d.owner}>`)] : [])
       : [ctx(dot(p && `PR ${link(url, `#${p.number}`)}`, p && pill(p.state), p?.ci && `CI ${cut(p.ci, 20)}`, /^[UW][A-Z0-9]+$/.test(d.owner ?? '') && `<@${d.owner}>`) || '-')]),
     // Interrupt and Stop only while it runs (live): on a paused or PR-open session they do nothing.
-    ...actions([btn('Diff', 'diff', d.key), ...(d.live === false ? [] : [btn('Interrupt', 'interrupt', d.key), btn('Stop', 'stop', d.key, { style: 'danger',
+    // An idle session (no turn open) has nothing to interrupt, so it keeps only Stop.
+    ...actions([btn('Diff', 'diff', d.key), ...(d.live === false ? [] : [...(d.idle ? [] : [btn('Interrupt', 'interrupt', d.key)]), btn('Stop', 'stop', d.key, { style: 'danger',
       confirm: { title: pt('Stop the session?'), text: pt('The sandbox stops. The branch stays.'), confirm: pt('Stop'), deny: pt('Keep') } })])])],
     fallback: null,
   };

@@ -1036,13 +1036,15 @@ async function bang(s, text, m, client) {
   if (cmd === 'status') {
     // In the thread, not just for the asker: whoever follows it may want to know.
     const cur = fresh(s.key), mins = cur.started_at ? Math.round((Date.now() - cur.started_at) / 60_000) : 0;
-    const notes = [cur.state === 'active' && !cur.status_ts ? 'Waiting for you. I pause after 10 minutes without a message; a reply picks it up again.' : null,
+    const notes = [cur.state === 'active' && !cur.status_ts ? 'I pause after 10 minutes without a message; a reply picks it up again.' : null,
       cur.muted ? 'Replies are muted here. `!unmute` to hear from me.' : null, cur.boot_s ? `Setup took ${cur.boot_s}s.` : null].filter(Boolean);
     // The status card (cards.status), with the owner's Diff, Interrupt and Stop. A team stack gets a row for each repo.
     const prOf = (url, seen) => (url ? { url, number: Number(String(url).match(/\/pull\/(\d+)$/)?.[1]) || 0, state: String(seen?.state ?? '').toLowerCase(), ci: seen?.ci } : null);
     const trees = Array.isArray(cur.trees) && cur.trees.length ? cur.trees.map((t) => ({ name: t.name || String(t.slug).split('/')[1], out: t.out, changes: t.changes,
       pr: prOf(cur.prs?.[t.slug]?.pr_url, cur.prs?.[t.slug]?.pr_seen) })) : null;
-    const c = cards.status({ key: cur.key, state: STATE_WORD[cur.state] ?? cur.state, minutes: mins, owner: cur.owner, now: cur.last_act, live: LIVE.includes(cur.state),
+    // Active with no turn open: the session waits for the person, so it says so and offers no Interrupt.
+    const idle = cur.state === 'active' && !cur.status_ts;
+    const c = cards.status({ key: cur.key, state: idle ? 'waiting for you' : STATE_WORD[cur.state] ?? cur.state, minutes: mins, owner: cur.owner, now: cur.last_act, live: LIVE.includes(cur.state), idle,
       pr: trees ? null : prOf(cur.pr_url, cur.pr_seen), trees });
     const extra = notes.length ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: notes.join(' ') }] }] : [];
     await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: c.text, blocks: [...c.blocks.slice(0, -1), ...extra, c.blocks.at(-1)] });

@@ -270,6 +270,7 @@ test('the status card offers Interrupt and Stop only while the session runs', ()
   const ids = (live) => C.status({ key: 'k', state: 'paused', minutes: 3, live }).blocks.at(-1).elements.map((b) => b.action_id);
   assert.deepEqual(ids(false), ['diff']);
   assert.deepEqual(ids(true), ['diff', 'interrupt', 'stop']);
+  assert.deepEqual(C.status({ key: 'k', state: 'waiting for you', minutes: 3, live: true, idle: true }).blocks.at(-1).elements.map((b) => b.action_id), ['diff', 'stop']);
 });
 
 test('the status card of a team stack has a row for each repo: its PR or diff, and its changes', () => {
