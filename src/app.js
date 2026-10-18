@@ -723,8 +723,10 @@ async function onMessage({ message, client, replay = false }) {
   // After the PR merged or closed, a reply is not a new task (a tag is).
   const resumable = (['paused', 'stopped', 'failed'].includes(s.state) && !prDone) || prOpen;
   // A moved session takes nothing here (resumePaused says where it went), so no 👀 that never settles.
-  // A wrap-up only keeps a message as context and never settles it, so it gets no 👀.
-  if (steers && ((LIVE.includes(s.state) && s.state !== 'wrapping') || resumable) && !s.moved_to) seen(message.channel, message.ts);
+  // A wrap-up only keeps a message as context and never settles it, so it gets no 👀. It starts at the
+  // Open PR tap (the wrapping set), before the next poll reads the state from the controller.
+  const wrapUp = s.state === 'wrapping' || (s.state === 'active' && wrapping.has(s.key));
+  if (steers && ((LIVE.includes(s.state) && !wrapUp) || resumable) && !s.moved_to) seen(message.channel, message.ts);
   if (resumable && steers && !s.stop_failed) {
     addAck(s.key, message.ts);
     const t = text || 'See the attached files.';
@@ -756,7 +758,7 @@ async function onMessage({ message, client, replay = false }) {
     return;
   }
   // A wrap-up takes no messages (the host refuses them): keep it as context, and say so.
-  if (s.state === 'wrapping' && steers) {
+  if (wrapUp && steers) {
     keepAside(s, message);
     await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: message.user,
       text: "I'm wrapping up and opening the PR, so I can't act on this now. I kept it as context. Reply here once the PR is open, and I'll pick it up." }).catch(() => {});
