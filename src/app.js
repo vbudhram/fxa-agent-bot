@@ -2670,6 +2670,8 @@ async function routineEvent(key, ev) {
   if (!r || r.ended) return;
   if (r.finishing && ev.type === 'pr' && ev.url) return endRoutine(key, { state: 'ok', pr: ev.url });
   if (ev.type === 'error') return endRoutine(key, { state: 'failed', reason: String(ev.text ?? '').split('\n')[0].slice(0, 300) || 'the turn failed' });
+  // The wrap-up's own reply (ctl's wrap_reply) comes before its error: only the PR or the error ends a shipping run.
+  if (r.finishing) return;
   if (ev.type === 'question') return endRoutine(key, { state: 'report', report: ev.text || ev.questions?.map((q) => q.q).join('\n') || '' });
   if (ev.type !== 'turn_end' || !['ready', 'needs-input'].includes(ev.status)) return;
   const changed = ev.trees?.length ? ev.trees.filter((t) => t.changes > 0) : ev.changes > 0 ? [{}] : [];

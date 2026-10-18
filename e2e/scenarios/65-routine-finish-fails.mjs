@@ -1,7 +1,7 @@
 export default {
-  title: 'Routines: a wrap-up that fails ends the run as failed, with the History link',
+  title: 'Routines: a wrap-up that replies and then fails ends the run as failed, with the History link',
   people: { A: 'allowed' },
-  env: { FAKE_ROUTINES: 'e2e/routines/pr-only.json', ROUTINES_ENV: 'live', ROUTINES_TICK_MS: '200', FAKE_FINISH_FAIL: 'the handoff check did not pass', DASHBOARD_URL: 'https://dash.example.com' },
+  env: { FAKE_ROUTINES: 'e2e/routines/pr-only.json', ROUTINES_ENV: 'live', ROUTINES_TICK_MS: '200', FAKE_FINISH_FAIL: 'the handoff check did not pass', FAKE_WRAP_REPLY: 'Which base branch should the PR target?', DASHBOARD_URL: 'https://dash.example.com' },
   steps: [
     { root: /^Code review \(routine for FxA\) started/ },
     { advance: 'setup' },
