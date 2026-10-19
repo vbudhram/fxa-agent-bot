@@ -51,7 +51,8 @@ function runOne({ file, sc, vary, persona }) {
     const kill = setTimeout(() => child.kill('SIGTERM'), persona ? 900_000 : 120_000);
     child.on('exit', (code) => {
       clearTimeout(kill);
-      rmSync(home, { recursive: true, force: true });
+      // A fake-ctl job the bot started in the background can still write here: retry, and never fail the run on cleanup.
+      try { rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch (e) { console.error(`e2e: could not remove ${home}: ${e.code}`); }
       let r = { ok: false, failures: [`exit ${code}`] };
       try { r = JSON.parse(readFileSync(join(out, 'result.json'), 'utf8')); } catch {}
       done({ name, title: sc.title, s: ((Date.now() - t0) / 1000).toFixed(1), ...r });
