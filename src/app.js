@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { statSync, readFileSync, readdirSync, lstatSync, writeFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as ctl from './ctl.js';
-import { quickFirst, askId, answerBlocks, findingsOf, stepRows, lastRow, doneLine, stepCount, ON_IT, FIRST_ROW, seamless } from './answer.js';
+import { quickFirst, askId, answerBlocks, findingsOf, stepRows, lastRow, doneLine, stepCount, rowTitle, ON_IT, FIRST_ROW, seamless } from './answer.js';
 import { installErrorLog } from './errors.js';
 import * as sessions from './sessions.js';
 import * as live from './live.js';
@@ -380,7 +380,7 @@ async function followUp(s, message, text, client, route = text) {
 // stage, or an edited line), for the quick look's steps.
 function quickStatus(p) {
   const t0 = Date.now(), asked = Number(p.acks?.[0]) * 1000 || 0;
-  let ts = null, kind = null, tick = null, chain = Promise.resolve(), n = 0;
+  let ts = null, kind = null, tick = null, chain = Promise.resolve(), n = 0, lastStep = '';
   let st = { t: 0, kind: null, label: FIRST_ROW, count: 0 };
   const at = () => ({ channel: p.channel, ts });
   const run = (fn) => (chain = chain.then(fn).catch((e) => console.error('quick_status', e.data?.error ?? e.message)));
@@ -393,17 +393,18 @@ function quickStatus(p) {
         return;
       } catch (e) { streamOff(e); }
     }
-    let k = 0;
-    const text = () => `${spinner(k)} ${st.label} · ${secs(Date.now() - t0)}`;
-    ({ ts } = await app.client.chat.postMessage({ channel: p.channel, thread_ts: p.thread_ts, text: text() }));
+    // The same look as a sandbox turn's status: the asker in the title, the current step and its command in the box.
+    const who = { asker: askers.get(p.acks?.[0]) ?? p.owner };
+    const msg = () => statusMessage({ title: statusTitle(who, 'Working', Date.now() - t0, n), rows: n ? [`› ${rowTitle(st)}`] : [], cmd: n ? lastStep : null });
+    ({ ts } = await app.client.chat.postMessage({ channel: p.channel, thread_ts: p.thread_ts, ...msg() }));
     kind = 'line';
-    tick = setInterval(() => { k++; run(() => app.client.chat.update({ ...at(), text: text() })); }, 3000);
+    tick = setInterval(() => run(() => app.client.chat.update({ ...at(), ...msg() })), 3000);
   });
   return {
     count: () => n,
     step: (text) => {
       const r = stepRows(st, defuse(text));
-      st = r.st; n++;
+      st = r.st; n++; lastStep = text;
       run(() => kind === 'stream' && app.client.apiCall('chat.appendStream', { ...at(), chunks: r.chunks }));
     },
     // The answer takes the status's place, as a sandbox turn's reply does: the summary, then the answer.
