@@ -2388,7 +2388,9 @@ async function pollOne(key) {
       if (ev.type === 'pr' && i !== endAt) {
         const ts = await postMsg(key, msg).catch((e) => console.error('post', key, ev.type, e.data?.error ?? e.message));
         if (ts) sessions.patch(key, prPatch(fresh(key), ev.repo ?? null, { pr_card_ts: ts, pr_card_head: msg.text, pr_card_text: null }));
-      } else await (i === endAt ? finishTurn(key, msg, ev) : postMsg(key, msg))
+      // Each turn end closes its own turn, also when two ended in one poll: the first takes the status
+      // message and settles its acks, so the steer queued behind it gets its ✅ from the second.
+      } else await (ev.type === 'turn_end' || ev.type === 'question' ? finishTurn(key, msg, ev) : postMsg(key, msg))
         .catch((e) => console.error('post', key, ev.type, e.data?.error ?? e.message));
       ship();
     }
