@@ -6,7 +6,7 @@ export default {
   steps: [
     { A: '@bot fix the blur' },
     { advance: 'setup' },
-    { advance: '4', pause: 7, expect: { calls: { method: 'chat.stopStream', n: 1 }, edited: { match: /^Failed · / } } },
+    { advance: '4', pause: 7, expect: { calls: { method: 'chat.startStream', n: 0 }, edited: { match: /^Failed · / } } },
   ],
   judge: 'When the sandbox fails, the live status says so instead of spinning on.',
 };
