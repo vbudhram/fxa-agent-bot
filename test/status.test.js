@@ -15,9 +15,10 @@ test('a live status is one plan block: a task per row, the current command under
   assert.match(m.text, /^Working for Greg · 2m 14s\n✓ Got ready · 52s/);
 });
 
-test('each edit gets a new block_id, as Slack asks for a plan', () => {
-  const a = statusMessage({ title: 'x', rows: ['› a'] }), b = statusMessage({ title: 'x', rows: ['› a'] });
-  assert.notEqual(a.blocks[0].block_id, b.blocks[0].block_id);
+test('a status keeps one block_id across its edits, so a plan someone opened stays open', () => {
+  const a = statusMessage({ title: 'x', rows: ['› a'], id: 'k1' }), b = statusMessage({ title: 'y', rows: ['✓ a', '› b'], id: 'k1' });
+  assert.equal(a.blocks[0].block_id, 'plan-k1');
+  assert.equal(b.blocks[0].block_id, a.blocks[0].block_id);
 });
 
 test('past the plan limit the oldest rows fold into one Earlier task', () => {

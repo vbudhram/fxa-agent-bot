@@ -23,10 +23,9 @@ export function planTasks(rows, cmd) {
 }
 
 // With no rows yet (in line, the first second of setup) the status is its title alone.
-// Slack asks for a new block_id on each edit of a plan.
-export function statusMessage({ title, rows = [], cmd }) {
+// id: one block_id for the message's whole life. A new one on an edit closes a plan someone opened.
+export function statusMessage({ title, rows = [], cmd, id = 'status' }) {
   const text = [title, ...rows].join('\n');
   if (!rows.length) return { text, blocks: [{ type: 'section', text: { type: 'mrkdwn', text: title } }] };
-  const block_id = `plan-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-  return { text, blocks: [{ type: 'plan', block_id, title: title.slice(0, 150), tasks: planTasks(rows, cmd) }] };
+  return { text, blocks: [{ type: 'plan', block_id: `plan-${id}`.slice(0, 255), title: title.slice(0, 150), tasks: planTasks(rows, cmd) }] };
 }
