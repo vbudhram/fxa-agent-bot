@@ -394,7 +394,8 @@ function quickStatus(p) {
       } catch (e) { streamOff(e); }
     }
     // The same look as a sandbox turn's status: the asker in the title, the current step and its command in the box.
-    const who = { asker: askers.get(p.acks?.[0]) ?? p.owner };
+    const asker = askers.get(p.acks?.[0]) ?? p.owner;
+    const who = { asker_name: /^[UW][A-Z0-9]+$/.test(asker ?? '') ? (await whoIs(app.client, asker))?.name : null };
     const msg = () => statusMessage({ title: statusTitle(who, 'Working', Date.now() - t0, n), rows: n ? [`› ${rowTitle(st)}`] : [], cmd: n ? lastStep : null });
     ({ ts } = await app.client.chat.postMessage({ channel: p.channel, thread_ts: p.thread_ts, ...msg() }));
     kind = 'line';
@@ -1338,6 +1339,7 @@ async function startStatusNow(s, verb) {
   const first = verb === 'Setting up' ? readyWord(cur) : `${verb} on it`;
   liveTurn.set(s.key, newLive(first));
   const asker = askers.get(ackList(cur)[0]) ?? cur.owner;
+  const asker_name = /^[UW][A-Z0-9]+$/.test(asker ?? '') ? (await whoIs(app.client, asker))?.name ?? null : null;
   // A stream needs a person to stream to; a routine run has none, so its status is a line.
   if (streamOk && !cur.routine) {
     try {
@@ -1351,9 +1353,9 @@ async function startStatusNow(s, verb) {
       return;
     } catch (e) { streamOff(e); }
   }
-  const msg = statusMessage({ title: statusTitle({ ...cur, asker }, verb, 0, 0) });
+  const msg = statusMessage({ title: statusTitle({ ...cur, asker_name }, verb, 0, 0) });
   const { ts } = await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...msg });
-  sessions.patch(cur.key, { status_ts: ts, status_kind: 'line', status_text: msg.text, status_box: null, asker, edit_at: Date.now(), busy_since: Date.now(), status_opened_at: Date.now(), last_act: null,
+  sessions.patch(cur.key, { status_ts: ts, status_kind: 'line', status_text: msg.text, status_box: null, asker, asker_name, edit_at: Date.now(), busy_since: Date.now(), status_opened_at: Date.now(), last_act: null,
     step_n: 0, rows_done: null, cur_kind: null, cur_count: 0, cur_label: null });
   if (cur.state === 'active') ensureWatch(s.key);
 }
@@ -1361,8 +1363,9 @@ const secs = (ms) => { const t = Math.round(ms / 1000); return t < 60 ? `${t}s` 
 const VERB = { starting: 'Setting up', wrapping: 'Wrapping up', active: 'Working' };
 // The status title: what the agent does, for whom, for how long. A routine run's owner is a
 // sentinel, not a person, so its title names nobody.
+// The name is plain text, not a mention: a mention would notify the asker each time a turn starts.
 function statusTitle(s, verb, ms, n) {
-  const who = /^[UW][A-Z0-9]+$/.test(s.asker ?? '') ? ` for <@${s.asker}>` : '';
+  const who = s.asker_name ? ` for ${defuse(s.asker_name)}` : '';
   return `${verb === 'Setting up' ? readyWord(s) : verb}${who} · ${secs(ms)}${n ? ` · ${stepCount(n)}` : ''}`;
 }
 const EDIT_MS = 3000, CLOCK_MS = 15_000; // Slack limits edits: a new step at most every 3 s, the clock alone every 15 s
