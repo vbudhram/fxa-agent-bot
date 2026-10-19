@@ -681,6 +681,9 @@ const untaggedOwner = (m, s) => m.user === s.owner && STEER_MODE === 'mention' &
 const LIVE = ['queued', 'starting', 'active', 'wrapping'];
 async function onMessage({ message, client, replay = false }) {
   noteAsker(message.ts, message.user);
+  // A person's reply under a running turn's status: the status moves below it at its next update.
+  const under = message.thread_ts && !message.subtype && !fromBot(message) && sessions.get(message.channel, message.thread_ts);
+  if (under?.status_ts && under.status_kind === 'line' && message.ts > under.status_ts) sessions.patch(under.key, { status_below: true });
   // Deleting the thread's first message closes its session, as in Claude Tag.
   // A parent with replies does not disappear; Slack turns it into a tombstone.
   const gone = message.subtype === 'message_deleted' ? message.deleted_ts
@@ -1377,7 +1380,12 @@ function statusTitle(s, verb, ms, n) {
   const who = s.asker_name ? ` for ${defuse(s.asker_name)}` : '';
   return `${verb === 'Setting up' ? readyWord(s) : verb}${who} · ${secs(ms)}${n ? ` · ${stepCount(n)}` : ''}`;
 }
-const EDIT_MS = 3000, CLOCK_MS = 15_000; // Slack limits edits: a new step at most every 3 s, the clock alone every 15 s
+// Slack allows an app about 50 chat.update calls a minute in a workspace: one live turn edits every
+// 1.2 s, as the stream did, and turns at once share that budget. The clock alone moves every 15 s.
+const CLOCK_MS = 15_000;
+const editGap = () => Math.min(5000, 1200 * Math.max(1, sessions.all().filter((x) => x.status_ts && x.busy_since).length));
+const trailing = new Set(); // sessions with an edit waiting for its gap to end
+const MOVE_MS = Number(process.env.STATUS_MOVE_MS) || 60_000; // a status moves below new replies at most once a minute
 // STATUS_EMOJI names an animated custom emoji (a spinner GIF); without one the
 // hourglass flips on each edit so the line still visibly ticks.
 const spinner = (n) => process.env.STATUS_EMOJI || (n % 2 ? ':hourglass:' : ':hourglass_flowing_sand:');
@@ -1531,7 +1539,7 @@ function bootDetails(s, b, done) {
   return { details: lines.length ? (from ? '\n' : '') + lines.join('\n') : undefined, boot_n: Math.max(from, upto) };
 }
 const SETUP_EXPECT_S = 80; // measured boot to a running agent, 75-90 s
-const STATUS_CLEAR = { status_ts: null, status_kind: null, busy_since: null, last_act: null, last_detail: null, last_step: null, step_n: null, task_n: null, cur_kind: null, cur_count: null, cur_label: null, cur_lines: null, title_at: null, rows_done: null, interrupted: null, stream_closed: null, wrap_done: null, boot_row: null };
+const STATUS_CLEAR = { status_ts: null, status_kind: null, busy_since: null, last_act: null, last_detail: null, last_step: null, step_n: null, task_n: null, cur_kind: null, cur_count: null, cur_label: null, cur_lines: null, title_at: null, rows_done: null, interrupted: null, stream_closed: null, wrap_done: null, boot_row: null, status_below: null, moved_at: null };
 // The finished turn's checklist, compact: every work row, ticked.
 
 const turnSummary = (s, word) => {
@@ -1797,7 +1805,20 @@ async function updateStatusNow(s, state, activity) {
     const nl = msg.text.indexOf('\n'), box = `${state}\n${nl < 0 ? '' : msg.text.slice(nl + 1)}`, age = Date.now() - (s.edit_at ?? 0);
     const keep = { busy_since: since, last_act: doing, ...(rows ?? {}), ...ready };
     if (!s.status_ts) return { ...keep, status_ts: (await post(msg)).ts, status_text: msg.text, status_box: box, edit_at: Date.now() };
-    if (msg.text === s.status_text || age < EDIT_MS || (box === s.status_box && age < CLOCK_MS)) return keep;
+    // People replied below it: post it again at the bottom and delete the old one, so the live status stays in view.
+    if (s.status_below && Date.now() - (s.moved_at ?? s.status_opened_at ?? 0) >= MOVE_MS) {
+      const { ts } = await post(msg);
+      await app.client.chat.delete({ channel: s.channel, ts: s.status_ts }).catch(() => {});
+      return { ...keep, status_ts: ts, status_text: msg.text, status_box: box, edit_at: Date.now(), status_below: false, moved_at: Date.now() };
+    }
+    if (msg.text === s.status_text || (box === s.status_box && age < CLOCK_MS)) return keep;
+    // A new step inside the gap: send it when the gap ends, so it never waits for the next poll.
+    const gap = editGap();
+    if (age < gap) {
+      // Setup is polled each second with its boot steps, which a live edit does not carry.
+      if (state !== 'starting' && !trailing.has(s.key)) { trailing.add(s.key); setTimeout(() => { trailing.delete(s.key); liveEdit(s.key); }, gap - age); }
+      return keep;
+    }
     await edit(msg);
     return { ...keep, status_text: msg.text, status_box: box, edit_at: Date.now() };
   }

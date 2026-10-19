@@ -1,41 +1,40 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { statusMessage, boxLines, BOX_LINES } from '../src/status.js';
+import { statusMessage, planTasks, PLAN_MAX } from '../src/status.js';
 
-const box = (m) => m.blocks.find((b) => b.type === 'rich_text')?.elements[0].elements[0].text;
-
-test('a live status is a title line and a box of exactly 5 lines, the current command under the current row', () => {
-  const m = statusMessage({ title: 'Working for <@U1> · 2m 14s', rows: ['✓ Got ready', '› Reading the code · 4 steps'], cmd: 'rg --files src' });
-  assert.equal(m.blocks[0].type, 'section');
-  assert.equal(m.blocks[0].text.text, 'Working for <@U1> · 2m 14s');
-  assert.equal(m.blocks[1].elements[0].type, 'rich_text_preformatted');
-  const lines = box(m).split('\n');
-  assert.equal(lines.length, BOX_LINES);
-  assert.deepEqual(lines.slice(0, 3), ['✓ Got ready', '▸ Reading the code · 4 steps', '    rg --files src']);
-  assert.match(m.text, /^Working for <@U1> · 2m 14s\n✓ Got ready/);
+test('a live status is one plan block: a task per row, the current command under the running task', () => {
+  const m = statusMessage({ title: 'Working for Greg · 2m 14s', rows: ['✓ Got ready · 52s', '› Reading the code · 4 steps', '○ Post the reply'], cmd: 'rg --files src' });
+  assert.equal(m.blocks.length, 1);
+  const [p] = m.blocks;
+  assert.equal(p.type, 'plan');
+  assert.equal(p.title, 'Working for Greg · 2m 14s');
+  assert.deepEqual(p.tasks.map((t) => [t.task_id, t.title, t.status]), [['t0', 'Got ready · 52s', 'complete'], ['t1', 'Reading the code · 4 steps', 'in_progress'], ['t2', 'Post the reply', 'pending']]);
+  assert.equal(p.tasks[1].details.elements[0].elements[0].text, 'rg --files src');
+  assert.equal(p.tasks[1].details.elements[0].elements[0].style.code, true);
+  assert.ok(!p.tasks[0].details && !p.tasks[2].details);
+  assert.match(m.text, /^Working for Greg · 2m 14s\n✓ Got ready · 52s/);
 });
 
-test('older rows fold into one Earlier line, so the box keeps its height', () => {
-  const rows = ['✓ Read the code · 40 steps', '✓ Upgraded next · 6 steps', '✓ Ran the build · 12 steps', '✓ Fixed 4 type errors · 18 steps', '✓ Ran the tests · 9 steps', '› Fixing a failing test · 3 steps'];
-  const lines = boxLines(rows, 'npm test');
-  assert.equal(lines.length, BOX_LINES);
-  assert.equal(lines[0], '✓ Earlier · Read the code, Upgraded next, Ran the build · 58 steps');
-  assert.deepEqual(lines.slice(1), ['✓ Fixed 4 type errors · 18 steps', '✓ Ran the tests · 9 steps', '▸ Fixing a failing test · 3 steps', '    npm test']);
+test('each edit gets a new block_id, as Slack asks for a plan', () => {
+  const a = statusMessage({ title: 'x', rows: ['› a'] }), b = statusMessage({ title: 'x', rows: ['› a'] });
+  assert.notEqual(a.blocks[0].block_id, b.blocks[0].block_id);
 });
 
-test('with a todo list the current todo keeps its command under it, and open todos past the room become one line', () => {
-  const rows = ['✓ Map the API routes', '✓ Read the database layer', '✓ Read the auth middleware', '› Rank the code smells', '○ Check each finding', '○ Write the top three', '○ Post the reply'];
-  assert.deepEqual(boxLines(rows, 'rg TODO'), ['✓ Earlier · Map the API routes, Read the database layer, Read the auth middleware', '▸ Rank the code smells', '    rg TODO', '○ Check each finding', '○ 2 more']);
-  assert.deepEqual(boxLines(['› First', '○ A', '○ B', '○ C', '○ D', '○ E'], 'ls'), ['▸ First', '    ls', '○ A', '○ B', '○ 3 more']);
+test('past the plan limit the oldest rows fold into one Earlier task', () => {
+  const rows = [...Array.from({ length: PLAN_MAX + 2 }, (_, i) => `✓ Step ${i} · 2 steps`), '› Now · 1 step'];
+  const t = planTasks(rows, 'ls');
+  assert.equal(t.length, PLAN_MAX);
+  assert.match(t[0].title, /^Earlier · Step 0, Step 1, Step 2, Step 3 · 8 steps$/);
+  assert.equal(t.at(-1).status, 'in_progress');
 });
 
 test('a long command is cut to one short line', () => {
-  const lines = boxLines(['› Running · 1 step'], 'x'.repeat(300));
-  assert.ok(lines[1].length <= 100, lines[1]);
+  const [t] = planTasks(['› Running · 1 step'], 'x'.repeat(300));
+  assert.ok(t.details.elements[0].elements[0].text.length <= 90);
 });
 
-test('a status with no rows is the title alone, with no box', () => {
-  const m = statusMessage({ title: 'In line for <@U1> · 2nd in line', rows: [] });
-  assert.equal(m.blocks.length, 1);
-  assert.equal(m.text, 'In line for <@U1> · 2nd in line');
+test('a status with no rows is the title alone, with no plan', () => {
+  const m = statusMessage({ title: 'In line for Greg · 2nd in line', rows: [] });
+  assert.deepEqual(m.blocks, [{ type: 'section', text: { type: 'mrkdwn', text: 'In line for Greg · 2nd in line' } }]);
+  assert.equal(m.text, 'In line for Greg · 2nd in line');
 });
