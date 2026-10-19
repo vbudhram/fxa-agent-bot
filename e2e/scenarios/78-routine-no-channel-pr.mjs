@@ -6,7 +6,9 @@ export default {
     { wait: { ctl: /"task","--source","routine","--routine-run","45"/ } },
     { advance: 'setup' },
     { advance: 'turn', wait: { ctl: /^\["finish"|"finish"/ }, expect: { ctl: { cmd: 'finish', n: 1 }, noCtl: 'stop' } },
-    { advance: 'finish', wait: { ctl: /"routine","done","45","--state","ok","--session","agent-[a-z0-9]+","--pr","https:\/\/github\.com\/mozilla\/fxa\/pull\/999999"/ }, expect: {
+    // A run with no channel posts nothing, so the driver sees no Slack activity to wait on: wait for the stop itself.
+    { advance: 'finish', wait: { ctl: /"argv":\["stop"/ }, expect: {
+      ctl: { cmd: 'routine', match: /"done","45","--state","ok","--session","agent-[a-z0-9]+","--pr","https:\/\/github\.com\/mozilla\/fxa\/pull\/999999"/, n: 1 },
       ctlOrder: [/"finish"/, /"routine","done","45"/, /^\["stop"/] } },
     { expect: { calls: { method: 'chat.postMessage', n: 0 }, ctl: { cmd: 'finish', n: 1 } } },
     { expect: { calls: { method: 'chat.update', n: 0 } } },
