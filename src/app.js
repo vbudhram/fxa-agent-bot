@@ -1352,7 +1352,8 @@ async function startStatusNow(s, verb) {
   }
   const msg = statusMessage({ title: statusTitle({ ...cur, asker }, verb, 0, 0) });
   const { ts } = await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...msg });
-  sessions.patch(cur.key, { status_ts: ts, status_kind: 'line', status_text: msg.text, asker, edit_at: Date.now(), busy_since: Date.now(), status_opened_at: Date.now(), last_act: null, step_n: 0 });
+  sessions.patch(cur.key, { status_ts: ts, status_kind: 'line', status_text: msg.text, status_box: null, asker, edit_at: Date.now(), busy_since: Date.now(), status_opened_at: Date.now(), last_act: null,
+    step_n: 0, rows_done: null, cur_kind: null, cur_count: 0, cur_label: null });
   if (cur.state === 'active') ensureWatch(s.key);
 }
 const secs = (ms) => { const t = Math.round(ms / 1000); return t < 60 ? `${t}s` : `${Math.floor(t / 60)}m ${t % 60}s`; };
@@ -1772,7 +1773,7 @@ async function updateStatusNow(s, state, activity) {
     const n = rows?.step_n ?? 0;
     const msg = statusMessage({ title: statusTitle(s, VERB[state] ?? 'Working', Date.now() - since, n), rows: body, cmd: rows ? log.at(-1) : null });
     // The rows, and the state word: a change of either is news; the clock alone is not.
-    const box = `${state}\n${msg.text.slice(msg.text.indexOf('\n') + 1)}`, age = Date.now() - (s.edit_at ?? 0);
+    const nl = msg.text.indexOf('\n'), box = `${state}\n${nl < 0 ? '' : msg.text.slice(nl + 1)}`, age = Date.now() - (s.edit_at ?? 0);
     const keep = { busy_since: since, last_act: doing, ...(rows ?? {}) };
     if (!s.status_ts) return { ...keep, status_ts: (await post(msg)).ts, status_text: msg.text, status_box: box, edit_at: Date.now() };
     if (msg.text === s.status_text || age < EDIT_MS || (box === s.status_box && age < CLOCK_MS)) return keep;
@@ -1784,7 +1785,8 @@ async function updateStatusNow(s, state, activity) {
     const word = endWord(s, state), text = turnSummary(s, word);
     await edit({ text, blocks: [{ type: 'context', elements: [{ type: 'mrkdwn', text }] }] });
   }
-  return { busy_since: null, last_act: null, status_ts: null, status_text: null };
+  // The rows go too, so the next turn's box starts empty.
+  return { ...STATUS_CLEAR, status_text: null, status_box: null };
 }
 
 const ownerAction = (id, fn) => app.action(id, async ({ ack, body, action, client }) => {
