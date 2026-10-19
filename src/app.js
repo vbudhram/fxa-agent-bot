@@ -1248,10 +1248,12 @@ async function sweepOnce() {
     await updateStatus(key, 'paused', { busy: false }).catch(() => {});
     sessions.patch(key, { state: 'paused' });
     await desktopClosed(key, 'paused');
-    if (!s.muted) await say(s, "I'll pause since it's been quiet. Everything's saved; reply here when you're ready.").catch(() => {});
+    // One small grey line, as the design has it: the status of a session at rest, not a chat message.
+    const text = 'Paused: nobody replied for a while. Everything is saved. Reply here to pick it up.';
+    if (!s.muted) await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text, blocks: [{ type: 'context', elements: [{ type: 'mrkdwn', text: `⏸ ${text}` }] }] }).catch(() => {});
   }
 }
-setInterval(() => { idleSweep(); }, 60_000);
+setInterval(() => { idleSweep(); }, Number(process.env.IDLE_SWEEP_MS) || 60_000);
 
 // Retention: the controller deletes sessions idle past FXA_SESSION_RETAIN_DAYS, and the bot
 // forgets their threads, so its own file keeps no old thread text either. Every 6 hours.
