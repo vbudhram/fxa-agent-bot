@@ -394,8 +394,7 @@ function quickStatus(p) {
       } catch (e) { streamOff(e); }
     }
     // The same look as a sandbox turn's status: the asker in the title, the current step and its command in the box.
-    const asker = askers.get(p.acks?.[0]) ?? p.owner;
-    const who = { asker_name: /^[UW][A-Z0-9]+$/.test(asker ?? '') ? (await whoIs(app.client, asker))?.name : null };
+    const who = { asker_name: await askerName({ acks: p.acks, owner: p.owner }) };
     const msg = () => statusMessage({ title: statusTitle(who, 'Working', Date.now() - t0, n), rows: n ? [`› ${rowTitle(st)}`] : [], cmd: n ? lastStep.replace(/^Running /, '') : null });
     ({ ts } = await app.client.chat.postMessage({ channel: p.channel, thread_ts: p.thread_ts, ...msg() }));
     kind = 'line';
@@ -471,7 +470,7 @@ async function quick(key, p, client) {
 
 // At the session cap the request waits in line, as Claude Tag's does, instead
 // of failing. It retries every 30 s and gives up after 30 min.
-const QUEUE_RETRY_MS = 30_000, QUEUE_GIVE_UP_MS = 30 * 60_000;
+const QUEUE_RETRY_MS = Number(process.env.QUEUE_RETRY_MS) || 30_000, QUEUE_GIVE_UP_MS = 30 * 60_000;
 // The files a launch downloaded, kept across its retries at the session cap: key -> {dir, note, urls}.
 const inboxes = new Map();
 // Done with a launch's files: remove them, and keep only the held files it did not take.
@@ -536,13 +535,15 @@ async function launch(key, client, since = Date.now()) {
     // 8: say where the request is in line, and keep that one message current.
     const line = sessions.all().filter((x) => x.state === 'queued').sort((a, b) => (a.started_at ?? 0) - (b.started_at ?? 0));
     const pos = line.findIndex((x) => x.key === key) + 1;
-    const text = `Waiting for capacity: all sessions are busy. You are ${ordinal(pos)} in line, and I'll start as soon as one frees up.`;
+    // The status line from the start: it says the place in line, and becomes the session's status when it starts.
+    const who = await askerName(s);
+    const msg = statusMessage({ title: `In line${who ? ` for ${defuse(who)}` : ''} · ${ordinal(pos)} in line · all sessions are busy, so I start as soon as one frees up` });
     const cur = fresh(key);
     if (!cur.queue_ts) {
-      const r = await say(s, text).catch(() => null);
+      const r = await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...msg }).catch(() => null);
       sessions.patch(key, { queued_note: true, queue_ts: r?.ts ?? null, queue_pos: pos });
     } else if (cur.queue_pos !== pos) {
-      await app.client.chat.update({ channel: s.channel, ts: cur.queue_ts, text }).catch(() => {});
+      await app.client.chat.update({ channel: s.channel, ts: cur.queue_ts, ...msg }).catch(() => {});
       sessions.patch(key, { queue_pos: pos });
     }
     setTimeout(() => launch(key, client, since).catch((err) => console.error('launch', key, err.message)), QUEUE_RETRY_MS);
@@ -558,7 +559,7 @@ async function launch(key, client, since = Date.now()) {
     : { acks: [...ackList(cur), ...(cur.late_acks ?? [])], late_acks: [] });
   // The runner is booting from here on: a Slack hiccup is logged, not fatal.
   sessions.patch(key, { state: 'starting', started_at: Date.now(), findings: null });
-  if (fresh(key).queue_ts) await app.client.chat.update({ channel: s.channel, ts: fresh(key).queue_ts, text: 'A session freed up; starting now.' }).catch(() => {});
+  if (fresh(key).queue_ts && streamOk) await app.client.chat.update({ channel: s.channel, ts: fresh(key).queue_ts, text: 'A session freed up; starting now.' }).catch(() => {});
   await startStatus(fresh(key), 'Setting up').catch((e) => console.error('status', key, e.data?.error ?? e.message));
 }
 const say = (s, text) => app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text });
@@ -1338,8 +1339,7 @@ async function startStatusNow(s, verb) {
   steps.delete(s.key); unsent.delete(s.key); stepAt.delete(s.key); said.delete(s.key);
   const first = verb === 'Setting up' ? readyWord(cur) : `${verb} on it`;
   liveTurn.set(s.key, newLive(first));
-  const asker = askers.get(ackList(cur)[0]) ?? cur.owner;
-  const asker_name = /^[UW][A-Z0-9]+$/.test(asker ?? '') ? (await whoIs(app.client, asker))?.name ?? null : null;
+  const asker = askers.get(ackList(cur)[0]) ?? cur.owner, asker_name = await askerName(cur);
   // A stream needs a person to stream to; a routine run has none, so its status is a line.
   if (streamOk && !cur.routine) {
     try {
@@ -1354,8 +1354,10 @@ async function startStatusNow(s, verb) {
     } catch (e) { streamOff(e); }
   }
   const msg = statusMessage({ title: statusTitle({ ...cur, asker_name }, verb, 0, 0) });
-  const { ts } = await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...msg });
-  sessions.patch(cur.key, { status_ts: ts, status_kind: 'line', status_text: msg.text, status_box: `${cur.state}\n`, asker, asker_name, edit_at: Date.now(), busy_since: Date.now(), status_opened_at: Date.now(), last_act: null,
+  // A request that waited in line already has its status message: it changes in place.
+  const ts = cur.queue_ts ? await app.client.chat.update({ channel: s.channel, ts: cur.queue_ts, ...msg }).then(() => cur.queue_ts, () => null) : null;
+  const status_ts = ts ?? (await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...msg })).ts;
+  sessions.patch(cur.key, { status_ts, queue_ts: null, status_kind: 'line', status_text: msg.text, status_box: `${cur.state}\n`, asker, asker_name, edit_at: Date.now(), busy_since: Date.now(), status_opened_at: Date.now(), last_act: null,
     step_n: 0, rows_done: null, cur_kind: null, cur_count: 0, cur_label: null });
   if (cur.state === 'active') ensureWatch(s.key);
 }
@@ -1363,6 +1365,11 @@ const secs = (ms) => { const t = Math.round(ms / 1000); return t < 60 ? `${t}s` 
 const VERB = { starting: 'Setting up', wrapping: 'Wrapping up', active: 'Working' };
 // The status title: what the agent does, for whom, for how long. A routine run's owner is a
 // sentinel, not a person, so its title names nobody.
+// The person who sent the first message this turn answers, by name: a routine run's owner is a sentinel, with none.
+async function askerName(s) {
+  const asker = askers.get(ackList(s)[0]) ?? s.owner;
+  return /^[UW][A-Z0-9]+$/.test(asker ?? '') ? (await whoIs(app.client, asker))?.name ?? null : null;
+}
 // The name is plain text, not a mention: a mention would notify the asker each time a turn starts.
 function statusTitle(s, verb, ms, n) {
   const who = s.asker_name ? ` for ${defuse(s.asker_name)}` : '';
