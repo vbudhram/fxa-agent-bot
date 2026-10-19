@@ -11,7 +11,7 @@ test('a live status is a title line and a box of exactly 5 lines, the current co
   assert.equal(m.blocks[1].elements[0].type, 'rich_text_preformatted');
   const lines = box(m).split('\n');
   assert.equal(lines.length, BOX_LINES);
-  assert.deepEqual(lines.slice(0, 3), ['✓ Got ready', '› Reading the code · 4 steps', '    $ rg --files src']);
+  assert.deepEqual(lines.slice(0, 3), ['✓ Got ready', '› Reading the code · 4 steps', '    rg --files src']);
   assert.match(m.text, /^Working for <@U1> · 2m 14s\n✓ Got ready/);
 });
 
@@ -20,13 +20,13 @@ test('older rows fold into one Earlier line, so the box keeps its height', () =>
   const lines = boxLines(rows, 'npm test');
   assert.equal(lines.length, BOX_LINES);
   assert.equal(lines[0], '✓ Earlier · Read the code, Upgraded next, Ran the build · 58 steps');
-  assert.deepEqual(lines.slice(1), ['✓ Fixed 4 type errors · 18 steps', '✓ Ran the tests · 9 steps', '› Fixing a failing test · 3 steps', '    $ npm test']);
+  assert.deepEqual(lines.slice(1), ['✓ Fixed 4 type errors · 18 steps', '✓ Ran the tests · 9 steps', '› Fixing a failing test · 3 steps', '    npm test']);
 });
 
 test('with a todo list the current todo keeps its command under it, and open todos past the room become one line', () => {
   const rows = ['✓ Map the API routes', '✓ Read the database layer', '✓ Read the auth middleware', '› Rank the code smells', '○ Check each finding', '○ Write the top three', '○ Post the reply'];
-  assert.deepEqual(boxLines(rows, 'rg TODO'), ['✓ Earlier · Map the API routes, Read the database layer, Read the auth middleware', '› Rank the code smells', '    $ rg TODO', '○ Check each finding', '○ 2 more']);
-  assert.deepEqual(boxLines(['› First', '○ A', '○ B', '○ C', '○ D', '○ E'], 'ls'), ['› First', '    $ ls', '○ A', '○ B', '○ 3 more']);
+  assert.deepEqual(boxLines(rows, 'rg TODO'), ['✓ Earlier · Map the API routes, Read the database layer, Read the auth middleware', '› Rank the code smells', '    rg TODO', '○ Check each finding', '○ 2 more']);
+  assert.deepEqual(boxLines(['› First', '○ A', '○ B', '○ C', '○ D', '○ E'], 'ls'), ['› First', '    ls', '○ A', '○ B', '○ 3 more']);
 });
 
 test('a long command is cut to one short line', () => {

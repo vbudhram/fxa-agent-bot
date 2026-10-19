@@ -13,7 +13,7 @@ function earlier(rows) {
 // rows: ✓ done, › current (at most one), ○ open todos. The command goes under the current row;
 // only rows before it fold, and open todos past the room become one "more" line.
 export function boxLines(rows, cmd) {
-  const tail = cmd ? [`    $ ${String(cmd).replace(/\s+/g, ' ').slice(0, CMD_MAX)}`] : [];
+  const tail = cmd ? [`    ${String(cmd).replace(/\s+/g, ' ').slice(0, CMD_MAX)}`] : [];
   let cur = rows.findLastIndex((r) => r.startsWith('›'));
   if (cur < 0) cur = rows.length - 1;
   let before = rows.slice(0, cur), after = rows.slice(cur + 1);

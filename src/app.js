@@ -396,7 +396,7 @@ function quickStatus(p) {
     // The same look as a sandbox turn's status: the asker in the title, the current step and its command in the box.
     const asker = askers.get(p.acks?.[0]) ?? p.owner;
     const who = { asker_name: /^[UW][A-Z0-9]+$/.test(asker ?? '') ? (await whoIs(app.client, asker))?.name : null };
-    const msg = () => statusMessage({ title: statusTitle(who, 'Working', Date.now() - t0, n), rows: n ? [`› ${rowTitle(st)}`] : [], cmd: n ? lastStep : null });
+    const msg = () => statusMessage({ title: statusTitle(who, 'Working', Date.now() - t0, n), rows: n ? [`› ${rowTitle(st)}`] : [], cmd: n ? lastStep.replace(/^Running /, '') : null });
     ({ ts } = await app.client.chat.postMessage({ channel: p.channel, thread_ts: p.thread_ts, ...msg() }));
     kind = 'line';
     tick = setInterval(() => run(() => app.client.chat.update({ ...at(), ...msg() })), 3000);
@@ -1355,7 +1355,7 @@ async function startStatusNow(s, verb) {
   }
   const msg = statusMessage({ title: statusTitle({ ...cur, asker_name }, verb, 0, 0) });
   const { ts } = await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...msg });
-  sessions.patch(cur.key, { status_ts: ts, status_kind: 'line', status_text: msg.text, status_box: null, asker, asker_name, edit_at: Date.now(), busy_since: Date.now(), status_opened_at: Date.now(), last_act: null,
+  sessions.patch(cur.key, { status_ts: ts, status_kind: 'line', status_text: msg.text, status_box: `${cur.state}\n`, asker, asker_name, edit_at: Date.now(), busy_since: Date.now(), status_opened_at: Date.now(), last_act: null,
     step_n: 0, rows_done: null, cur_kind: null, cur_count: 0, cur_label: null });
   if (cur.state === 'active') ensureWatch(s.key);
 }
@@ -1775,7 +1775,7 @@ async function updateStatusNow(s, state, activity) {
     const rows = state === 'starting' ? null : { ...live.advanceRows(s, news), step_n: (s.step_n ?? 0) + news.length };
     const body = rows ? live.lineRows(liveTurn.get(s.key)?.st, rows) : log.map((t, i) => `${i === log.length - 1 ? '›' : '✓'} ${defuse(t)}`);
     const n = rows?.step_n ?? 0;
-    const msg = statusMessage({ title: statusTitle(s, VERB[state] ?? 'Working', Date.now() - since, n), rows: body, cmd: rows ? log.at(-1) : null });
+    const msg = statusMessage({ title: statusTitle(s, VERB[state] ?? 'Working', Date.now() - since, n), rows: body, cmd: rows ? log.at(-1)?.replace(/^Running /, '') : null });
     // The rows, and the state word: a change of either is news; the clock alone is not.
     const nl = msg.text.indexOf('\n'), box = `${state}\n${nl < 0 ? '' : msg.text.slice(nl + 1)}`, age = Date.now() - (s.edit_at ?? 0);
     const keep = { busy_since: since, last_act: doing, ...(rows ?? {}) };
