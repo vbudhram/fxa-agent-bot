@@ -2639,8 +2639,11 @@ async function watchErrors() {
 setInterval(watchErrors, 120_000);
 
 // Routines (epic i168): each tick posts the skips it should and starts the due runs (D4, D22, D23).
+// The first tick that answers also starts the runs a bot that died after its claim never started.
+let routineResume = true;
 async function routineTick() {
-  const { runs, skips } = await ctl.routineTick(ROUTINES_ENV);
+  const { runs, skips } = await ctl.routineTick(ROUTINES_ENV, routineResume);
+  routineResume = false;
   for (const k of skips.filter((x) => x.post && x.channel)) {
     // A skip names the routine in its channel: the same private-channel rule as a run (D8). Not posted, not marked.
     const why = await channelRefusal(app.client, k);

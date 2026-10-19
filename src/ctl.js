@@ -50,7 +50,7 @@ export const task = ({ key, owner, prompt, resumeFrom, fresh, thread, isNew, run
 export const routineTask = ({ key, profile, run: id, thread, link }) => run(['--pipeline', profile, 'task', '--source', 'routine', '--routine-run', String(id), '--id', key,
   ...(thread ? ['--thread', thread] : []), ...(link ? ['--link', link] : [])]);
 // {runs, skips}: the runs to start and the skips to post, for this bot's env (live or dev).
-export const routineTick = async (env) => JSON.parse(await run(['routine', 'tick', '--env', env], { timeout: 5 * 60_000 }));
+export const routineTick = async (env, resume = false) => JSON.parse(await run(['routine', 'tick', '--env', env, ...(resume ? ['--resume'] : [])], { timeout: 5 * 60_000 }));
 // A run's result: {changed, state, post, next}. The report goes in a file, which ctl scans before the bot posts it.
 // No session: a run refused before it had one.
 export const routineDone = (id, { state, session, pr, reason, report }) => withFile(report ?? '', async (f) => JSON.parse(await run(['routine', 'done', String(id), '--state', state,

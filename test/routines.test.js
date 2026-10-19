@@ -60,8 +60,11 @@ test('each routine wrapper passes argv with no shell', async () => {
   await ctl.routinePosted(9);
   // A routine run never waits in the bot's line, so it has no queue time to pass.
   await ctl.routineTask({ key: 'agent-abc123', profile: 'fxa', run: 7, thread: 'C0OUT:1792414800.000100', link: 'https://x.slack.com/p1', queuedS: 30 });
+  // The first tick after a start also takes the runs a dead bot claimed and never started.
+  await ctl.routineTick('live', true);
   const calls = readFileSync(join(d, 'argv'), 'utf8').split('\n').filter(Boolean).map((l) => l.split('\0').slice(0, -1));
   assert.deepEqual(calls[0], ['--backend', 'gce', 'routine', 'tick', '--env', 'dev']);
+  assert.deepEqual(calls.at(-1), ['--backend', 'gce', 'routine', 'tick', '--env', 'live', '--resume']);
   assert.deepEqual(calls[1].slice(0, 10), ['--backend', 'gce', 'routine', 'done', '7', '--state', 'report', '--session', 'agent-abc123', '--reason']);
   assert.equal(calls[1][10], `${evil} line 2`);
   assert.equal(calls[1][11], '--report-file');
