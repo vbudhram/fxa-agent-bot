@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { start, reduce, todoRows, currentRow, changedRows, facts, summary, todoLine, closingLine, advanceRows, lineRows, lostContact, LOST_MS, GIVE_UP_MS, MAX_ROWS, lastNote } from '../src/live.js';
+import { start, reduce, todoRows, currentRow, changedRows, facts, summary, todoLine, advanceRows, lineRows, lostContact, LOST_MS, GIVE_UP_MS, MAX_ROWS, lastNote } from '../src/live.js';
 
 const feed = (evs) => evs.reduce(reduce, start());
 const todos = (...s) => ({ type: 'todos', items: s.map(([content, status, active]) => ({ content, status, active })) });
@@ -95,13 +95,10 @@ test('a status reply names the time, the todo in progress, the last step and the
   assert.equal(statusReply(start(), { elapsedMs: 30_000 }), '⏳ Still working · 1m');
 });
 
-test('closing line: open todos, else several kinds of work, never the counts again', () => {
+test('a turn that ends with work left lists its todos, ticked and open', () => {
   const todos = (...ss) => reduce(start(), { type: 'todos', items: ss.map((x, i) => ({ content: `t${i}`, status: x })) });
-  assert.equal(closingLine(todos('completed', 'pending')), '✓ t0  ·  ○ t1');
-  assert.equal(closingLine(todos('completed', 'completed')), null);
-  assert.equal(closingLine(start(), ['Exploring the code · 4 steps']), null);
-  assert.equal(closingLine(start(), ['Exploring the code · 4 steps', 'Making changes · 2 steps', 'Exploring the code · 1 step']), '✓ Exploring the code  ·  ✓ Making changes');
-  assert.equal(closingLine(undefined, []), null);
+  assert.equal(todoLine(todos('completed', 'pending')), '✓ t0  ·  ○ t1');
+  assert.equal(todoLine(start()), null);
 });
 
 test('a closed stream goes on with the same stage rows, not raw commands', () => {

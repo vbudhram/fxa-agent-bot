@@ -59,6 +59,6 @@ const secs = (ms) => { const t = Math.round(ms / 1000); return t < 60 ? `${t}s` 
 // The summary line a sandbox turn ends with.
 export const doneLine = (word, n, tookMs, askedMs) => {
   const asked = askedMs ? ` · reply ${secs(askedMs)} after the message` : '';
-  if (word === 'Done') return `Worked for ${secs(tookMs)}${n ? ` · ${stepCount(n)}` : ''}${asked}`;
+  if (word === 'Done') return `Worked for ${secs(tookMs)}${n ? ` · ${stepCount(n)}` : ''}`;
   return `${word} · ${n ? `${stepCount(n)} · ` : ''}${secs(tookMs)}${asked}`;
 };

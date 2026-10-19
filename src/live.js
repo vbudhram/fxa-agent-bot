@@ -85,15 +85,6 @@ export function summary(st) {
 export const todoLine = (st) => (st.todos ?? []).length
   ? todoRows(st).map((r) => `${r.status === 'complete' ? '✓' : '○'} ${r.title}`).join('  ·  ') : null;
 
-// The finished turn's second line, under the summary (which has the counts): the todos while
-// any is open, else the kinds of work when there were several. stages: row labels, in order.
-export function closingLine(st, stages = []) {
-  const todos = st?.todos ?? [];
-  if (todos.length) return todos.some((t) => t.status !== 'completed') ? todoLine(st) : null;
-  const kinds = [...new Set(stages.map((r) => String(r).replace(/ · \d+( steps?)?$/, '')))];
-  return kinds.length > 1 ? kinds.map((k) => `✓ ${defuse(k)}`).join('  ·  ') : null;
-}
-
 // After Slack closes a turn's stream, the turn goes on as an edited line with the same rows
 // the stream showed, not raw commands. rows: {rows_done, cur_kind, cur_label, cur_count} as
 // the stream left them; each new step joins its stage row or opens the next one.

@@ -25,7 +25,8 @@ export function boxLines(rows, cmd) {
     const room = BOX_LINES - 1 - before.length - mid.length - tail.length;
     after = [...after.slice(0, room), `○ ${after.length - room} more`];
   }
-  return [...before, ...mid, ...tail, ...after];
+  // ▸ marks the current row: a code block cannot make one line darker.
+  return [...before, ...mid.map((r) => r.replace(/^› /, '▸ ')), ...tail, ...after];
 }
 
 // The box keeps its height early in a turn: Slack may drop trailing blank lines, not a no-break space.

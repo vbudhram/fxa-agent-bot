@@ -1522,7 +1522,7 @@ function bootDetails(s, b, done) {
   return { details: lines.length ? (from ? '\n' : '') + lines.join('\n') : undefined, boot_n: Math.max(from, upto) };
 }
 const SETUP_EXPECT_S = 80; // measured boot to a running agent, 75-90 s
-const STATUS_CLEAR = { status_ts: null, status_kind: null, busy_since: null, last_act: null, last_detail: null, last_step: null, step_n: null, task_n: null, cur_kind: null, cur_count: null, cur_label: null, cur_lines: null, title_at: null, rows_done: null, interrupted: null, stream_closed: null, wrap_done: null };
+const STATUS_CLEAR = { status_ts: null, status_kind: null, busy_since: null, last_act: null, last_detail: null, last_step: null, step_n: null, task_n: null, cur_kind: null, cur_count: null, cur_label: null, cur_lines: null, title_at: null, rows_done: null, interrupted: null, stream_closed: null, wrap_done: null, boot_row: null };
 // The finished turn's checklist, compact: every work row, ticked.
 
 const turnSummary = (s, word) => {
@@ -1531,7 +1531,8 @@ const turnSummary = (s, word) => {
   const first = Number(ackList(s)[0]);
   // It can be a teammate's message, so the line does not say whose.
   const asked = first ? ` · reply ${secs(Date.now() - first * 1000)} after the message` : '';
-  if (word === 'Done') return `Worked for ${took}${n ? ` · ${stepCount(n)}` : ''}${asked}`;
+  // Done is one line, as the design has it; the reply time goes to the log, where it is still measured.
+  if (word === 'Done') { if (asked) console.log(`timing ${s.key}:${asked.slice(2)}`); return `Worked for ${took}${n ? ` · ${stepCount(n)}` : ''}`; }
   return `${word} · ${n ? `${n} step${n === 1 ? '' : 's'} · ` : ''}${took}${asked}`;
 };
 
@@ -1559,11 +1560,12 @@ const finishTurn = (key, msg, ev) => serial(key, async function finishTurn() {
         chunks: [{ type: 'task_update', id: 't0', title: summary, status: 'complete' }] }).catch((e) => console.log('stop stream', key, e.data?.error ?? e.message));
       // Rewrite the finished status: summary, answer, and this turn's buttons.
       const lt = liveTurn.get(key);
-      const steps = live.closingLine(lt?.st, [...(s.rows_done ?? []), ...(s.cur_count ? [s.cur_label] : [])]);
       liveTurn.delete(key);
       // One element, the checklist on its own line: two elements sit side by side, and Slack's
       // plain text (notifications, copy) ran them together ("…your message✓ Exploring the code").
-      const kept = [{ type: 'context', elements: [{ type: 'mrkdwn', text: steps ? `${summary}\n${steps.slice(0, 2900)}` : summary }] }, ...body];
+      // One line, plus the open todos when the turn ended with work left on its list.
+      const left = lt?.st?.todos?.some((t) => t.status !== 'completed') ? live.todoLine(lt.st) : null;
+      const kept = [{ type: 'context', elements: [{ type: 'mrkdwn', text: left ? `${summary}\n${left.slice(0, 2900)}` : summary }] }, ...body];
       // The answer's own order: with several questions, each row of buttons sits
       // under its question, not all together at the end.
       const ordered = (msg.blocks ?? []).length ? [kept[0], ...msg.blocks] : [...kept, ...actions];
@@ -1773,12 +1775,18 @@ async function updateStatusNow(s, state, activity) {
     const news = state === 'starting' ? [] : unsent.get(s.key) ?? [];
     unsent.delete(s.key);
     const rows = state === 'starting' ? null : { ...live.advanceRows(s, news), step_n: (s.step_n ?? 0) + news.length };
-    const body = rows ? live.lineRows(liveTurn.get(s.key)?.st, rows) : log.map((t, i) => `${i === log.length - 1 ? '›' : '✓'} ${defuse(t)}`);
+    // Setup lists its boot steps with their times; once it is over it is one ticked row at the top of the turn.
+    const boot = activity.boot, cap = (t) => defuse(t.charAt(0).toUpperCase() + t.slice(1));
+    const bootRows = boot?.steps?.length ? boot.steps.map((x, i, a) => (i < a.length - 1 ? `✓ ${cap(x.step)} · ${x.s}s` : `› ${cap(x.step)}`)) : null;
+    const ready = state !== 'starting' && boot?.done && !s.boot_shown ? { boot_row: `✓ Got ready · ${boot.total}s`, boot_shown: true, boot_s: boot.total } : {};
+    const bootRow = ready.boot_row ?? s.boot_row;
+    const body = rows ? [...(bootRow ? [bootRow] : []), ...live.lineRows(liveTurn.get(s.key)?.st, rows)]
+      : bootRows ?? log.map((t, i) => `${i === log.length - 1 ? '›' : '✓'} ${defuse(t)}`);
     const n = rows?.step_n ?? 0;
     const msg = statusMessage({ title: statusTitle(s, VERB[state] ?? 'Working', Date.now() - since, n), rows: body, cmd: rows ? log.at(-1)?.replace(/^Running /, '') : null });
     // The rows, and the state word: a change of either is news; the clock alone is not.
     const nl = msg.text.indexOf('\n'), box = `${state}\n${nl < 0 ? '' : msg.text.slice(nl + 1)}`, age = Date.now() - (s.edit_at ?? 0);
-    const keep = { busy_since: since, last_act: doing, ...(rows ?? {}) };
+    const keep = { busy_since: since, last_act: doing, ...(rows ?? {}), ...ready };
     if (!s.status_ts) return { ...keep, status_ts: (await post(msg)).ts, status_text: msg.text, status_box: box, edit_at: Date.now() };
     if (msg.text === s.status_text || age < EDIT_MS || (box === s.status_box && age < CLOCK_MS)) return keep;
     await edit(msg);

@@ -51,7 +51,7 @@ test('steps become the rows a sandbox turn shows: a row per stage, a count withi
 });
 
 test('the summary line matches a sandbox turn', () => {
-  assert.equal(doneLine('Done', 4, 14_000, 19_000), 'Worked for 14s · 4 steps · reply 19s after the message');
+  assert.equal(doneLine('Done', 4, 14_000, 19_000), 'Worked for 14s · 4 steps');
   assert.equal(doneLine('Done', 1, 61_000), 'Worked for 1m 1s · 1 step');
 });
 
