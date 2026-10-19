@@ -761,7 +761,9 @@ async function onMessage({ message, client, replay = false }) {
   if (wrapUp && steers) {
     keepAside(s, message);
     await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: message.user,
-      text: "I'm wrapping up and opening the PR, so I can't act on this now. I kept it as context. Reply here once the PR is open, and I'll pick it up." }).catch(() => {});
+      text: fresh(s.key)?.wrap_push
+        ? "I'm pushing the branch, so I can't act on this now. I kept it as context, and I'll send it with your next message once the push is done."
+        : "I'm wrapping up and opening the PR, so I can't act on this now. I kept it as context. Reply here once the PR is open, and I'll pick it up." }).catch(() => {});
     return;
   }
   if (message.user !== s.owner && !(STEER_ANYONE && allowed(message.channel, message.user) && onTeam(s, message.user))) {
@@ -1853,6 +1855,8 @@ async function wrapTap(s, client, body, what, repo) {
 async function startWrap(s, client, what, user, msg, repo) {
   if (wrapping.has(s.key) || fresh(s.key)?.state === 'wrapping') return 'Already wrapping up. I will post here when it is done.';
   wrapping.add(s.key); setTimeout(() => wrapping.delete(s.key), 30_000);
+  // A push opens no PR, so a reply during it gets its own note (onMessage).
+  sessions.patch(s.key, { wrap_push: what.startsWith('Push') });
   unwrap.delete(s.key); // An earlier wrap's row must not come back on this wrap's refusal.
   const bm = fresh(s.key)?.buttons_msg, target = msg ?? (bm && { ...bm, blocks: bm.full ?? bm.blocks });
   if (target?.ts) {
