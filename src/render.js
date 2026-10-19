@@ -14,9 +14,9 @@ const buttons = (key, ...names) => ({
 // cap is per message; a section block would have failed past 3,000.
 const MD_MAX = 11500;
 // Agent text is untrusted: it must not ping (@here, @channel, a user group)
-// or hide a link behind a label. Slack's special <...> forms become plain text.
+// or hide a link behind a label. Slack's special <...> forms become plain text, and <url|label> shows its url.
 const defuse = (t) => String(t ?? '').replace(/<!(here|channel|everyone)[^>]*>/gi, '@$1').replace(/<!subteam\^[^>]*>/gi, '@group')
-  .replace(/<@[A-Z0-9]+>/g, '@someone');
+  .replace(/<@[A-Z0-9]+>/g, '@someone').replace(/<((?:https?|mailto):[^|>\s]+)\|[^>]*>/gi, '<$1>');
 const esc = (t) => defuse(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 // " in owner/repo" for a team stack's event, which names its repo.
 const repoOf = (ev) => (/^[\w.-]+\/[\w.-]+$/.test(ev.repo ?? '') ? ` in ${ev.repo}` : '');

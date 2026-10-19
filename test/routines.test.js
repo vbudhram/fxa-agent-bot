@@ -26,6 +26,12 @@ test('a routine report has its mentions made inert, and a long one goes as a fil
   assert.equal(routineReport('x'.repeat(2901)).snippet, true);
 });
 
+test('a routine report shows the real target of a labelled link', () => {
+  const r = routineReport('See <https://evil.example/login|the fixed PR #42> and <mailto:a@example.com|mail>.');
+  assert.ok(!r.text.includes('|the fixed PR #42>'), r.text);
+  assert.ok(r.text.includes('<https://evil.example/login>') && r.text.includes('<mailto:a@example.com>'), r.text);
+});
+
 test('the end texts: PR link, report kept off Slack, failure with the History link', () => {
   process.env.DASHBOARD_URL = 'https://dash.example.com/';
   assert.match(routineEnd(R, ENDS[0]), /^Code review: draft PR <https:\/\/github.com\/mozilla\/fxa\/pull\/12\|#12>\. The findings it did not fix are in the PR description\./);
