@@ -479,7 +479,7 @@ async function quick(key, p, client) {
 
 // At the session cap the request waits in line, as Claude Tag's does, instead
 // of failing. It retries every 30 s and gives up after 30 min.
-const QUEUE_RETRY_MS = Number(process.env.QUEUE_RETRY_MS) || 30_000, QUEUE_GIVE_UP_MS = 30 * 60_000;
+const QUEUE_RETRY_MS = Number(process.env.QUEUE_RETRY_MS) || 30_000, QUEUE_GIVE_UP_MS = Number(process.env.QUEUE_GIVE_UP_MS) || 30 * 60_000;
 // The files a launch downloaded, kept across its retries at the session cap: key -> {dir, note, urls}.
 const inboxes = new Map();
 // Done with a launch's files: remove them, and keep only the held files it did not take.
@@ -551,7 +551,10 @@ async function launch(key, client, since = Date.now(), retry = false) {
       sessions.patch(key, { state: 'stopped' });
       dropInbox(key, inbox);
       const drop = 'I waited 30 minutes and no session freed up, so I dropped this request. Tag me again to retry.';
-      if (!(await closeQueueLine(fresh(key), drop))) await say(s, drop);
+      // The edit stops the line promising a start; the reply is what notifies the thread (an edit does not).
+      await closeQueueLine(fresh(key), 'Not started: no session freed up in 30 minutes.');
+      await say(s, drop);
+      await settle(s, null);
       return;
     }
     // 8: say where the request is in line, and keep that one message current.
