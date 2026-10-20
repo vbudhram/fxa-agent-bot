@@ -7,7 +7,7 @@ const ENDS = [{ state: 'ok', pr: 'https://github.com/mozilla/fxa/pull/12', next:
   { state: 'report', post: false, next: 1792501200 }, { state: 'nochange', next: 1792501200 }, { state: 'failed', reason: 'the handoff check did not pass', next: 1792501200 },
   { state: 'failed', cost: true, next: 1792501200 }, { state: 'stopped', next: 1792501200 }];
 const ALL = [routineStart(R), routineStart({ ...R, since: null }), ...ENDS.map((e) => routineEnd(R, e)), ...ENDS.map((e) => routineEndLine(R, e)),
-  routineSkip({ name: 'Code review', reason: 'the team reached its daily spend cap', next: 1792501200 }), routineHint('report'), routineHint('pr')];
+  routineSkip({ name: 'Code review', reason: 'the team reached its daily spend cap', next: 1792501200 }), routineHint('report'), routineHint('pr'), routineHint('run')];
 
 test('routine texts show no dollar amount', () => { for (const t of ALL) assert.ok(!t.includes('$'), t); });
 
@@ -128,4 +128,12 @@ test('a routine with no channel needs no channel check, and its Slack calls are 
   const a = mutedReply(), b = mutedReply();
   assert.match(a.ts, /^\d+\.\d{6}$/);
   assert.notEqual(a.ts, b.ts);
+});
+
+test('a routine thread says a report is there only when one posted, and its hint follows how the run ended', () => {
+  assert.match(routineEnd(R, { state: 'report', post: true, posted: false }), /^Code review: the run ended with no report I could post here\..*History/);
+  assert.doesNotMatch(routineEnd(R, { state: 'report', post: true, posted: false }), /the report is in this thread/);
+  assert.match(routineEnd(R, { state: 'report', post: true, posted: true }), /the report is in this thread/);
+  assert.match(routineHint('run'), /^This thread is for a routine run\. I do not take requests here\./);
+  assert.doesNotMatch(routineHint('run'), /holds a routine's report|PR link/);
 });
