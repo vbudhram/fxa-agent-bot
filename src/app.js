@@ -2546,7 +2546,7 @@ async function endRoutine(key, end) {
   }
   // A later tag's hint follows what the thread shows: a report only when one posted, a PR only when the end names one.
   if (fresh(key)?.routine) sessions.patch(key, { routine: { ...fresh(key).routine, hint: posted ? 'report' : shown.state === 'ok' ? 'pr' : 'run' } });
-  const text = routineEnd(r, { ...shown, post, posted, next: a?.next });
+  const text = routineEnd(r, { ...shown, post, posted, blank: !end.report?.trim(), next: a?.next });
   await app.client.chat.update({ channel: s.channel, ts: r.start_ts, text: routineEndLine(r, shown) }).catch((e) => console.error('routine', key, `start edit: ${e.data?.error ?? e.message}`));
   await app.client.chat.postMessage({ ...at, text, reply_broadcast: true }).catch((e) => console.error('routine', key, `end post: ${e.data?.error ?? e.message}`));
 }
