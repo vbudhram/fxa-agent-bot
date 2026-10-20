@@ -2406,7 +2406,7 @@ async function autoRound(s, prev, cur) {
     if (comments.length) job = { note: (why) => copilotNote(comments, why), text: copilotRound(comments, randomBytes(6).toString('hex')) };
   } else if (ciKey && ciKey !== s.ci_seen) {
     seen = { ci_seen: ciKey };
-    job = { note: (why) => ciNote(cur, why), text: ciRound(cur) };
+    job = { note: (why) => ciNote(cur, why), text: ciRound(cur, randomBytes(6).toString('hex')) };
   }
   const pp = (fields) => sessions.patch(s.key, prPatch(fresh(s.key), s.repo, fields));
   if (!job) { if (seen) pp(seen); return; }

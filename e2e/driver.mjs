@@ -72,7 +72,7 @@ export async function runScenario(app, view, scenario) {
     // {says, files}: a message with attached files (names only; the URLs are fake).
     if (typeof a === 'string' || a.says !== undefined) {
       const text = mentions(a.says ?? a, scenario.people);
-      const files = (a.files ?? []).map((name, n) => ({ id: `F${i}${n}`, name, size: 100, url_private_download: `https://files.slack.fake/${name}` }));
+      const files = (a.files ?? []).map((name, n) => ({ id: `F${i}${n}`, name, size: 100, url_private_download: `https://files.slack.com/files-pri/T0/F${i}${n}/${name}` }));
       const m = view.personSays(p, CHANNEL, text, root);
       m.step = i;
       if (!root) roots[t] = m.ts;

@@ -21,6 +21,10 @@ bolt.webApi.WebClient.prototype.apiCall = async function (method, args = {}) {
 // files.uploadV2 is bound to its own method, which needs a real upload URL: the view gets the call instead.
 bolt.webApi.WebClient.prototype.filesUploadV2 = async function (args = {}) { return view.apply('files.uploadV2', args); };
 
+// The bot downloads thread files from Slack's file host with its token: answer here, never on the network.
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (url, opts) => (String(url).startsWith('https://files.slack.com/') ? new Response(`fake file ${String(url).split('/').pop()}\n`) : realFetch(url, opts));
+
 let app = null;
 bolt.SocketModeReceiver.prototype.start = async function () {
   app = this.app;
