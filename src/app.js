@@ -490,7 +490,7 @@ function dropInbox(key, box) {
   const left = (fresh(key).held_files ?? []).filter((f) => !box.urls.includes(f.url));
   sessions.patch(key, { held_files: left.length ? left : null });
 }
-async function launch(key, client, since = Date.now()) {
+async function launch(key, client, since = Date.now(), retry = false) {
   const s = fresh(key);
   if (!s || s.state !== 'queued') { dropInbox(key, inboxes.get(key)); return; } // stopped or restarted while waiting
   // Every start and resume meets here: access can change after a session began, so check it again.
@@ -505,10 +505,14 @@ async function launch(key, client, since = Date.now()) {
   }
   // The private-channel rule of begin(), again: a session queued before a bot restart comes here with no begin().
   // Not a routine run: it has its own channel rule (D8), and a routine with no channel posts nothing.
-  if (!routine && s.private && !(await codeAllowed({ private: true, channel: s.channel }, client))) {
+  // Not a retry at the cap: the first try checked it, and a Slack error on a later try must not stop it.
+  if (!retry && !routine && s.private && !(await codeAllowed({ private: true, channel: s.channel }, client))) {
     sessions.patch(key, { state: 'stopped' });
     dropInbox(key, inboxes.get(key));
-    await say(s, 'This team has a private repo, so its sessions run only in a private channel. Start it there.').catch(() => {});
+    const text = 'This team has a private repo, so its sessions run only in a private channel. Start it there.';
+    // A session queued before a restart has an "In line" message: it becomes the refusal.
+    if (s.queue_ts) await app.client.chat.update({ channel: s.channel, ts: s.queue_ts, text, blocks: [] }).catch(() => {});
+    else await say(s, text).catch(() => {});
     return;
   }
   // The dashboard links each session to its thread; a lookup failure only drops the link.
@@ -563,7 +567,7 @@ async function launch(key, client, since = Date.now()) {
       await app.client.chat.update({ channel: s.channel, ts: cur.queue_ts, ...msg }).catch(() => {});
       sessions.patch(key, { queue_pos: pos });
     }
-    setTimeout(() => launch(key, client, since).catch((err) => console.error('launch', key, err.message)), QUEUE_RETRY_MS);
+    setTimeout(() => launch(key, client, since, true).catch((err) => console.error('launch', key, err.message)), QUEUE_RETRY_MS);
     return;
   }
   // Stopped while ctl.task ran: take the runner back down.
