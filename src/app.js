@@ -1359,12 +1359,12 @@ async function startStatusNow(s, verb) {
   if (!cur || cur.status_ts || cur.muted) return;
   steps.delete(s.key); unsent.delete(s.key); stepAt.delete(s.key); said.delete(s.key);
   liveTurn.set(s.key, newLive());
-  const asker = askers.get(ackList(cur)[0]) ?? cur.owner, asker_name = await askerName(cur);
+  const asker_name = await askerName(cur);
   const msg = statusMessage({ title: statusTitle({ ...cur, asker_name }, verb, 0, 0) });
   // A request that waited in line already has its status message: it changes in place.
   const ts = cur.queue_ts ? await app.client.chat.update({ channel: s.channel, ts: cur.queue_ts, ...msg }).then(() => cur.queue_ts, () => null) : null;
   const status_ts = ts ?? (await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...msg })).ts;
-  sessions.patch(cur.key, { status_ts, queue_ts: null, status_text: msg.text, status_box: `${cur.state}\n`, asker, asker_name, edit_at: Date.now(), busy_since: Date.now(), status_opened_at: Date.now(), last_act: null,
+  sessions.patch(cur.key, { status_ts, queue_ts: null, status_text: msg.text, status_box: `${cur.state}\n`, asker_name, edit_at: Date.now(), busy_since: Date.now(), status_opened_at: Date.now(), last_act: null,
     step_n: 0, rows_done: null, cur_kind: null, cur_count: 0, cur_label: null });
   if (cur.state === 'active') ensureWatch(s.key);
 }
@@ -1432,7 +1432,7 @@ const finishTurn = (key, msg, ev) => serial(key, async function finishTurn() {
       // One element, the checklist on its own line: two elements sit side by side, and Slack's
       // plain text (notifications, copy) ran them together ("…your message✓ Exploring the code").
       // One line, plus the open todos when the turn ended with work left on its list.
-      const left = lt?.st?.todos?.some((t) => t.status !== 'completed') ? live.todoLine(lt.st) : null;
+      const left = lt?.st ? live.openTodoLine(lt.st) : null;
       const kept = [{ type: 'context', elements: [{ type: 'mrkdwn', text: left ? `${summary}\n${left.slice(0, 2900)}` : summary }] }, ...body];
       // The answer's own order: with several questions, each row of buttons sits
       // under its question, not all together at the end.

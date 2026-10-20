@@ -74,6 +74,8 @@ export function summary(st) {
 // The finished turn's checklist, compact: every todo with its mark.
 export const todoLine = (st) => (st.todos ?? []).length
   ? todoRows(st).map((r) => `${r.status === 'complete' ? '✓' : '○'} ${r.title}`).join('  ·  ') : null;
+// The same line only when a todo is still open: a turn that finished its list says nothing more.
+export const openTodoLine = (st) => (st?.todos ?? []).some((t) => t.status !== 'completed') ? todoLine(st) : null;
 
 // The status's stage rows, not raw commands. rows: {rows_done, cur_kind, cur_label, cur_count}
 // as the last update left them; each new step joins its stage row or opens the next one.

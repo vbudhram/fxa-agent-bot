@@ -6,7 +6,9 @@ export default {
     { root: /^Code review \(routine for monitor\) started\. I review the commits on mozilla\/fxa main since <!date\^1792200000\^/,
       wait: { ctl: /"task","--source","routine","--routine-run","31"/ },
       expect: { ctl: { cmd: 'task', team: 'monitor', match: /^\[\["task","--source","routine","--routine-run","31","--id","agent-[a-z0-9]+","--thread","C_TEST:[0-9.]+","--link","[^"]+"\]/, n: 1 } } },
-    { advance: 'setup', wait: { text: /Working/ }, expect: { postCount: { match: /<@routine:|is not on the/, n: 0 } } },
+    { advance: 'setup', wait: { text: /Working/ }, expect: { postCount: { match: /<@routine:|is not on the/, n: 0 },
+      // Only the first tick after the bot starts takes the runs a dead bot left (--resume); the later ticks do not.
+      ctl: { cmd: 'routine', match: /"tick".*"--resume"/, n: 1 } } },
   ],
   judge: 'A routine run looks like any session in its thread: a live status, and no odd mention of a fake user.',
 };

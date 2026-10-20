@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { start, reduce, todoRows, currentRow, facts, summary, todoLine, advanceRows, lineRows, lostContact, LOST_MS, GIVE_UP_MS, MAX_ROWS, lastNote } from '../src/live.js';
+import { start, reduce, todoRows, currentRow, facts, summary, todoLine, openTodoLine, advanceRows, lineRows, lostContact, LOST_MS, GIVE_UP_MS, MAX_ROWS, lastNote } from '../src/live.js';
 
 const feed = (evs) => evs.reduce(reduce, start());
 const todos = (...s) => ({ type: 'todos', items: s.map(([content, status, active]) => ({ content, status, active })) });
@@ -88,8 +88,9 @@ test('a status reply names the time, the todo in progress, the last step and the
 
 test('a turn that ends with work left lists its todos, ticked and open', () => {
   const todos = (...ss) => reduce(start(), { type: 'todos', items: ss.map((x, i) => ({ content: `t${i}`, status: x })) });
-  assert.equal(todoLine(todos('completed', 'pending')), '✓ t0  ·  ○ t1');
-  assert.equal(todoLine(start()), null);
+  assert.equal(openTodoLine(todos('completed', 'pending')), '✓ t0  ·  ○ t1');
+  assert.equal(openTodoLine(todos('completed', 'completed')), null);
+  assert.equal(openTodoLine(start()), null);
 });
 
 test('the status line shows stage rows, not raw commands', () => {
