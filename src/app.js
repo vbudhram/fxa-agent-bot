@@ -325,7 +325,8 @@ async function begin(key, client) {
   if (from) pr.resumed_profile = from.profile ?? from.resumed_profile;
   // private (a private repo) on every way a session starts: a resume keeps it, else the team says, and no answer is private.
   if (rest.private === undefined) {
-    const prof = rest.profile ?? pr.resumed_profile;
+    // A moved PR whose old session left the map: its team comes from find-pr (rest.resumed_profile).
+    const prof = rest.profile ?? pr.resumed_profile ?? rest.resumed_profile;
     rest.private = from?.private ?? (prof && prof !== 'fxa' ? await ctl.profileInfo(prof).then((i) => i.private !== false).catch(() => true) : false);
   }
   // A team with a private repo runs only in a private channel: its replies hold its code, not only its diffs.
@@ -1013,7 +1014,7 @@ async function checkout(s, p, text, m, client, note, teams) {
     const old = sessions.all().find((x) => x.key === found.key);
     const key = sessions.newKey();
     pending.set(key, { prompt, request: prompt, owner: m.user, team: old?.team ?? s?.team, channel: m.channel, thread_ts: m.thread_ts,
-      resume_from: found.key, moved_from: found.key, runtime: old?.runtime || 'claude' });
+      resume_from: found.key, moved_from: found.key, runtime: old?.runtime || 'claude', resumed_profile: found.profile || undefined });
     await say({ channel: m.channel, thread_ts: m.thread_ts }, `Moving ${p.url} here: its branch, its work so far, and its PR card. The old thread stops following it.`);
     const link = await client.chat.getPermalink({ channel: m.channel, message_ts: m.thread_ts }).then((r) => r.permalink, () => null);
     // A refused start (a private team in a public channel) moves nothing: the old thread keeps the PR.
