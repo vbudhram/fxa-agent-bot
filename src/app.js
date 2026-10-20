@@ -511,9 +511,9 @@ async function launch(key, client, since = Date.now(), retry = false) {
     sessions.patch(key, { state: 'stopped' });
     dropInbox(key, inboxes.get(key));
     const text = 'This team has a private repo, so its sessions run only in a private channel. Start it there.';
-    // A session queued before a restart has an "In line" message: it becomes the refusal.
-    if (s.queue_ts) await app.client.chat.update({ channel: s.channel, ts: s.queue_ts, text, blocks: [] }).catch(() => {});
-    else await say(s, text).catch(() => {});
+    // A session queued before a restart has an "In line" message: it stops promising a start, and the reply notifies.
+    if (s.queue_ts) await app.client.chat.update({ channel: s.channel, ts: s.queue_ts, text: 'Not started.', blocks: [] }).catch(() => {});
+    await say(s, text).catch(() => {});
     return;
   }
   // The dashboard links each session to its thread; a lookup failure only drops the link.
