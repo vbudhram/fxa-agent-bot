@@ -1,5 +1,5 @@
 // npm run e2e [-- name-filter]: run each scenario against the real bot, fake Slack and fake-ctl.
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -7,7 +7,15 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BOT = resolve(HERE, '..');
-const CTL = process.env.FXA_CTL_REPO || resolve(BOT, '../fxa-sandbox-ctl');
+// The controller: FXA_CTL_REPO, else its worktree on this bot branch's name (as CI picks), else the sibling tree.
+function ctlTree() {
+  const sib = resolve(BOT, '../fxa-sandbox-ctl'), git = (d, ...a) => { try { return execFileSync('git', ['-C', d, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return ''; } };
+  const branch = git(BOT, 'branch', '--show-current');
+  const wt = branch && git(sib, 'worktree', 'list', '--porcelain').split('\n\n').map((b) => b.split('\n'))
+    .find((l) => l.includes(`branch refs/heads/${branch}`))?.[0]?.replace(/^worktree /, '');
+  return wt || sib;
+}
+const CTL = process.env.FXA_CTL_REPO || ctlTree();
 const PARALLEL = 8;
 const CHROME = process.env.E2E_CHROME || `${homedir()}/Library/Caches/ms-playwright/chromium_headless_shell-1234/chrome-headless-shell-mac-arm64/chrome-headless-shell`;
 const flags = new Set(process.argv.slice(2).filter((a) => a.startsWith('--')));
