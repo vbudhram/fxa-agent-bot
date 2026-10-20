@@ -556,7 +556,7 @@ async function launch(key, client, since = Date.now(), retry = false) {
       const drop = 'I waited 30 minutes and no session freed up, so I dropped this request. Tag me again to retry.';
       // The edit stops the line promising a start; the reply is what notifies the thread (an edit does not).
       await closeQueueLine(fresh(key), 'Not started: no session freed up in 30 minutes.');
-      await say(s, drop);
+      await say(s, drop).catch(() => {});
       await settle(s, null);
       return;
     }
