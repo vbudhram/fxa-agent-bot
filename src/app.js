@@ -377,9 +377,13 @@ async function followUp(s, message, text, client, route = text) {
 }
 
 // quickStatus: the status a sandbox turn shows (an edited message), for the quick look's steps.
+// Quick looks with a live status: they share the workspace's chat.update budget with the sessions (editGap).
+let liveQuicks = 0;
 function quickStatus(p) {
   const t0 = Date.now(), asked = Number(p.acks?.[0]) * 1000 || 0;
-  let ts = null, tick = null, closed = false, chain = Promise.resolve(), n = 0, lastStep = '';
+  let ts = null, tick = null, closed = false, chain = Promise.resolve(), n = 0, lastStep = '', sent = '', sentAt = 0;
+  liveQuicks++;
+  const close = () => { if (!closed) liveQuicks--; closed = true; clearInterval(tick); };
   let st = { t: 0, kind: null, label: FIRST_ROW, count: 0 };
   const at = () => ({ channel: p.channel, ts });
   const run = (fn) => (chain = chain.then(fn).catch((e) => console.error('quick_status', e.data?.error ?? e.message)));
@@ -390,7 +394,13 @@ function quickStatus(p) {
       cmd: n ? lastStep.replace(/^Running /, '') : null, id: `quick-${t0}` });
     ({ ts } = await app.client.chat.postMessage({ channel: p.channel, thread_ts: p.thread_ts, ...msg() }));
     // answer() or done() may come before this run ends: then no timer, or it would edit a closed status.
-    if (!closed) tick = setInterval(() => run(() => app.client.chat.update({ ...at(), ...msg() })), 3000);
+    // An edit only for a new step, or for the clock every 15 s, as a sandbox turn's status does.
+    sent = `${n}|${lastStep}`; sentAt = Date.now();
+    if (!closed) tick = setInterval(() => run(async () => {
+      if (`${n}|${lastStep}` === sent && Date.now() - sentAt < CLOCK_MS) return;
+      sent = `${n}|${lastStep}`; sentAt = Date.now();
+      await app.client.chat.update({ ...at(), ...msg() });
+    }), 3000);
   });
   return {
     count: () => n,
@@ -399,7 +409,7 @@ function quickStatus(p) {
     },
     // The answer takes the status's place, as a sandbox turn's reply does: the summary, then the answer.
     answer: (msg) => {
-      closed = true; clearInterval(tick);
+      close();
       return run(async () => {
         const summary = doneLine('Done', n, Date.now() - t0, asked ? Date.now() - asked : 0);
         const blocks = [{ type: 'context', elements: [{ type: 'mrkdwn', text: summary }] }, ...(msg.blocks ?? [md(msg.text)])];
@@ -409,7 +419,7 @@ function quickStatus(p) {
     },
     // word: on the way to a sandbox, or stopped; a status with no steps goes away.
     done: (word) => {
-      closed = true; clearInterval(tick);
+      close();
       return run(async () => {
         if (!ts) return;
         // On the way to a sandbox the quick look's status goes: the sandbox's status takes
@@ -509,7 +519,7 @@ async function launch(key, client, since = Date.now()) {
     if (!/cap \d+ \(FXA_SESSION_MAX\)/.test(e.stderr ?? '')) dropInbox(key, inbox);
     if (!/cap \d+ \(FXA_SESSION_MAX\)/.test(e.stderr ?? '')) {
       if (routine) { console.error('routine', key, e.stderr || e.message); await endRoutine(key, { state: 'failed', reason: lastLine(e.stderr) || 'the session did not start' }); return; }
-      sessions.patch(key, { state: 'failed' }); await fail(client, s, e); return;
+      sessions.patch(key, { state: 'failed' }); await closeQueueLine(fresh(key), 'Not started: the sandbox did not start.'); await fail(client, s, e); return;
     }
     // The tick already waited for a slot (D16), and its reconcile fails a claimed run with no session after 10 min.
     if (routine) { await endRoutine(key, { state: 'failed', reason: 'no runner free' }); return; }
@@ -517,7 +527,8 @@ async function launch(key, client, since = Date.now()) {
       console.error('queue_dropped', key, 'no session freed up in 30 minutes');   // counted on the dashboard
       sessions.patch(key, { state: 'stopped' });
       dropInbox(key, inbox);
-      await say(s, 'I waited 30 minutes and no session freed up, so I dropped this request. Tag me again to retry.');
+      const drop = 'I waited 30 minutes and no session freed up, so I dropped this request. Tag me again to retry.';
+      if (!(await closeQueueLine(fresh(key), drop))) await say(s, drop);
       return;
     }
     // 8: say where the request is in line, and keep that one message current.
@@ -1359,7 +1370,7 @@ const nowOf = (rows) => rows.find((r) => r.startsWith('›'))?.slice(2).replace(
 // Slack allows an app about 50 chat.update calls a minute in a workspace: one live turn edits every
 // 1.2 s, and turns at once share that budget. The clock alone moves every 15 s.
 const CLOCK_MS = 15_000;
-const editGap = () => Math.min(5000, 1200 * Math.max(1, sessions.all().filter((x) => x.status_ts && x.busy_since).length));
+const editGap = () => Math.min(5000, 1200 * Math.max(1, sessions.all().filter((x) => x.status_ts && x.busy_since).length + liveQuicks));
 const trailing = new Set(); // sessions with an edit waiting for its gap to end
 const MOVE_MS = Number(process.env.STATUS_MOVE_MS) || 60_000; // a status moves below new replies at most once a minute
 // The status is an edited message that everyone in the thread sees: a native stream shows its steps to one person only.
@@ -2074,11 +2085,19 @@ const ranFor = (s) => { const m = Math.max(1, Math.round((Date.now() - (s.starte
 
 // 11: one way to end a session, so no path leaves the live status, the watch,
 // or the runner behind. False when the runner could not be stopped.
+// A request that waited in line and never started: its "In line" message says why, so it no longer promises a start.
+async function closeQueueLine(s, text) {
+  if (!s?.queue_ts) return false;
+  const ok = await app.client.chat.update({ channel: s.channel, ts: s.queue_ts, text, blocks: [{ type: 'context', elements: [{ type: 'mrkdwn', text }] }] }).then(() => true, () => false);
+  sessions.patch(s.key, { queue_ts: null });
+  return ok;
+}
 async function stopSession(key) {
   const s = fresh(key);
   if (!s) return true;
   const hadRunner = s.state !== 'queued';
   sessions.patch(key, { state: 'stopped' });
+  await closeQueueLine(s, 'Stopped before it started.');
   stopWatch(key);
   await updateStatus(key, 'stopped', { busy: false }).catch(() => {});
   await settle(s, null);
