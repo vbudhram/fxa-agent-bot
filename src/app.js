@@ -321,6 +321,9 @@ async function begin(key, client) {
   if (from?.prs) pr.prs = carryPrs(from.prs, Boolean(rest.moved_from));
   if (rest.moved_from) Object.assign(pr, { pr_card_ts: null, pr_card_head: null, pr_card_text: null });
   if (from?.trees) pr.trees = from.trees;
+  // The thread's newest buttons move with it, so the new session's first row retires them. Not on a move: those are in the old thread.
+  const prior = from ?? sessions.get(rest.channel, rest.thread_ts);
+  if (prior?.buttons_msg && !rest.moved_from) pr.buttons_msg = prior.buttons_msg;
   // The team the resumed session ran as: the new record replaces the old one in this thread, and launch checks it.
   if (from) pr.resumed_profile = from.profile ?? from.resumed_profile;
   // private (a private repo) on every way a session starts: a resume keeps it, else the team says, and no answer is private.
