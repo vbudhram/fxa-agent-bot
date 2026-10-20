@@ -28,7 +28,8 @@ export function stepChecks(expect = {}, ctx) {
     else if (k === 'reaction') { const m = ctx.target(v.on ?? 'self');
       need(m && m.reactions.has(v.name) && (!v.not || !m.reactions.has(v.not)), `:${v.name}:${v.not ? ` and not :${v.not}:` : ''} on ${v.on ?? 'self'}, saw ${m ? [...m.reactions].join(',') || 'none' : 'no message'}`); }
     else if (k === 'calls') { const n = view.calls.filter((c) => c.method === v.method && (!v.match || v.match.test(JSON.stringify(c.args)))).length;
-      need(n === v.n, `${v.n} ${v.method} call(s)${v.match ? ` matching ${v.match}` : ''} in all, saw ${n}`); }
+      // max: at most that many, for a count that timing can lower (a clock edit that the answer beats).
+      need(v.max != null ? n <= v.max : n === v.n, `${v.max != null ? `at most ${v.max}` : v.n} ${v.method} call(s)${v.match ? ` matching ${v.match}` : ''} in all, saw ${n}`); }
     else if (k === 'noReaction') { const m = ctx.target(v.on ?? 'self'); need(m && !m.reactions.has(v.name), `no :${v.name}: on ${v.on ?? 'self'}`); }
     else if (k === 'edited') need(touched.some((m) => m.bot && m.edits && (!v.match || v.match.test(said(m)))), `an edited bot message${v.match ? ` matching ${v.match}` : ''}`);
     else if (k === 'text') need(touched.some((m) => m.bot && !m.to && v.test(said(m))), `a bot message matching ${v}`);
