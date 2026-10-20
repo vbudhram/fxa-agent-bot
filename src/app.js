@@ -503,6 +503,14 @@ async function launch(key, client, since = Date.now()) {
     await say(s, `<@${s.owner}> is not on the ${team} team now, so this session does not start.`).catch(() => {});
     return;
   }
+  // The private-channel rule of begin(), again: a session queued before a bot restart comes here with no begin().
+  // Not a routine run: it has its own channel rule (D8), and a routine with no channel posts nothing.
+  if (!routine && s.private && !(await codeAllowed({ private: true, channel: s.channel }, client))) {
+    sessions.patch(key, { state: 'stopped' });
+    dropInbox(key, inboxes.get(key));
+    await say(s, 'This team has a private repo, so its sessions run only in a private channel. Start it there.').catch(() => {});
+    return;
+  }
   // The dashboard links each session to its thread; a lookup failure only drops the link.
   const linkP = app.client.chat.getPermalink({ channel: s.channel, message_ts: s.thread_ts }).then((r) => r.permalink, () => undefined);
   let inbox;
