@@ -379,7 +379,7 @@ async function followUp(s, message, text, client, route = text) {
 // quickStatus: the status a sandbox turn shows (an edited message), for the quick look's steps.
 function quickStatus(p) {
   const t0 = Date.now(), asked = Number(p.acks?.[0]) * 1000 || 0;
-  let ts = null, tick = null, chain = Promise.resolve(), n = 0, lastStep = '';
+  let ts = null, tick = null, closed = false, chain = Promise.resolve(), n = 0, lastStep = '';
   let st = { t: 0, kind: null, label: FIRST_ROW, count: 0 };
   const at = () => ({ channel: p.channel, ts });
   const run = (fn) => (chain = chain.then(fn).catch((e) => console.error('quick_status', e.data?.error ?? e.message)));
@@ -389,7 +389,8 @@ function quickStatus(p) {
     const msg = () => statusMessage({ title: statusTitle(who, 'Working', Date.now() - t0, n, n ? st.label : null), rows: n ? [`› ${rowTitle(st)}`] : [],
       cmd: n ? lastStep.replace(/^Running /, '') : null, id: `quick-${t0}` });
     ({ ts } = await app.client.chat.postMessage({ channel: p.channel, thread_ts: p.thread_ts, ...msg() }));
-    tick = setInterval(() => run(() => app.client.chat.update({ ...at(), ...msg() })), 3000);
+    // answer() or done() may come before this run ends: then no timer, or it would edit a closed status.
+    if (!closed) tick = setInterval(() => run(() => app.client.chat.update({ ...at(), ...msg() })), 3000);
   });
   return {
     count: () => n,
@@ -398,7 +399,7 @@ function quickStatus(p) {
     },
     // The answer takes the status's place, as a sandbox turn's reply does: the summary, then the answer.
     answer: (msg) => {
-      clearInterval(tick);
+      closed = true; clearInterval(tick);
       return run(async () => {
         const summary = doneLine('Done', n, Date.now() - t0, asked ? Date.now() - asked : 0);
         const blocks = [{ type: 'context', elements: [{ type: 'mrkdwn', text: summary }] }, ...(msg.blocks ?? [md(msg.text)])];
@@ -408,7 +409,7 @@ function quickStatus(p) {
     },
     // word: on the way to a sandbox, or stopped; a status with no steps goes away.
     done: (word) => {
-      clearInterval(tick);
+      closed = true; clearInterval(tick);
       return run(async () => {
         if (!ts) return;
         // On the way to a sandbox the quick look's status goes: the sandbox's status takes
@@ -1361,9 +1362,6 @@ const CLOCK_MS = 15_000;
 const editGap = () => Math.min(5000, 1200 * Math.max(1, sessions.all().filter((x) => x.status_ts && x.busy_since).length));
 const trailing = new Set(); // sessions with an edit waiting for its gap to end
 const MOVE_MS = Number(process.env.STATUS_MOVE_MS) || 60_000; // a status moves below new replies at most once a minute
-// STATUS_EMOJI names an animated custom emoji (a spinner GIF); without one the
-// hourglass flips on each edit so the line still visibly ticks.
-const spinner = (n) => process.env.STATUS_EMOJI || (n % 2 ? ':hourglass:' : ':hourglass_flowing_sand:');
 // The status is an edited message that everyone in the thread sees: a native stream shows its steps to one person only.
 const unsent = new Map(); // key → steps not yet shown in the status
 // status_kind: a field old records may hold ('stream' or 'line'); nothing reads it, and a clear drops it.
@@ -2016,7 +2014,9 @@ async function showLost(key, ok) {
   }
   const title = r.show === 'warn' ? ':warning: Lost contact with the sandbox, retrying…' : 'Reconnected to the sandbox';
   const at = { channel: s.channel, ts: s.status_ts };
-  if (r.show === 'warn') await app.client.chat.update({ ...at, text: `${title}\n${s.status_text ?? ''}`.trim() }).catch(() => {});
+  // The warning is the plan's title, with the rows it had: a text-only edit keeps the old blocks, so nobody sees it.
+  const rows = (s.status_text ?? '').split('\n').slice(1).filter(Boolean);
+  if (r.show === 'warn') await app.client.chat.update({ ...at, ...statusMessage({ title, rows, id: `${s.key}-${s.status_opened_at ?? s.busy_since}` }) }).catch(() => {});
 }
 
 async function mindLifetime(key, state) {

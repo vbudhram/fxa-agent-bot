@@ -12,7 +12,12 @@ const scenario = process.env.E2E_PERSONA
   : (await import(process.env.E2E_SCENARIO)).default;
 const view = createView({ names: Object.fromEntries(Object.keys(scenario.people).map((p) => [`U${p}`, p])) });
 
-bolt.webApi.WebClient.prototype.apiCall = async function (method, args = {}) { return view.apply(method, args); };
+// E2E_SLOW=<method>=<ms>: that Slack method answers late, as a slow workspace does (a race in the bot shows).
+const [slowMethod, slowMs] = (process.env.E2E_SLOW ?? '').split('=');
+bolt.webApi.WebClient.prototype.apiCall = async function (method, args = {}) {
+  if (method === slowMethod) await new Promise((r) => setTimeout(r, Number(slowMs) || 0));
+  return view.apply(method, args);
+};
 // files.uploadV2 is bound to its own method, which needs a real upload URL: the view gets the call instead.
 bolt.webApi.WebClient.prototype.filesUploadV2 = async function (args = {}) { return view.apply('files.uploadV2', args); };
 
