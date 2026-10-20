@@ -629,10 +629,11 @@ const nextRun = (t) => (t ? ` Next run: ${dateToken(t)}.` : '');
 const WHAT = { 'code-review': 'review the commits', 'ux-review': 'review the UI changes', 'perf-review': 'look for slow paths in the code changed',
   'security-review': 'review the code changed' };
 // The dashboard page where a team admin reads a run's History; null when the bot knows no dashboard.
-const historyLink = (team) => {
+// routine: the routine's id, so the page opens on this thread's routine, not the one that ran last.
+const historyLink = (team, routine) => {
   const base = process.env.DESKTOP_GATEWAY || process.env.DASHBOARD_URL;
-  // The dashboard's router reads the hash as view/tab/selection: the teams view, its routines tab, this team.
-  return base ? `<${base.replace(/\/+$/, '')}/#teams/routines/${encodeURIComponent(team)}|History>` : 'History';
+  const id = Number.isInteger(routine) && routine > 0 ? `/${routine}` : '';
+  return base ? `<${base.replace(/\/+$/, '')}/#teams/${encodeURIComponent(team)}/routines${id}|History>` : 'History';
 };
 export function routineStart(r) {
   const where = `${(r.repos ?? []).map(esc).join(', ')}${r.branch ? ` ${esc(r.branch)}` : ''}`;
@@ -645,17 +646,17 @@ export function routineEnd(r, end) {
   const n = esc(r.name), next = nextRun(end.next);
   if (end.state === 'ok') return `${n}: draft PR ${gh(end.pr) ? `<${end.pr}|#${end.pr.split('/').pop()}>` : 'opened'}.${r.mode === 'pr+notes' ? ' The findings it did not fix are in the PR description.' : ''}${next}`;
   if (end.state === 'report') return end.post === false
-    ? `${n}: the report holds data I do not post in Slack. A team admin can read it in the dashboard ${historyLink(r.team)}.${next}`
-    : end.posted === false ? `${n}: the run ended with no report I could post here. A team admin can read it in the dashboard ${historyLink(r.team)}.${next}`
+    ? `${n}: the report holds data I do not post in Slack. A team admin can read it in the dashboard ${historyLink(r.team, r.routine)}.${next}`
+    : end.posted === false ? `${n}: the run ended with no report I could post here. A team admin can read it in the dashboard ${historyLink(r.team, r.routine)}.${next}`
     : `${n}: the report is in this thread. No code changed.${next}`;
   if (end.state === 'nochange') return `${n}: no issue to fix.${next}`;
   // done did not answer: nothing is recorded, so nothing of the run is posted.
-  if (end.state === 'store') return `${n}: I could not record this run's result, so I post nothing from it. A team admin can see the run in the dashboard ${historyLink(r.team)}.`;
+  if (end.state === 'store') return `${n}: I could not record this run's result, so I post nothing from it. A team admin can see the run in the dashboard ${historyLink(r.team, r.routine)}.`;
   // done changed nothing: the run had ended before (a reconcile or another end); its row has the result.
-  if (end.state === 'ended') return `${n}: this run had ended already. A team admin can see its result in the dashboard ${historyLink(r.team)}.${next}`;
+  if (end.state === 'ended') return `${n}: this run had ended already. A team admin can see its result in the dashboard ${historyLink(r.team, r.routine)}.${next}`;
   if (end.state === 'stopped') return `${n} stopped by a team admin.${next}`;
   if (end.cost) return `${n} stopped at its cost limit.${next}`;
-  return `${n} failed: ${esc(end.reason || 'the run did not finish')}. A team admin can see the log in the dashboard: ${historyLink(r.team)}.${next}`;
+  return `${n} failed: ${esc(end.reason || 'the run did not finish')}. A team admin can see the log in the dashboard: ${historyLink(r.team, r.routine)}.${next}`;
 }
 // The start message's end state, one line (D22): the full end text goes once, as the broadcast reply.
 const END_WORD = { ok: 'done', report: 'done', nochange: 'no change', stopped: 'stopped', ended: 'ended', store: 'not recorded' };

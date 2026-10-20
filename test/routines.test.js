@@ -35,8 +35,10 @@ test('a routine report shows the real target of a labelled link', () => {
 test('the end texts: PR link, report kept off Slack, failure with the History link', () => {
   process.env.DASHBOARD_URL = 'https://dash.example.com/';
   assert.match(routineEnd(R, ENDS[0]), /^Code review: draft PR <https:\/\/github.com\/mozilla\/fxa\/pull\/12\|#12>\. The findings it did not fix are in the PR description\./);
-  assert.match(routineEnd(R, ENDS[2]), /holds data I do not post in Slack.*<https:\/\/dash\.example\.com\/#teams\/routines\/fxa\|History>/);
-  assert.match(routineEnd(R, ENDS[4]), /^Code review failed: the handoff check did not pass\. .*<https:\/\/dash\.example\.com\/#teams\/routines\/fxa\|History>/);
+  assert.match(routineEnd(R, ENDS[2]), /holds data I do not post in Slack.*<https:\/\/dash\.example\.com\/#teams\/fxa\/routines\|History>/);
+  assert.match(routineEnd(R, ENDS[4]), /^Code review failed: the handoff check did not pass\. .*<https:\/\/dash\.example\.com\/#teams\/fxa\/routines\|History>/);
+  // With the routine's id, the link opens that routine's History, not the team's newest run.
+  assert.match(routineEnd({ ...R, routine: 7 }, ENDS[4]), /#teams\/fxa\/routines\/7\|History>/);
   assert.match(routineEnd(R, ENDS[5]), /^Code review stopped at its cost limit\./);
   delete process.env.DASHBOARD_URL;
 });
