@@ -99,6 +99,7 @@ const busy = new Set();    // sessions with a poll in flight
 const fromBot = (m) => Boolean(m?.bot_id) && !(process.env.DRIVER_APP_ID && m.app_id === process.env.DRIVER_APP_ID && botUserId && m.user && m.user !== botUserId);
 // A team record's channels count as allowed ones: a new team's channel needs no restart.
 const inChannels = (channel) => CHANNELS.includes(channel) || teamChannels().includes(channel);
+const unwatchedSaid = new Set(); // channel:thread where the not-watched reply went, once each
 const allowed = (channel, user) => inChannels(channel) && (USERS.includes('*') || USERS.includes(user)) && gateAllows(GATES, gateMembers, channel, user);
 // The session's owner, or someone on its team: only they may steer, answer, interrupt or resume it. The channel gate
 // alone let a person allowed in the channel but not on a gated team drive that team's repos and secrets.
@@ -180,6 +181,15 @@ async function onMention({ event, body, client }) {
   const rt = event.thread_ts && sessions.get(event.channel, event.thread_ts)?.routine;
   if (rt) { await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts, text: routineHint(rt.mode !== 'report' && (!rt.ended || rt.ended === 'ok') ? 'pr' : 'report') }).catch(() => {}); return; }
   if (!allowed(event.channel, event.user)) {
+    // A channel the bot does not watch: one short reply per thread to a person it would serve, and a log line,
+    // so a channel that dropped out of ALLOWED_CHANNELS is not a silent bot. Nothing starts.
+    if (!inChannels(event.channel) && (USERS.includes('*') || USERS.includes(event.user))) {
+      console.log('channel_not_watched', event.channel);
+      const t = `${event.channel}:${event.thread_ts || event.ts}`;
+      if (!unwatchedSaid.has(t)) { unwatchedSaid.add(t); await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts,
+        text: "I don't work in this channel yet. Ask an admin to add it." }).catch(() => {}); }
+      return;
+    }
     const runs = event.thread_ts && sessions.get(event.channel, event.thread_ts)?.owner;
     if (inChannels(event.channel)) await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts,
       text: `Sorry, you're not on the list of people who can use the agent here.${runs ? ` <@${runs}> runs this session: ask them.` : ''}` }).catch(() => {});
