@@ -36,6 +36,10 @@ test('the end texts: PR link, report kept off Slack, failure with the History li
   process.env.DASHBOARD_URL = 'https://dash.example.com/';
   assert.match(routineEnd(R, ENDS[0]), /^Code review: draft PR <https:\/\/github.com\/mozilla\/fxa\/pull\/12\|#12>\. The findings it did not fix are in the PR description\./);
   assert.match(routineEnd(R, ENDS[2]), /holds data I do not post in Slack.*<https:\/\/dash\.example\.com\/#teams\/routines\/fxa\|History>/);
+  // A blank report has nothing in History either: the text does not send the admin there.
+  const blank = routineEnd(R, { state: 'report', post: true, posted: false, blank: true });
+  assert.match(blank, /^Code review: the run ended with no report\. No code changed\./);
+  assert.doesNotMatch(blank, /History/);
   assert.match(routineEnd(R, ENDS[4]), /^Code review failed: the handoff check did not pass\. .*<https:\/\/dash\.example\.com\/#teams\/routines\/fxa\|History>/);
   assert.match(routineEnd(R, ENDS[5]), /^Code review stopped at its cost limit\./);
   delete process.env.DASHBOARD_URL;

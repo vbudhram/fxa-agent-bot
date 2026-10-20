@@ -641,6 +641,7 @@ export function routineEnd(r, end) {
   if (end.state === 'ok') return `${n}: draft PR ${gh(end.pr) ? `<${end.pr}|#${end.pr.split('/').pop()}>` : 'opened'}.${r.mode === 'pr+notes' ? ' The findings it did not fix are in the PR description.' : ''}${next}`;
   if (end.state === 'report') return end.post === false
     ? `${n}: the report holds data I do not post in Slack. A team admin can read it in the dashboard ${historyLink(r.team)}.${next}`
+    : end.blank ? `${n}: the run ended with no report. No code changed.${next}`
     : end.posted === false ? `${n}: the run ended with no report I could post here. A team admin can read it in the dashboard ${historyLink(r.team)}.${next}`
     : `${n}: the report is in this thread. No code changed.${next}`;
   if (end.state === 'nochange') return `${n}: no issue to fix.${next}`;
