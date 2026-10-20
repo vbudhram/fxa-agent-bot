@@ -477,18 +477,6 @@ export function errorDigest(rows) {
     + `${rows.length > 5 ? `\n…and ${rows.length - 5} more.` : ''}\nDetails: \`fxa-sandbox-ctl errors show <sig>\`, or the dashboard's Errors page.`;
 }
 
-// Reply text ready to stream: whole lines without control lines (status:,
-// OPTION:, QUESTION:), and a last line held back while it may become one.
-const CONTROL = ['status:', 'OPTION:', 'QUESTION:'];
-export function draftSplit(buf) {
-  const lines = buf.split('\n'), tail = lines.pop();
-  // The unfinished last word waits for the next chunk, so maskSecrets always sees a token whole.
-  const word = tail.match(/\S*$/)[0];
-  const keep = CONTROL.some((c) => c.startsWith(tail) || tail.startsWith(c)) ? tail : word;
-  const out = lines.filter((l) => !CONTROL.some((c) => l.startsWith(c))).map((l) => `${l}\n`).join('') + tail.slice(0, tail.length - keep.length);
-  return { out, keep };
-}
-
 // The runner's own tokens (proxy fxl_, gateway fxm_) and the other token shapes the watch page
 // masks: an agent that prints its environment must not post them to the thread.
 // GitHub and runner tokens are 12+ letters and digits after the prefix (github_pat_ adds _), so a

@@ -183,8 +183,8 @@ export async function runScenario(app, view, scenario) {
         // A turn ended: a ✅ or ⚠️ landed in this step, and no message still has 👀 (⏳ waits for a later turn).
         const from = view.calls.length;
         const waiting = () => view.msgs.filter((m) => !m.bot && !m.deleted && m.reactions.has('eyes') && !m.reactions.has('hourglass_flowing_sand'));
-        // A turn with no new message to answer ends without a reaction: then its stream stops, or its line shows the reply.
-        const ended = (c) => (c.method === 'reactions.add' && ['white_check_mark', 'warning'].includes(c.args.name)) || c.method === 'chat.stopStream'
+        // A turn with no new message to answer ends without a reaction: then its line shows the reply.
+        const ended = (c) => (c.method === 'reactions.add' && ['white_check_mark', 'warning'].includes(c.args.name))
           || (/^chat\.(update|postMessage)$/.test(c.method) && TURN_TEXT.test(`${c.args.text} ${JSON.stringify(c.args.blocks ?? '')}`));
         await until(() => view.calls.slice(from).some(ended) && !waiting().length,
           () => `a turn to end (✅ or ⚠️, and no 👀 left${waiting().length ? `; waiting: #${waiting().map((m) => m.seq).join(', #')}` : ''})`);

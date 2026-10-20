@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { quickFirst, askId, answerBlocks, findingsOf, stepRows, lastRow, doneLine, FIRST_ROW, seamless } from '../src/answer.js';
+import { quickFirst, askId, answerBlocks, findingsOf, stepRows, rowTitle, doneLine, FIRST_ROW, seamless } from '../src/answer.js';
 
 test('a sentence about the mode never reaches the thread', () => {
   const slip = "Ready. What do you want to test? Give me a file or PR.\n\nIf you want new tests written or existing ones run, I can't do that from here. Tell me which and I'll hand it off.";
@@ -41,13 +41,11 @@ test('the session gets the findings and the reply so far', () => {
   assert.equal(findingsOf({ answer: 'At index.tsx:73.', upgrade: { findings: 'index.tsx:73-81' } }), 'index.tsx:73-81\n\nIts reply so far:\nAt index.tsx:73.');
 });
 
-test('steps become the rows a sandbox turn shows: a row per stage, a count within it', () => {
-  let st = { t: 0, kind: null, label: FIRST_ROW, count: 0 };
-  let r = stepRows(st, 'Searching for `changePassword`');
-  assert.deepEqual(r.chunks.map((c) => [c.id, c.title, c.status]), [['t0', 'Working on it', 'complete'], ['t1', 'Exploring the code · 1 step', 'in_progress']]);
-  r = stepRows(r.st, 'Reading `password.ts`');
-  assert.deepEqual(r.chunks.map((c) => [c.id, c.title, c.details]), [['t1', 'Exploring the code · 2 steps', '`password.ts`']]);
-  assert.deepEqual(lastRow(r.st), { type: 'task_update', id: 't1', title: 'Exploring the code · 2 steps', status: 'complete' });
+test('steps become the row a sandbox turn shows: a row per stage, a count within it', () => {
+  let st = stepRows({ t: 0, kind: null, label: FIRST_ROW, count: 0 }, 'Searching for `changePassword`');
+  assert.equal(rowTitle(st), 'Exploring the code · 1 step');
+  st = stepRows(st, 'Reading `password.ts`');
+  assert.deepEqual([st.t, rowTitle(st)], [1, 'Exploring the code · 2 steps']);
 });
 
 test('the summary line matches a sandbox turn', () => {

@@ -11,7 +11,6 @@ export default {
     { expect: { ctl: { cmd: 'finish', n: 0 } } },
     { expect: { calls: { method: 'chat.postMessage', n: 0 }, ctl: { cmd: 'routine', match: /"done","44"/, n: 1 } } },
     { expect: { calls: { method: 'chat.update', n: 0 } } },
-    { expect: { calls: { method: 'chat.startStream', n: 0 } } },
     { expect: { calls: { method: 'reactions.add', n: 0 } } },
     { expect: { calls: { method: 'conversations.info', n: 0 } } },
   ],

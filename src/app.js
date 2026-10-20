@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { statSync, readFileSync, readdirSync, lstatSync, writeFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as ctl from './ctl.js';
-import { quickFirst, askId, answerBlocks, findingsOf, stepRows, lastRow, doneLine, stepCount, rowTitle, ON_IT, FIRST_ROW, seamless } from './answer.js';
+import { quickFirst, askId, answerBlocks, findingsOf, stepRows, doneLine, stepCount, rowTitle, ON_IT, FIRST_ROW, seamless } from './answer.js';
 import { installErrorLog } from './errors.js';
 import * as sessions from './sessions.js';
 import * as live from './live.js';
@@ -22,7 +22,7 @@ import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { routineStart, routineSkip, routineEnd, routineEndLine, routineReport, routineHint, routineLabel } from './render.js';
-import { render, startCard, stage, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, draftSplit, toSomeoneElse, asideBlock, REBASE_PROMPT, fileRefs, distinctFiles, maskSecrets, maskUpload } from './render.js';
+import { render, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, toSomeoneElse, asideBlock, REBASE_PROMPT, fileRefs, distinctFiles, maskSecrets, maskUpload } from './render.js';
 
 const { App } = bolt;
 installErrorLog(ctl.errorsPush);
@@ -44,7 +44,7 @@ if (process.env.SLACK_CALL_LOG) {
 // No link previews on the bot's own posts: a PR link drew GitHub's large preview under each card.
 {
   const proto = bolt.webApi.WebClient.prototype, call = proto.apiCall;
-  // Every string the bot posts, edits or streams goes through maskSecrets.
+  // Every string the bot posts or edits goes through maskSecrets.
   const mask = (v) => (typeof v === 'string' ? maskSecrets(v) : Array.isArray(v) ? v.map(mask)
     : v && typeof v === 'object' && v.constructor === Object ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, mask(x)])) : v);
   proto.apiCall = function (method, args = {}) {
@@ -376,37 +376,25 @@ async function followUp(s, message, text, client, route = text) {
   await begin(key, client).catch((e) => { pending.delete(key); console.error('begin', key, e.message); });
 }
 
-// quickStatus: the status a sandbox turn shows (a native stream with a row per
-// stage, or an edited line), for the quick look's steps.
+// quickStatus: the status a sandbox turn shows (an edited message), for the quick look's steps.
 function quickStatus(p) {
   const t0 = Date.now(), asked = Number(p.acks?.[0]) * 1000 || 0;
-  let ts = null, kind = null, tick = null, chain = Promise.resolve(), n = 0, lastStep = '';
+  let ts = null, tick = null, chain = Promise.resolve(), n = 0, lastStep = '';
   let st = { t: 0, kind: null, label: FIRST_ROW, count: 0 };
   const at = () => ({ channel: p.channel, ts });
   const run = (fn) => (chain = chain.then(fn).catch((e) => console.error('quick_status', e.data?.error ?? e.message)));
   run(async () => {
-    if (streamOk) {
-      try {
-        ({ ts } = await app.client.apiCall('chat.startStream', { channel: p.channel, thread_ts: p.thread_ts, recipient_user_id: p.owner,
-          recipient_team_id: p.team ?? teamId, chunks: [{ type: 'task_update', id: 't0', title: FIRST_ROW, status: 'in_progress' }] }));
-        kind = 'stream';
-        return;
-      } catch (e) { streamOff(e); }
-    }
     // The same look as a sandbox turn's status: the asker in the title, the current step and its command in the box.
     const who = { asker_name: await askerName({ acks: p.acks, owner: p.owner }) };
     const msg = () => statusMessage({ title: statusTitle(who, 'Working', Date.now() - t0, n, n ? st.label : null), rows: n ? [`› ${rowTitle(st)}`] : [],
       cmd: n ? lastStep.replace(/^Running /, '') : null, id: `quick-${t0}` });
     ({ ts } = await app.client.chat.postMessage({ channel: p.channel, thread_ts: p.thread_ts, ...msg() }));
-    kind = 'line';
     tick = setInterval(() => run(() => app.client.chat.update({ ...at(), ...msg() })), 3000);
   });
   return {
     count: () => n,
     step: (text) => {
-      const r = stepRows(st, defuse(text));
-      st = r.st; n++; lastStep = text;
-      run(() => kind === 'stream' && app.client.apiCall('chat.appendStream', { ...at(), chunks: r.chunks }));
+      st = stepRows(st, defuse(text)); n++; lastStep = text;
     },
     // The answer takes the status's place, as a sandbox turn's reply does: the summary, then the answer.
     answer: (msg) => {
@@ -414,7 +402,6 @@ function quickStatus(p) {
       return run(async () => {
         const summary = doneLine('Done', n, Date.now() - t0, asked ? Date.now() - asked : 0);
         const blocks = [{ type: 'context', elements: [{ type: 'mrkdwn', text: summary }] }, ...(msg.blocks ?? [md(msg.text)])];
-        if (ts && kind === 'stream') await app.client.apiCall('chat.stopStream', { ...at(), chunks: [lastRow(st)] }).catch(() => {});
         try { if (!ts) throw new Error('no status'); await app.client.chat.update({ ...at(), text: msg.text, blocks }); }
         catch { await app.client.chat.postMessage({ channel: p.channel, thread_ts: p.thread_ts, text: msg.text, blocks }); }
       });
@@ -424,7 +411,6 @@ function quickStatus(p) {
       clearInterval(tick);
       return run(async () => {
         if (!ts) return;
-        if (kind === 'stream') await app.client.apiCall('chat.stopStream', { ...at(), chunks: [lastRow(st)] });
         // On the way to a sandbox the quick look's status goes: the sandbox's status takes
         // its place, one status per turn, and its findings go to the session.
         if (word === HANDOFF || (!n && word !== 'Done')) { await app.client.chat.delete(at()).catch(() => {}); return; }
@@ -560,7 +546,6 @@ async function launch(key, client, since = Date.now()) {
     : { acks: [...ackList(cur), ...(cur.late_acks ?? [])], late_acks: [] });
   // The runner is booting from here on: a Slack hiccup is logged, not fatal.
   sessions.patch(key, { state: 'starting', started_at: Date.now(), findings: null });
-  if (fresh(key).queue_ts && streamOk) await app.client.chat.update({ channel: s.channel, ts: fresh(key).queue_ts, text: 'A session freed up; starting now.' }).catch(() => {});
   await startStatus(fresh(key), 'Setting up').catch((e) => console.error('status', key, e.data?.error ?? e.message));
 }
 const say = (s, text) => app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text });
@@ -684,7 +669,7 @@ async function onMessage({ message, client, replay = false }) {
   noteAsker(message.ts, message.user);
   // A person's reply under a running turn's status: the status moves below it at its next update.
   const under = message.thread_ts && !message.subtype && !fromBot(message) && sessions.get(message.channel, message.thread_ts);
-  if (under?.status_ts && under.status_kind === 'line' && message.ts > under.status_ts) sessions.patch(under.key, { status_below: true });
+  if (under?.status_ts && message.ts > under.status_ts) sessions.patch(under.key, { status_below: true });
   // Deleting the thread's first message closes its session, as in Claude Tag.
   // A parent with replies does not disappear; Slack turns it into a tombstone.
   const gone = message.subtype === 'message_deleted' ? message.deleted_ts
@@ -1343,27 +1328,13 @@ async function startStatusNow(s, verb) {
   const cur = fresh(s.key);
   if (!cur || cur.status_ts || cur.muted) return;
   steps.delete(s.key); unsent.delete(s.key); stepAt.delete(s.key); said.delete(s.key);
-  const first = verb === 'Setting up' ? readyWord(cur) : `${verb} on it`;
-  liveTurn.set(s.key, newLive(first));
+  liveTurn.set(s.key, newLive());
   const asker = askers.get(ackList(cur)[0]) ?? cur.owner, asker_name = await askerName(cur);
-  // A stream needs a person to stream to; a routine run has none, so its status is a line.
-  if (streamOk && !cur.routine) {
-    try {
-      const { ts } = await app.client.apiCall('chat.startStream', {
-        channel: s.channel, thread_ts: s.thread_ts, recipient_user_id: cur.owner, recipient_team_id: cur.team ?? teamId,
-        // No Interrupt button: nobody tapped it, and it sat above the reply. !interrupt stops a turn.
-        chunks: [{ type: 'task_update', id: 't0', title: first, status: 'in_progress' }],
-      });
-      sessions.patch(cur.key, { status_ts: ts, status_kind: 'stream', busy_since: Date.now(), status_opened_at: Date.now(), last_act: first, step_n: 0 });
-      if (cur.state === 'active') ensureWatch(s.key);
-      return;
-    } catch (e) { streamOff(e); }
-  }
   const msg = statusMessage({ title: statusTitle({ ...cur, asker_name }, verb, 0, 0) });
   // A request that waited in line already has its status message: it changes in place.
   const ts = cur.queue_ts ? await app.client.chat.update({ channel: s.channel, ts: cur.queue_ts, ...msg }).then(() => cur.queue_ts, () => null) : null;
   const status_ts = ts ?? (await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...msg })).ts;
-  sessions.patch(cur.key, { status_ts, queue_ts: null, status_kind: 'line', status_text: msg.text, status_box: `${cur.state}\n`, asker, asker_name, edit_at: Date.now(), busy_since: Date.now(), status_opened_at: Date.now(), last_act: null,
+  sessions.patch(cur.key, { status_ts, queue_ts: null, status_text: msg.text, status_box: `${cur.state}\n`, asker, asker_name, edit_at: Date.now(), busy_since: Date.now(), status_opened_at: Date.now(), last_act: null,
     step_n: 0, rows_done: null, cur_kind: null, cur_count: 0, cur_label: null });
   if (cur.state === 'active') ensureWatch(s.key);
 }
@@ -1385,7 +1356,7 @@ function statusTitle(s, verb, ms, n, now) {
 // The running row's label, without its step count: "› Exploring the code · 4 steps" is "Exploring the code".
 const nowOf = (rows) => rows.find((r) => r.startsWith('›'))?.slice(2).replace(/ · \d+ steps?$/, '');
 // Slack allows an app about 50 chat.update calls a minute in a workspace: one live turn edits every
-// 1.2 s, as the stream did, and turns at once share that budget. The clock alone moves every 15 s.
+// 1.2 s, and turns at once share that budget. The clock alone moves every 15 s.
 const CLOCK_MS = 15_000;
 const editGap = () => Math.min(5000, 1200 * Math.max(1, sessions.all().filter((x) => x.status_ts && x.busy_since).length));
 const trailing = new Set(); // sessions with an edit waiting for its gap to end
@@ -1393,157 +1364,10 @@ const MOVE_MS = Number(process.env.STATUS_MOVE_MS) || 60_000; // a status moves 
 // STATUS_EMOJI names an animated custom emoji (a spinner GIF); without one the
 // hourglass flips on each edit so the line still visibly ticks.
 const spinner = (n) => process.env.STATUS_EMOJI || (n % 2 ? ':hourglass:' : ':hourglass_flowing_sand:');
-// Native streaming shows its steps only to one person (recipient_user_id), so the status is an
-// edited message that everyone in the thread sees. NATIVE_STREAM=1 turns the stream back on.
-let streamOk = process.env.NATIVE_STREAM === '1', teamId = null;
-const unsent = new Map(); // key → steps not yet appended to the stream
-function streamOff(e) {
-  streamOk = false;
-  console.error(`native streaming unavailable (${e.data?.error ?? e.message}); using the status line`);
-}
-// One timeline entry per turn, updated in place: the current kind of work and a
-// running step count, with the latest command as its detail.
-// The live timeline is a checklist, as in Claude Tag: a new row each time the
-// kind of work changes (the previous row ticks), and within a row a running
-// count, with each new command appended to its details. Slack appends
-// task_update details rather than replacing them, so only the new line is sent.
-async function updateStreamNow(s, state, activity) {
-  const at = { channel: s.channel, ts: s.status_ts };
-  let n = s.step_n ?? 0, t = s.task_n ?? 0, kind = s.cur_kind ?? null, count = s.cur_count ?? 0, label = s.cur_label ?? s.last_act;
-  let lines = s.cur_lines ?? 0;
-  const row = (id, title, status, details) => ({ type: 'task_update', id: `t${id}`, title: String(title).slice(0, 250),
-    ...(details ? { details: details.slice(0, 250) } : {}), status });
-  // Long turns: the running row shows the turn's time, so a quiet 15-minute
-  // test run still visibly moves.
-  const took = () => { const m = Math.floor((Date.now() - (s.busy_since ?? Date.now())) / 60_000); return m ? ` · ${m}m` : ''; };
-  const rowTitle = (running = false) => (count ? `${label} · ${stepCount(count)}` : label) + (running ? took() : '');
-  // Not while still starting: a stack prewarm keeps the state there after the boot.
-  if (state !== 'starting' && activity?.boot?.done && !s.boot_shown && !kind) {
-    const { details, boot_n } = bootDetails(s, activity.boot, true);
-    label = `Ready in ${activity.boot.total}s`;
-    await app.client.apiCall('chat.appendStream', { ...at, chunks: [row(t, label, 'in_progress', details)] });
-    s = { ...s, boot_n, boot_shown: true, cur_label: label, last_act: label };
-    sessions.patch(s.key, { boot_n, boot_shown: true, cur_label: label, last_act: label, boot_s: activity.boot.total });
-  }
-  if (activity?.busy) {
-    // The reply text written since the last send rides in the same call as the rows.
-    const say = takeText(s.key);
-    const send = async (chunks) => {
-      const all = say ? [{ type: 'markdown_text', text: say }, ...chunks] : chunks;
-      if (!all.length) return;
-      try { await app.client.apiCall('chat.appendStream', { ...at, chunks: all }); }
-      catch (e) {
-        // Slack refused text chunks: keep the task timeline and stop sending text.
-        if (!say || !/invalid|unknown|chunk/i.test(e.data?.error ?? '')) throw e;
-        streamText = false; console.error(`reply streaming off (${e.data?.error})`);
-        if (chunks.length) await app.client.apiCall('chat.appendStream', { ...at, chunks });
-      }
-    };
-    const news = unsent.get(s.key) ?? [];
-    unsent.delete(s.key);
-    // Boot steps and the no-stream fallback come from the poll, not the watch.
-    if (!news.length && activity.text && activity.text !== s.last_step && (activity.host || !watchers.has(s.key)))
-      news.push(activity.host ? { host: activity.text } : activity.text);
-    // Setup refreshes every poll, so its clock keeps moving between steps.
-    if (!news.length && state === 'starting' && s.last_step) news.push(s.last_step);
-    const L = LIVE_ON && state !== 'starting' ? liveOf(s.key) : null;
-    // The facts (files, tests, lint) ride on the first row's title, at most every 10 s.
-    const header = [];
-    if (L) {
-      const f = live.facts(L.st);
-      if (f !== L.header && (!L.header || Date.now() - L.headerAt >= 10_000)) {
-        L.header = f; L.headerAt = Date.now();
-        header.push({ type: 'task_update', id: 't0', title: `${L.title0}${f ? ` · ${f}` : ''}`.slice(0, 250), status: t > 0 || L.todo ? 'complete' : 'in_progress' });
-      }
-    }
-    // Once the agent keeps a todo list, its todos are the rows and each step is
-    // a detail line under the todo in progress.
-    if (L?.st.todos?.length) {
-      const chunks = [...header], rows = live.todoRows(L.st);
-      // The todos take over: the open stage row, or the first row if none opened yet, ticks.
-      if (!L.todo) {
-        L.todo = true;
-        chunks.push(t > 0 ? row(t, rowTitle(), 'complete') : { type: 'task_update', id: 't0', title: `${L.title0}${L.header ? ` · ${L.header}` : ''}`.slice(0, 250), status: 'complete' });
-      }
-      const ch = live.changedRows(L.sent, rows); L.sent = ch.sent;
-      for (const r of ch.rows) chunks.push({ type: 'task_update', id: r.id, title: r.title, status: r.status });
-      const curId = live.currentRow(rows), cur = rows.find((r) => r.id === curId);
-      // A long quiet step (a build, a test run): once a minute, the todo shows how long, so the thread visibly moves.
-      const quiet = Date.now() - (stepAt.get(s.key) ?? Date.now());
-      if (!news.length && cur && quiet >= 60_000 && Date.now() - (s.title_at ?? 0) >= 60_000) {
-        const title = `${cur.title} · this step ${Math.floor(quiet / 60_000)}m`.slice(0, 250);
-        L.sent[curId] = `${title}|${cur.status}`; // the next real change sends the plain title again
-        await send([...chunks, { type: 'task_update', id: curId, title, status: cur.status }]);
-        return { title_at: Date.now() };
-      }
-      for (const item of news) {
-        const line = String(item?.host ?? item).slice(0, 200), k = (L.lines[curId] ?? 0) + 1;
-        L.lines[curId] = k;
-        const more = k <= DETAIL_LINES ? `${k > 1 ? '\n' : ''}${line}` : k === DETAIL_LINES + 1 ? '\n… more steps' : '';
-        if (cur && more) chunks.push({ type: 'task_update', id: curId, title: cur.title, status: cur.status, details: more.slice(0, 250) });
-      }
-      await send(chunks);
-      return news.length ? { step_n: n + news.length, last_step: news.at(-1)?.host ?? news.at(-1), last_act: cur?.title ?? s.last_act, title_at: Date.now() } : {};
-    }
-    // Nothing new: refresh the running row's clock once a minute, no more.
-    if (!news.length) {
-      if (state === 'starting' || !kind || Date.now() - (s.title_at ?? 0) < 60_000) { await send(header); return {}; }
-      await send([...header, row(t, rowTitle(true), 'in_progress')]);
-      return { title_at: Date.now() };
-    }
-    if (state === 'starting') {
-      const b = activity.boot;
-      const up = Math.round(b?.elapsed ?? (Date.now() - (s.busy_since ?? Date.now())) / 1000);
-      label = `${readyWord(s)}: ${news.at(-1)} · ${up}s of about ${b?.expect ?? SETUP_EXPECT_S}s`;
-      const { details, boot_n } = bootDetails(s, b, false);
-      await send([row(t, label, 'in_progress', details)]);
-      return { last_act: label, cur_label: label, last_step: news.at(-1), boot_n };
-    }
-    const chunks = [...header], done = [...(s.rows_done ?? [])];
-    for (const item of news) {
-      // A host step of Open PR or Push branch is a row of its own, with no details.
-      const step = item?.host ?? item;
-      // A step with no stage of its own (a misc command) joins the current row;
-      // before any row exists it opens an exploring one.
-      const st = item?.host ? { kind: `host:${step}`, label: step }
-        : stage(step) ?? (kind ? { kind, label } : { kind: 'explore', label: 'Exploring the code' });
-      const line = item?.host ? '' : String(step).slice(0, 200);
-      n += 1;
-      if (st.kind !== kind) {
-        chunks.push(row(t, rowTitle(), 'complete'));
-        if (count) done.push(rowTitle()); // work rows only, not the opening one
-        t += 1; kind = st.kind; label = st.label; count = item?.host ? 0 : 1; lines = 1;
-        chunks.push(row(t, rowTitle(true), 'in_progress', line));
-      } else {
-        // Details only append, so a long row stops listing steps after a while;
-        // its count keeps going.
-        count += 1; lines += 1;
-        const more = lines <= DETAIL_LINES ? `\n${line}` : lines === DETAIL_LINES + 1 ? '\n… more steps' : '';
-        chunks.push(row(t, rowTitle(true), 'in_progress', more));
-      }
-    }
-    await send(chunks);
-    return { step_n: n, task_n: t, cur_kind: kind, cur_count: count, cur_label: label, cur_lines: lines, title_at: Date.now(),
-      last_act: rowTitle(), last_step: news.at(-1)?.host ?? news.at(-1), rows_done: done };
-  }
-  const summary = withLive(s.key, turnSummary(s, endWord(s, state)));
-  liveTurn.delete(s.key);
-  await app.client.apiCall('chat.stopStream', { ...at, chunks: [row(t, rowTitle(), 'complete')] });
-  await app.client.chat.update({ ...at, text: summary, blocks: [{ type: 'context', elements: [{ type: 'mrkdwn', text: summary }] }] }).catch(() => {});
-  return { ...STATUS_CLEAR, interrupted: null };
-}
-
-const DETAIL_LINES = 15; // steps listed per checklist row before "… more steps"
-// Boot steps not yet listed under the setup row, one line each with its time.
-// A step is listed once it is over: when the next one starts, or at the end.
-function bootDetails(s, b, done) {
-  const steps = b?.steps ?? [], upto = done ? steps.length : steps.length - 1, from = s.boot_n ?? 0;
-  const lines = steps.slice(from, Math.max(from, upto)).map((x) => `✓ ${x.step} · ${x.s}s`
-    + (x.step.startsWith('restoring') && b.restore ? ` (snapshot loaded in ${b.restore.restore_ms} ms)` : ''));
-  return { details: lines.length ? (from ? '\n' : '') + lines.join('\n') : undefined, boot_n: Math.max(from, upto) };
-}
-const SETUP_EXPECT_S = 80; // measured boot to a running agent, 75-90 s
-const STATUS_CLEAR = { status_ts: null, status_kind: null, busy_since: null, last_act: null, last_detail: null, last_step: null, step_n: null, task_n: null, cur_kind: null, cur_count: null, cur_label: null, cur_lines: null, title_at: null, rows_done: null, interrupted: null, stream_closed: null, wrap_done: null, boot_row: null, status_below: null, moved_at: null };
+// The status is an edited message that everyone in the thread sees: a native stream shows its steps to one person only.
+const unsent = new Map(); // key → steps not yet shown in the status
+// status_kind: a field old records may hold ('stream' or 'line'); nothing reads it, and a clear drops it.
+const STATUS_CLEAR = { status_ts: null, status_kind: null, busy_since: null, last_act: null, last_detail: null, last_step: null, step_n: null, task_n: null, cur_kind: null, cur_count: null, cur_label: null, cur_lines: null, title_at: null, rows_done: null, interrupted: null, wrap_done: null, boot_row: null, status_below: null, moved_at: null };
 // The finished turn's checklist, compact: every work row, ticked.
 
 const turnSummary = (s, word) => {
@@ -1557,10 +1381,9 @@ const turnSummary = (s, word) => {
   return `${word} · ${n ? `${n} step${n === 1 ? '' : 's'} · ` : ''}${took}${asked}`;
 };
 
-// 1: the turn's reply closes its own stream, so a turn is one message: what the
-// agent did, then what it says. A status line (no stream, or a stream Slack closed) is edited the same way.
+// 1: the turn's reply takes its status message's place, so a turn is one message: what the
+// agent did, then what it says.
 const finishTurn = (key, msg, ev) => serial(key, async function finishTurn() {
-  clearTimeout(drafts.get(key)?.timer); drafts.delete(key);
   const seenAt = resultAt.get(key); resultAt.delete(key);
   // Measure only: how often replies break the STE rules the PR text is held to.
   if (ev?.text) ctl.ste(ev.text).then((p) => { if (p.length) console.log(`ste ${key}: ${p.length} | ${p.slice(0, 3).join(' | ')}`); });
@@ -1569,16 +1392,13 @@ const finishTurn = (key, msg, ev) => serial(key, async function finishTurn() {
   settle(s);
   // The buttons and their hint line go together; they are what retireButtons removes.
   const actions = (msg.blocks ?? []).filter((b) => b.type === 'actions' || b.block_id === 'answer_hint');
-  // The reply takes the status message's place, streamed or edited: one message per turn.
+  // The reply takes the status message's place: one message per turn.
   if (s.status_ts) {
     const summary = withLive(key, turnSummary(s, 'Done'));
     // The rendered answer and, for a question, its options lists; the buttons follow.
     const body = (msg.blocks ?? []).filter((b) => b.type !== 'actions' && b.block_id !== 'answer_hint');
     if (!body.length) body.push(md(ev.text || 'Over to you.'));
     try {
-      // A stream Slack already closed cannot be stopped; the edit below still lands.
-      if (s.status_kind === 'stream') await app.client.apiCall('chat.stopStream', { channel: s.channel, ts: s.status_ts,
-        chunks: [{ type: 'task_update', id: 't0', title: summary, status: 'complete' }] }).catch((e) => console.log('stop stream', key, e.data?.error ?? e.message));
       // Rewrite the finished status: summary, answer, and this turn's buttons.
       const lt = liveTurn.get(key);
       liveTurn.delete(key);
@@ -1641,7 +1461,7 @@ const watchers = new Map(), steps = new Map(), editTimers = new Map(), lastEdit 
 const LIVE_ON = process.env.LIVE_STATUS !== '0';
 const LIVE_EVENTS = new Set(['todos', 'edit', 'diffstat', 'subagent_start', 'tool_done', 'tests', 'lint', 'types']);
 const liveTurn = new Map();
-const newLive = (title0 = 'Working on it') => ({ st: live.start(), sent: {}, lines: {}, header: '', headerAt: 0, todo: false, title0 });
+const newLive = () => ({ st: live.start() });
 const liveOf = (key) => { if (!liveTurn.has(key)) liveTurn.set(key, newLive()); return liveTurn.get(key); };
 const withLive = (key, summary) => { const lt = liveTurn.get(key), x = lt ? live.summary(lt.st) : ''; return x ? `${summary} · ${x}` : summary; };
 function ensureWatch(key) {
@@ -1649,8 +1469,8 @@ function ensureWatch(key) {
   const w = ctl.watch(key, (ev) => {
     if (ev.type === 'step') { pushStep(key, ev.text); unsent.set(key, [...(unsent.get(key) ?? []), ev.text]); liveEdit(key); }
     if (ev.type === 'result') { resultAt.set(key, Date.now()); setTimeout(() => pollOne(key), 300); }
-    if (ev.type === 'text_start') draftText(key, null);
-    if (ev.type === 'text') draftText(key, ev.text);
+    if (ev.type === 'text_start') saidText(key, null);
+    if (ev.type === 'text') saidText(key, ev.text);
     if (ev.type === 'edit') sessions.patch(key, { edited_at: Date.now() }); // work not yet pushed (autoRound)
     if (LIVE_ON && LIVE_EVENTS.has(ev.type)) {
       const L = liveOf(key);
@@ -1663,12 +1483,6 @@ function ensureWatch(key) {
 }
 function stopWatch(key) { watchers.get(key)?.stop(); watchers.delete(key); }
 
-// The reply streams into the turn's message as Claude writes it, with the
-// checklist rows, in one Slack call per 1.2 s (liveEdit). Control lines are
-// dropped (draftSplit). finishTurn then rewrites the message with the formatted
-// answer and its buttons.
-let streamText = process.env.STREAM_TEXT !== '0';
-const drafts = new Map(); // key → { buf, timer, sent }
 const said = new Map(), stepAt = new Map(); // key → the latest text block; when the last step started
 // The answer to a status question while a turn runs.
 function statusNow(key) {
@@ -1676,52 +1490,19 @@ function statusNow(key) {
   return live.statusReply(liveTurn.get(key)?.st ?? live.start(), { elapsedMs: Date.now() - (s?.busy_since ?? Date.now()),
     lastStep: log.at(-1) ?? '', stepAgoMs: Date.now() - (stepAt.get(key) ?? Date.now()), said: said.get(key) ?? '' });
 }
-function draftText(key, text) {
-  if (!streamText) return;
-  const d = drafts.get(key) ?? { buf: '', timer: null, sent: false };
-  drafts.set(key, d);
-  // A new block of text after some was shown: a paragraph break.
-  if (text === null) { if (d.sent || d.buf) d.buf += '\n\n'; said.set(key, ''); return; }
-  d.buf += text;
+// The agent's latest text block, for the status reply.
+function saidText(key, text) {
+  if (text === null) { said.set(key, ''); return; }
   said.set(key, ((said.get(key) ?? '') + text).slice(-600));
   liveEdit(key);
 }
-// The reply text not yet sent, and marks it sent.
-function takeText(key) {
-  const d = drafts.get(key);
-  if (!d || !streamText) return '';
-  clearTimeout(d.timer); d.timer = null;
-  const { out, keep } = draftSplit(d.buf);
-  d.buf = keep;
-  if (out) d.sent = true;
-  return out;
-}
-const flushDraft = (key) => serial(key, async function flushDraft() {
-  const d = drafts.get(key);
-  if (!d) return;
-  d.timer = null;
-  const s = fresh(key);
-  if (!s || DONE.includes(s.state)) { drafts.delete(key); return; }
-  // The turn's status is not open yet (a queued turn): try again shortly.
-  if (s.status_kind !== 'stream' || !s.status_ts) { if (s.status_kind !== 'line') d.timer = setTimeout(() => flushDraft(key), 1000); else drafts.delete(key); return; }
-  const out = takeText(key);
-  if (!out) return;
-  try {
-    await app.client.apiCall('chat.appendStream', { channel: s.channel, ts: s.status_ts, chunks: [{ type: 'markdown_text', text: out }] });
-    d.sent = true;
-  } catch (e) {
-    // Slack refused text chunks: keep the task timeline and stop trying.
-    if (/invalid|unknown|chunk/i.test(e.data?.error ?? '')) { streamText = false; console.error(`reply streaming off (${e.data?.error})`); }
-    else console.error('draft', key, e.data?.error ?? e.message);
-  }
-});
 function pushStep(key, text) {
   if (!text) return;
   const list = steps.get(key) ?? [];
   list.push(text); stepAt.set(key, Date.now());
   steps.set(key, list.slice(-5));
 }
-// At most one Slack call per 1.2 s per session, rows and reply text together.
+// At most one Slack call per 1.2 s per session.
 function liveEdit(key) {
   if (editTimers.has(key)) return;
   const wait = Math.max(0, 1200 - (Date.now() - (lastEdit.get(key) ?? 0)));
@@ -1729,57 +1510,17 @@ function liveEdit(key) {
     editTimers.delete(key); lastEdit.set(key, Date.now());
     const s = fresh(key);
     if (s?.status_ts) updateStatus(key, s.state, { busy: true, text: null, live: true }).catch((e) => console.error('status', key, e.message));
-    else if (drafts.get(key)?.buf) flushDraft(key);
   }, wait));
 }
 
 // Writes the status fields itself, inside the serial section, so no caller can
 // overwrite a status line posted in between with stale fields.
-// Slack closes a stream after about 5 minutes. Open a new one at the bottom of the thread
-// and delete the closed one: still one live message for the turn, with its spinner. The
-// rows so far become one "Earlier" row; a todo list is sent again in full. False: no stream.
-async function restartStream(key) {
-  const s = fresh(key);
-  if (!s?.status_ts || !streamOk) return false;
-  const earlier = [...new Set([...(s.rows_done ?? []), ...(s.cur_count ? [`${s.cur_label} · ${stepCount(s.cur_count)}`] : [])])];
-  const L = liveTurn.get(key);
-  try {
-    const { ts } = await app.client.apiCall('chat.startStream', {
-      channel: s.channel, thread_ts: s.thread_ts, recipient_user_id: s.owner, recipient_team_id: s.team ?? teamId,
-      chunks: [...(earlier.length && !L?.st.todos?.length ? [{ type: 'task_update', id: 'e0', title: `Earlier: ${earlier.join(' · ')}`.slice(0, 250), status: 'complete' }] : []),
-        { type: 'task_update', id: 't0', title: 'Still working', status: 'in_progress' }],
-    });
-    await app.client.chat.delete({ channel: s.channel, ts: s.status_ts }).catch(() => {});
-    // The deleted stream held the agent's notes: carry the last one, so the new card is not bare.
-    const note = streamText ? live.lastNote(said.get(key)) : '';
-    if (note) await app.client.apiCall('chat.appendStream', { channel: s.channel, ts, chunks: [{ type: 'markdown_text', text: `_${note.replace(/_/g, ' ')}_` }] }).catch(() => {});
-    // The new stream starts its rows again; the counts and rows_done stay for the closing line.
-    if (L) { L.sent = {}; L.lines = {}; L.header = ''; L.headerAt = 0; L.title0 = 'Still working'; }
-    sessions.patch(key, { status_ts: ts, status_kind: 'stream', cur_kind: null, cur_count: 0, cur_lines: 0, task_n: 0, cur_label: 'Still working', last_act: 'Still working', title_at: Date.now() });
-    return true;
-  } catch (e) { console.error('stream restart', key, e.data?.error ?? e.message); return false; }
-}
 const updateStatus = (key, state, activity) => serial(key, async function updateStatus() {
   const s = fresh(key);
   // A turn the bot did not start itself (a queued message, the first plan): open its status now.
   if (!s.status_ts && activity?.busy) {
     if (activity.live) return; // a step that raced the reply; the turn is over
     await startStatusNow(s, VERB[state] ?? 'Working');
-    return;
-  }
-  if (s.status_kind === 'stream') {
-    try { sessions.patch(key, await updateStreamNow(s, state, activity)); }
-    catch (e) {
-      // Slack closed the stream (it times out on a long turn): go on in the same message
-      // by editing it, so the turn stays one message. Any other failure: start fresh next time.
-      const why = e.data?.error ?? e.message;
-      if (why === 'message_not_in_streaming_state') {
-        console.log('stream closed', key);
-        // A new live stream at the bottom, so the spinner and the rows go on; the edited line is the fallback.
-        if (!(await restartStream(key))) sessions.patch(key, { status_kind: 'line', status_text: null, stream_closed: true });
-      }
-      else { console.error('stream', key, why); sessions.patch(key, STATUS_CLEAR); }
-    }
     return;
   }
   sessions.patch(key, await updateStatusNow(s, state, activity));
@@ -2275,8 +2016,7 @@ async function showLost(key, ok) {
   }
   const title = r.show === 'warn' ? ':warning: Lost contact with the sandbox, retrying…' : 'Reconnected to the sandbox';
   const at = { channel: s.channel, ts: s.status_ts };
-  if (s.status_kind === 'stream') await app.client.apiCall('chat.appendStream', { ...at, chunks: [{ type: 'task_update', id: 'lost', title, status: r.show === 'warn' ? 'in_progress' : 'complete' }] }).catch(() => {});
-  else if (r.show === 'warn') await app.client.chat.update({ ...at, text: `${title}\n${s.status_text ?? ''}`.trim() }).catch(() => {});
+  if (r.show === 'warn') await app.client.chat.update({ ...at, text: `${title}\n${s.status_text ?? ''}`.trim() }).catch(() => {});
 }
 
 async function mindLifetime(key, state) {
@@ -2332,7 +2072,7 @@ async function mindCost(key, spent) {
 }
 const ranFor = (s) => { const m = Math.max(1, Math.round((Date.now() - (s.started_at ?? Date.now())) / 60_000)); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
 
-// 11: one way to end a session, so no path leaves the live stream, the watch,
+// 11: one way to end a session, so no path leaves the live status, the watch,
 // or the runner behind. False when the runner could not be stopped.
 async function stopSession(key) {
   const s = fresh(key);
@@ -2426,8 +2166,8 @@ async function pollOne(key) {
         const tw = i === endAt && fresh(key)?.then_wrap;
         if (tw) { sessions.patch(key, { then_wrap: null }); setTimeout(() => shipAfterResume(key, tw, ev).catch((e) => console.error('ship', key, e.message)), 1000); }
       };
-      // A Show-nothing turn end (No response requested) still ends the turn: acks, drafts, and a pending ship.
-      if (!msg) { if (i === endAt) { clearTimeout(drafts.get(key)?.timer); drafts.delete(key); await settle(fresh(key)); ship(); } continue; }
+      // A Show-nothing turn end (No response requested) still ends the turn: acks and a pending ship.
+      if (!msg) { if (i === endAt) { await settle(fresh(key)); ship(); } continue; }
       if (msg.operator) { const kind = msg.operator; delete msg.operator; if (!firstOperatorNote(key, kind)) continue; }
       if (msg.more !== undefined) { sessions.patch(key, { more_text: msg.more }); delete msg.more; }
       // The PR link's message becomes the PR's card: the follower edits its state into it.
@@ -2457,7 +2197,7 @@ async function pollOne(key) {
     // A state ctl reported itself goes on, so updateStatus closes the status line.
     if (DONE.includes(fresh(key)?.state) && !DONE.includes(state)) { stopWatch(key); return; }
     // 14: a reply can open a turn while this poll was reading "idle". Its
-    // stream is newer than what this poll saw, so leave it open.
+    // status is newer than what this poll saw, so leave it open.
     const opened = fresh(key)?.status_opened_at ?? 0;
     const stale = !activity?.busy && opened > polledAt;
     // The watch stays open between turns (tail -F follows the transcript): a new
@@ -2801,7 +2541,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { for (const w of
 
 const replayMarks = new Map(sessions.all().map((s) => [s.key, replayMark(s)]));
 await app.start();
-{ const me = await app.client.auth.test(); teamId = me.team_id; botUserId = me.user_id; }
+{ const me = await app.client.auth.test(); botUserId = me.user_id; }
 // ponytail: polled, so a person who joins the source channel waits up to 10 minutes.
 if (GATES.size) { await loadMembers(app.client, GATES, gateMembers); setInterval(() => loadMembers(app.client, GATES, gateMembers), 600_000).unref(); }
 // A request waiting for capacity lived only in a timer; pick it up again.

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { start, reduce, todoRows, currentRow, changedRows, facts, summary, todoLine, advanceRows, lineRows, lostContact, LOST_MS, GIVE_UP_MS, MAX_ROWS, lastNote } from '../src/live.js';
+import { start, reduce, todoRows, currentRow, facts, summary, todoLine, advanceRows, lineRows, lostContact, LOST_MS, GIVE_UP_MS, MAX_ROWS, lastNote } from '../src/live.js';
 
 const feed = (evs) => evs.reduce(reduce, start());
 const todos = (...s) => ({ type: 'todos', items: s.map(([content, status, active]) => ({ content, status, active })) });
@@ -12,15 +12,6 @@ test('todos become rows, the one in progress titled by its active form', () => {
     { id: 'd1', title: 'Fixing it', status: 'in_progress' },
     { id: 'd2', title: 'Test it', status: 'pending' }]);
   assert.equal(currentRow(todoRows(st)), 'd1');
-});
-
-test('a later todo list replaces the earlier one, and only changed rows are sent', () => {
-  const a = todoRows(feed([todos(['Find it', 'in_progress', 'Finding it'], ['Fix it', 'pending'])]));
-  const first = changedRows({}, a);
-  assert.equal(first.rows.length, 2);
-  const b = todoRows(feed([todos(['Find it', 'completed'], ['Fix it', 'pending'])]));
-  const second = changedRows(first.sent, b);
-  assert.deepEqual(second.rows, [{ id: 'd0', title: 'Find it', status: 'complete' }]);
 });
 
 test('an un-ticked todo goes back to in progress', () => {
@@ -101,7 +92,7 @@ test('a turn that ends with work left lists its todos, ticked and open', () => {
   assert.equal(todoLine(start()), null);
 });
 
-test('a closed stream goes on with the same stage rows, not raw commands', () => {
+test('the status line shows stage rows, not raw commands', () => {
   const left = { rows_done: ['Exploring the code · 5 steps'], cur_kind: 'verify', cur_label: 'Verifying', cur_count: 1 };
   const r = advanceRows(left, ['Running npx jest pushbox', 'Running node x.js', 'Editing index.ts', '↳ Running git diff']);
   assert.deepEqual(lineRows(start(), r), ['✓ Exploring the code · 5 steps', '✓ Verifying · 3 steps', '› Making changes · 2 steps']);

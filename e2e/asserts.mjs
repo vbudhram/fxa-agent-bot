@@ -2,7 +2,7 @@
 import { blockText } from './slack-view.mjs';
 
 const uid = (p) => `U${p}`;
-const said = (m) => { const { lines } = blockText(m.blocks); return [m.text, ...lines, ...(m.chunks ?? []).map((c) => c.title ?? c.text ?? '')].join('\n'); };
+const said = (m) => { const { lines } = blockText(m.blocks); return [m.text, ...lines].join('\n'); };
 const visibleTo = (m, u) => !m.to || m.to === u;
 const ids = (m) => (m.blocks ?? []).flatMap((b) => [...(b.elements ?? []), ...(b.accessory ? [b.accessory] : [])]).map((e) => e.action_id).filter(Boolean);
 
@@ -60,7 +60,6 @@ export function globalChecks({ view, botLog, stepOf }) {
   // A post that says only "Done · 12s" tells nobody anything (seen in real threads).
   fail('no_empty_post', bot.filter((m) => /^\s*(Done ·|Worked for) [\dm h]+s?\s*$/.test(said(m).trim())).map((m) => `#${m.seq}`));
   fail('no_pings', bot.filter((m) => /<!(here|channel|everyone)>|<!subteam\^/.test(said(m))).map((m) => `#${m.seq}`));
-  fail('one_open_stream', Object.values(Object.groupBy(bot.filter((m) => m.stream === 'open'), (m) => m.thread_ts)).filter((g) => g.length > 1).map((g) => `${g.length} open streams`));
   const twice = (list) => Object.values(Object.groupBy(list, (m) => `${stepOf(m.seq)}|${m.to ?? ''}|${said(m).trim()}`)).filter((g) => g.length > 1).map((g) => `#${g.map((m) => m.seq).join(', #')}: ${said(g[0]).slice(0, 80)}`);
   fail('no_double_post', twice(bot.filter((m) => !m.to)));
   fail('no_double_ephemeral', twice(bot.filter((m) => m.to)));

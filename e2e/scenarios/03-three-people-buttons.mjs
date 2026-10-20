@@ -1,6 +1,5 @@
 export default {
   title: 'A owner, B teammate, C not allowed: C tags, B and C tap Open PR, then A taps it twice (catalog 10, 25)',
-  matrix: { NATIVE_STREAM: ['1', '0'] },
   env: { FAKE_CI_S: '0' },
   people: { A: 'owner, allowed', B: 'teammate, allowed', C: 'not allowed' },
   steps: [

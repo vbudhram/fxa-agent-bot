@@ -47,16 +47,6 @@ export function currentRow(rows) {
   return (rows.find((r) => r.status === 'in_progress') ?? rows.find((r) => r.status !== 'complete') ?? rows.at(-1))?.id ?? null;
 }
 
-// The rows whose title or status changed since `sent` ({id: "title|status"}).
-export function changedRows(sent, rows) {
-  const next = { ...sent }, out = [];
-  for (const r of rows) {
-    const k = `${r.title}|${r.status}`;
-    if (next[r.id] !== k) { out.push(r); next[r.id] = k; }
-  }
-  return { rows: out, sent: next };
-}
-
 // One line of facts: files, tests, lint and type errors. Empty when there are none.
 export function facts(st) {
   const bits = [], files = Object.values(st.files);
@@ -85,9 +75,8 @@ export function summary(st) {
 export const todoLine = (st) => (st.todos ?? []).length
   ? todoRows(st).map((r) => `${r.status === 'complete' ? '✓' : '○'} ${r.title}`).join('  ·  ') : null;
 
-// After Slack closes a turn's stream, the turn goes on as an edited line with the same rows
-// the stream showed, not raw commands. rows: {rows_done, cur_kind, cur_label, cur_count} as
-// the stream left them; each new step joins its stage row or opens the next one.
+// The status's stage rows, not raw commands. rows: {rows_done, cur_kind, cur_label, cur_count}
+// as the last update left them; each new step joins its stage row or opens the next one.
 const steps = (n) => `${n} step${n === 1 ? '' : 's'}`;
 export function advanceRows(rows, news) {
   let { rows_done: done = [], cur_kind: kind = null, cur_label: label = null, cur_count: count = 0 } = rows ?? {};
@@ -131,7 +120,7 @@ export const isStatusAsk = (text) => {
   return t.length <= 60 && parts.length > 0 && parts.every((p) => STATUS_ASKS.some((r) => r.test(p)));
 };
 
-// The last sentence of the agent's latest text block: the status reply's and a new stream's note.
+// The last sentence of the agent's latest text block: the status reply's note.
 export const lastNote = (said) => clip(said ?? '').split(/(?<=[.!?])\s+/).filter(Boolean).at(-1) ?? '';
 
 // The status reply: time, todo progress, the current todo, the last step and when it started.

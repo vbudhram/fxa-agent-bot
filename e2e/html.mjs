@@ -1,5 +1,5 @@
 // A thread as Slack lays it out, for the PNG the judge reads. An approximation: real Slack
-// rendering (fonts, the stream UI, Show more) differs.
+// rendering (fonts, Show more) differs.
 import { blockText } from './slack-view.mjs';
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -25,16 +25,13 @@ function message(m, who) {
     else { flush(); body += `<div>${mrkdwn(l, who)}</div>`; }
   }
   flush();
-  const rows = (m.chunks ?? []).map((c) => (c.type === 'task_update'
-    ? `<div class="row ${c.status}">${c.status === 'complete' ? '✓' : c.status === 'in_progress' ? '◌' : '○'} ${esc(c.title)}${c.details ? `<span class="det"> ${esc(c.details)}</span>` : ''}</div>`
-    : `<div>${mrkdwn(c.text ?? '', who)}</div>`)).join('');
   const name = m.bot ? 'fxa-agent <span class="app">APP</span>' : esc(who(m.user));
   return `<div class="msg${m.to ? ' eph' : ''}${m.deleted ? ' del' : ''}" data-seq="${m.seq}">
   <div class="av ${m.bot ? 'bot' : ''}">${m.bot ? '🦊' : esc(who(m.user)[0])}</div>
   <div class="main">
     ${m.to ? `<div class="only">👁 Only visible to you (${esc(who(m.to))})</div>` : ''}
     <div class="who">${name} <span class="seq">#${m.seq}</span>${m.edits && !m.bot ? ' <span class="ed">(edited)</span>' : ''}</div>
-    ${m.deleted ? '<div class="gone">This message was deleted.</div>' : `${rows ? `<div class="stream">${rows}</div>` : ''}${body}`}
+    ${m.deleted ? '<div class="gone">This message was deleted.</div>' : body}
     ${buttons.length ? `<div class="btns">${buttons.map((b) => `<span class="btn">${esc(b)}</span>`).join('')}</div>`
       : m.retired ? `<div class="btns gone-btns">${m.retired.map((b) => `<span class="btn">${esc(b)}</span>`).join('')} <span class="mute">later removed</span></div>` : ''}
     ${m.reactions.size || m.marks?.length ? `<div class="reacts">${[...m.reactions].map((r) => `<span>${EMOJI[r] ?? `:${r}:`}</span>`).join('')}${(m.marks ?? []).map((r) => `<span>${EMOJI[r.split(' ')[0]] ?? r.split(' ')[0]} ${esc(who(r.split(' by ')[1]))}</span>`).join('')}</div>` : ''}
@@ -54,7 +51,6 @@ h2{font-size:13px;color:#616061;border-bottom:1px solid #ddd;padding-bottom:4px}
 .av{width:36px;height:36px;border-radius:6px;background:#4a154b;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;flex:none}.av.bot{background:#ff9400;font-size:20px}
 .main{flex:1;min-width:0}.who{font-weight:700}.seq,.ed{font-weight:400;color:#888;font-size:12px}.app{background:#ddd;font-size:10px;padding:0 3px;border-radius:2px;color:#555}
 .only{font-size:12px;color:#616061}.gone{color:#888;font-style:italic}
-.stream{border:1px solid #e8e8e8;border-radius:6px;padding:4px 8px;margin:2px 0;font-size:14px}.row.in_progress{color:#1264a3}.det{color:#888}
 .btns{margin-top:4px;display:flex;gap:6px;flex-wrap:wrap}.gone-btns .btn{opacity:.4;text-decoration:line-through}.mute{color:#888;font-size:12px}.btn{border:1px solid #bbb;border-radius:4px;padding:2px 10px;font-weight:600;font-size:13px}
 .reacts{margin-top:3px;display:flex;gap:4px}.reacts span{background:#eef3f8;border:1px solid #d0e0ef;border-radius:12px;padding:0 6px;font-size:13px}
 .at{background:#e8f5fa;color:#1264a3}a{color:#1264a3}code{background:#f6f6f6;border:1px solid #ddd;padding:0 3px;font-size:13px}pre{background:#f6f6f6;padding:6px;white-space:pre-wrap}q{display:block;border-left:3px solid #ddd;padding-left:8px}q:before,q:after{content:none}

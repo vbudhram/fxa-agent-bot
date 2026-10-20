@@ -4,7 +4,7 @@
 export const BOT = { user_id: 'UBOT', bot_id: 'BBOT', team_id: 'T1' };
 
 export function createView({ names = {} } = {}) {
-  const msgs = []; // {ts, channel, thread_ts, user|bot, text, blocks, to, chunks, edits, reactions:Set, deleted, seq}
+  const msgs = []; // {ts, channel, thread_ts, user|bot, text, blocks, to, edits, reactions:Set, deleted, seq}
   const calls = []; // {at, method, args}
   let clock = Math.floor(Date.now() / 1000) * 1e6, seq = 0, chg = 0, lastCall = Date.now();
   const touch = (m) => { m.chg = ++chg; return m; };
@@ -24,14 +24,6 @@ export function createView({ names = {} } = {}) {
   const personEdit = (m, text) => { m.text = text; m.edits++; touch(m); };
   const personDelete = (m) => { m.deleted = true; touch(m); };
   const personReact = (m, user, name) => { (m.marks ??= []).push(`${name} by ${user}`); touch(m); };
-
-  // A stream's chunks: a task_update with an id we already have replaces that row.
-  function addChunks(m, chunks = []) {
-    for (const c of chunks) {
-      const i = c.type === 'task_update' ? m.chunks.findIndex((x) => x.type === 'task_update' && x.id === c.id) : -1;
-      if (i >= 0) m.chunks[i] = c; else m.chunks.push(c);
-    }
-  }
 
   function apply(method, args = {}) {
     lastCall = Date.now();
@@ -55,12 +47,11 @@ export function createView({ names = {} } = {}) {
         const m = find(channel, args.ts);
         if (!m || m.deleted) throw err('message_not_found');
         if ('text' in args) m.text = args.text;
-        // New blocks replace a finished stream's task card too, as in Slack.
         if ('blocks' in args) {
           // Buttons an edit took away (the bot moves them to the newest reply): kept, so a reader knows they were there.
           const had = blockText(m.blocks).buttons, now = blockText(args.blocks).buttons;
           if (had.length && !now.length) m.retired = had;
-          m.blocks = args.blocks; if (m.stream === 'closed') m.chunks = [];
+          m.blocks = args.blocks;
         }
         m.edits++; touch(m);
         return { ok: true, channel, ts: m.ts };
@@ -72,20 +63,6 @@ export function createView({ names = {} } = {}) {
         return { ok: true };
       }
       case 'chat.getPermalink': return { ok: true, permalink: `https://fake.slack.com/archives/${channel}/p${String(args.message_ts).replace('.', '')}` };
-      case 'chat.startStream': {
-        const m = { ts: nextTs(), channel, thread_ts: args.thread_ts, bot: true, text: '', chunks: [], stream: 'open', edits: 0, reactions: new Set(), seq: ++seq };
-        addChunks(m, args.chunks);
-        msgs.push(touch(m));
-        return { ok: true, channel, ts: m.ts };
-      }
-      case 'chat.appendStream': case 'chat.stopStream': {
-        const m = find(channel, args.ts);
-        if (!m || m.stream !== 'open') throw err('message_not_in_streaming_state');
-        addChunks(m, args.chunks);
-        if (method === 'chat.stopStream') { m.stream = 'closed'; if (args.blocks) m.blocks = args.blocks; }
-        touch(m);
-        return { ok: true, channel, ts: m.ts };
-      }
       case 'reactions.add': case 'reactions.remove': {
         const m = find(channel, args.timestamp);
         if (!m) throw err('message_not_found');
@@ -167,10 +144,8 @@ export function toText(view, { channel, thread_ts, who = (u) => u, notes = [], v
     if (m.to) head.push(`(ephemeral -> ${who(m.to)})`);
     if (m.edits) head.push(`(edited x${m.edits})`);
     if (m.deleted) head.push('(deleted)');
-    if (m.stream) head.push(`(stream ${m.stream})`);
     const { lines, buttons } = blockText(m.blocks);
     const body = lines.length ? lines : [m.text];
-    for (const c of m.chunks ?? []) body.push(c.type === 'task_update' ? `  ${c.status === 'complete' ? '✓' : c.status === 'in_progress' ? '›' : '○'} ${c.title}${c.details ? ` (${c.details})` : ''}` : `  ${c.text ?? JSON.stringify(c)}`);
     rows.push({ seq: m.seq, text: [`${head.join(' ')}: ${body.join('\n    ')}`,
       ...(buttons.length ? [`    buttons: ${buttons.map((b) => `[${b}]`).join(' ')}`] : []),
       ...(!buttons.length && m.retired ? [`    (had buttons ${m.retired.map((b) => `[${b}]`).join(' ')}, later removed)`] : []),

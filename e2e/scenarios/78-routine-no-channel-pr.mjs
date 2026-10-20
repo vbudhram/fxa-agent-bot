@@ -12,7 +12,6 @@ export default {
       ctlOrder: [/"finish"/, /"routine","done","45"/, /^\["stop"/] } },
     { expect: { calls: { method: 'chat.postMessage', n: 0 }, ctl: { cmd: 'finish', n: 1 } } },
     { expect: { calls: { method: 'chat.update', n: 0 } } },
-    { expect: { calls: { method: 'chat.startStream', n: 0 } } },
   ],
   judge: 'A routine with no channel ships its PR and leaves Slack untouched.',
 };
