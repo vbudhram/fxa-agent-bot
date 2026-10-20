@@ -11,6 +11,8 @@ export default {
     { A: '!stop', expect: { noPublicPost: true, noCtl: 'stop' } },
     { A: { react: '-1', on: 'status' }, expect: { noCtl: 'interrupt', noEphemeral: 'A' } },
     { advance: 'turn', wait: { text: /^Security review: the report is in this thread/ }, expect: { ctl: { cmd: 'task', n: 1 } } },
+    { A: '@bot fix the first finding', expect: { ephemeral: { to: 'A', match: /^This thread holds a routine's report\. To work on a finding, tag me in a new thread and paste the finding\.$/ },
+      ephemeralCount: { to: 'A', n: 2 }, noCtl: 'steer' } },
   ],
   judge: 'People can talk about the result in the thread without the bot answering each reply; a tag gets one private pointer to the right way to start work.',
 };
