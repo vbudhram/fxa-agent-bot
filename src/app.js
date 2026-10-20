@@ -178,7 +178,7 @@ async function onMention({ event, body, client }) {
   // A routine's thread: a tag gets a hint for that person only, and never steers or starts anything (D24).
   // The hint follows what the thread shows (rt.hint, set at the run's end); a run still at work gets 'run'.
   const rt = event.thread_ts && sessions.get(event.channel, event.thread_ts)?.routine;
-  if (rt) { await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts, text: routineHint(rt.hint ?? 'run') }).catch(() => {}); return; }
+  if (rt) { await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts, text: routineHint(rt.hint ?? (rt.ended === 'report' ? 'report' : rt.ended === 'ok' ? 'pr' : 'run')) }).catch(() => {}); return; }
   if (!allowed(event.channel, event.user)) {
     const runs = event.thread_ts && sessions.get(event.channel, event.thread_ts)?.owner;
     if (inChannels(event.channel)) await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts,
