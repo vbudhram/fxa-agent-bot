@@ -177,9 +177,9 @@ async function onMention({ event, body, client }) {
   if (fromBot(event)) return; // another app's post, as for thread replies
   noteAsker(event.ts, event.user);
   // A routine's thread: a tag gets a hint for that person only, and never steers or starts anything (D24).
-  // The PR hint only while a PR may come, or when one opened; else the thread holds a report.
+  // The hint follows what the thread shows (rt.hint, set at the run's end); a run still at work gets 'run'.
   const rt = event.thread_ts && sessions.get(event.channel, event.thread_ts)?.routine;
-  if (rt) { await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts, text: routineHint(rt.ended === 'report' ? 'report' : rt.ended === 'ok' ? 'pr' : 'run') }).catch(() => {}); return; }
+  if (rt) { await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts, text: routineHint(rt.hint ?? 'run') }).catch(() => {}); return; }
   if (!allowed(event.channel, event.user)) {
     // A channel the bot does not watch: one short reply per thread to a person it would serve, and a log line,
     // so a channel that dropped out of ALLOWED_CHANNELS is not a silent bot. Nothing starts.
@@ -2540,6 +2540,8 @@ async function endRoutine(key, end) {
     posted = await (rep.snippet ? app.client.filesUploadV2({ channel_id: s.channel, thread_ts: r.start_ts, content: rep.text, filename: 'report.md', title: `${r.name} report` })
       : app.client.chat.postMessage({ ...at, text: rep.text })).then(() => true, (e) => { console.error('routine', key, `report post: ${e.data?.error ?? e.message}`); return false; });
   }
+  // A later tag's hint follows what the thread shows: a report only when one posted, a PR only when the end names one.
+  if (fresh(key)?.routine) sessions.patch(key, { routine: { ...fresh(key).routine, hint: posted ? 'report' : shown.state === 'ok' ? 'pr' : 'run' } });
   const text = routineEnd(r, { ...shown, post, posted, next: a?.next });
   await app.client.chat.update({ channel: s.channel, ts: r.start_ts, text: routineEndLine(r, shown) }).catch((e) => console.error('routine', key, `start edit: ${e.data?.error ?? e.message}`));
   await app.client.chat.postMessage({ ...at, text, reply_broadcast: true }).catch((e) => console.error('routine', key, `end post: ${e.data?.error ?? e.message}`));
