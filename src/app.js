@@ -178,7 +178,7 @@ async function onMention({ event, body, client }) {
   // A routine's thread: a tag gets a hint for that person only, and never steers or starts anything (D24).
   // The PR hint only while a PR may come, or when one opened; else the thread holds a report.
   const rt = event.thread_ts && sessions.get(event.channel, event.thread_ts)?.routine;
-  if (rt) { await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts, text: routineHint(rt.mode !== 'report' && (!rt.ended || rt.ended === 'ok') ? 'pr' : 'report') }).catch(() => {}); return; }
+  if (rt) { await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts, text: routineHint(rt.ended === 'report' ? 'report' : rt.ended === 'ok' ? 'pr' : 'run') }).catch(() => {}); return; }
   if (!allowed(event.channel, event.user)) {
     const runs = event.thread_ts && sessions.get(event.channel, event.thread_ts)?.owner;
     if (inChannels(event.channel)) await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts,
@@ -2510,13 +2510,15 @@ async function endRoutine(key, end) {
   const post = a?.changed === true && a.post === true;
   const shown = !a ? { state: 'store' } : a.changed ? end : a.state === 'stopped' ? { state: 'stopped' }
     : a.state === 'failed' ? { state: 'failed', reason: 'the run ended before its result came in' } : { state: 'ended' };
-  const text = routineEnd(r, { ...shown, post, next: a?.next });
   const at = { channel: s.channel, thread_ts: r.start_ts };
-  if (end.report && post) {
+  // posted: the report is really in the thread, so the end text may say so (a blank report or a failed post is not).
+  let posted = false;
+  if (end.report?.trim() && post) {
     const rep = routineReport(end.report);
-    await (rep.snippet ? app.client.filesUploadV2({ channel_id: s.channel, thread_ts: r.start_ts, content: rep.text, filename: 'report.md', title: `${r.name} report` })
-      : app.client.chat.postMessage({ ...at, text: rep.text })).catch((e) => console.error('routine', key, `report post: ${e.data?.error ?? e.message}`));
+    posted = await (rep.snippet ? app.client.filesUploadV2({ channel_id: s.channel, thread_ts: r.start_ts, content: rep.text, filename: 'report.md', title: `${r.name} report` })
+      : app.client.chat.postMessage({ ...at, text: rep.text })).then(() => true, (e) => { console.error('routine', key, `report post: ${e.data?.error ?? e.message}`); return false; });
   }
+  const text = routineEnd(r, { ...shown, post, posted, next: a?.next });
   await app.client.chat.update({ channel: s.channel, ts: r.start_ts, text: routineEndLine(r, shown) }).catch((e) => console.error('routine', key, `start edit: ${e.data?.error ?? e.message}`));
   await app.client.chat.postMessage({ ...at, text, reply_broadcast: true }).catch((e) => console.error('routine', key, `end post: ${e.data?.error ?? e.message}`));
 }

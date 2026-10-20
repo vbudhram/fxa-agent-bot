@@ -6,7 +6,7 @@ export default {
     { root: /^Security review \(routine for FxA\) started/ },
     { advance: 'setup' },
     { A: 'this looks wrong, can you also check the login route?', expect: { noPublicPost: true, noEphemeral: 'A', noCtl: 'steer' } },
-    { A: '@bot pause this routine', expect: { ephemeral: { to: 'A', match: /^This thread holds a routine's report\. To work on a finding, tag me in a new thread and paste the finding\.$/ },
+    { A: '@bot pause this routine', expect: { ephemeral: { to: 'A', match: /^This thread is for a routine run\. I do not take requests here\. To start work, tag me in a new thread\.$/ },
       ephemeralCount: { to: 'A', n: 1 }, noCtl: 'steer', noPublicPost: true } },
     { A: '!stop', expect: { noPublicPost: true, noCtl: 'stop' } },
     { A: { react: '-1', on: 'status' }, expect: { noCtl: 'interrupt', noEphemeral: 'A' } },
