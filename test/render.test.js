@@ -1,18 +1,24 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { threadStarter, endWord, render, operatorProblem, summaryLine, closestCommand, watchUrl, threadLine, maskSecrets, maskUpload, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, fromOther, othersLines, laterMessage } from '../src/render.js';
+import { threadStarter, endWord, render, operatorProblem, operatorNext, summaryLine, closestCommand, watchUrl, threadLine, maskSecrets, maskUpload, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, fromOther, othersLines, laterMessage } from '../src/render.js';
 
 test('operator problems are named, other errors are not', () => {
   assert.equal(operatorProblem('ERROR: (gcloud.compute.ssh) Reauthentication failed. cannot prompt').kind, 'gcloud');
   assert.equal(operatorProblem('I stopped without replying. The last output was: OAuth token has expired.').kind, 'claude');
   assert.equal(operatorProblem('ERROR: could not mint a GitHub App installation token.').kind, 'github-app');
   assert.equal(operatorProblem('yarn test failed in fxa-settings'), null);
+  // The manager's world: the proxy's key and the manager's account, never the laptop's token or gcloud login.
+  const c = operatorProblem('authentication_error');
+  assert.doesNotMatch(c.text, /CLAUDE_CODE_OAUTH_TOKEN/);
+  assert.doesNotMatch(operatorProblem('Reauthentication failed').text, /gcloud auth login/);
+  assert.match(operatorNext('claude'), /vm\.sh secret fxa-anthropic-api-key.*fxa-llm-proxy/);
+  assert.match(operatorNext('gcloud'), /service account/);
 });
 
 test('an operator error renders the plain message and its kind', () => {
   const msg = render('agent-x', { type: 'error', text: 'Reauthentication failed' });
   assert.equal(msg.operator, 'gcloud');
-  assert.match(msg.text, /gcloud auth login/);
+  assert.match(msg.text, /Google Cloud refused the manager's sign-in/);
 });
 
 test('the PR message carries its notes, not the session summary', () => {

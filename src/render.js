@@ -87,16 +87,24 @@ export { md, buttons, defuse };
 
 // Problems only the operator can fix, told plainly: a raw gcloud or auth error in
 // every thread helps nobody. Each has a kind, so a thread hears it once.
+// [pattern, kind, what the thread is told, the operator's next step for the error row]. The manager runs the
+// controller: runners reach Claude through the LLM proxy, and gcloud runs as the manager's service account.
 const OPERATOR = [
   [/Reauthentication failed|gcloud auth login|problem refreshing your current auth tokens|invalid_grant/i, 'gcloud',
-    "The operator's Google Cloud sign-in expired, so I can't reach the sandbox. The operator must run `gcloud auth login`. Then try again."],
+    "Google Cloud refused the manager's sign-in, so I can't reach the sandbox. The operator must check it. Then try again.",
+    'check the manager service account and its roles: vm.sh status'],
   [/OAuth token has expired|Invalid API key|authentication_error|Please run \/login|CLAUDE_CODE_OAUTH_TOKEN is unset/i, 'claude',
-    "The agent's Claude token was rejected. The operator must renew `CLAUDE_CODE_OAUTH_TOKEN`. Then send your message again."],
+    'The Claude key behind the agent was rejected. The operator must store a new one. Then send your message again.',
+    "store a new key: vm.sh secret fxa-anthropic-api-key, then vm.sh sys 'sudo systemctl restart fxa-llm-proxy'"],
   [/Codex auth|codex login|refresh_token_reused|token_expired/i, 'codex',
-    'The Codex sign-in on the host expired. The operator must sign in to Codex again. Then send your message again.'],
+    'The Codex sign-in on the host expired. The operator must sign in to Codex again. Then send your message again.',
+    'sign in to Codex again on the manager'],
   [/could not mint a GitHub App installation token/i, 'github-app',
-    'The GitHub App could not get a token. The operator must check its key and installation. The work is not lost; try again after that.'],
+    'The GitHub App could not get a token. The operator must check its key and installation. The work is not lost; try again after that.',
+    'check the GitHub App key (fxa-github-app-key) and its installation'],
 ];
+// The operator's next step for an operator-problem kind, for the error row.
+export const operatorNext = (kind) => OPERATOR.find(([, k]) => k === kind)?.[3] ?? '';
 // The Diff message: files from the git headers, or from the +++ lines of a plain unified diff.
 export function diffStat(d) {
   const files = Math.max((d.match(/^diff --git /gm) ?? []).length, (d.match(/^\+\+\+ /gm) ?? []).length);

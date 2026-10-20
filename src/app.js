@@ -22,7 +22,7 @@ import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { routineStart, routineSkip, routineEnd, routineEndLine, routineReport, routineHint, routineLabel } from './render.js';
-import { render, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, toSomeoneElse, asideBlock, REBASE_PROMPT, fileRefs, distinctFiles, maskSecrets, maskUpload } from './render.js';
+import { render, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, toSomeoneElse, asideBlock, REBASE_PROMPT, operatorNext, fileRefs, distinctFiles, maskSecrets, maskUpload } from './render.js';
 
 const { App } = bolt;
 installErrorLog(ctl.errorsPush);
@@ -1855,7 +1855,7 @@ const operatorSaid = new Map();
 function firstOperatorNote(key, kind) {
   const id = `${key}:${kind}`, at = operatorSaid.get(id) ?? 0;
   if (Date.now() - at < 3_600_000) return false;
-  if (![...operatorSaid.keys()].some((k) => k.endsWith(`:${kind}`))) console.error(`operator problem: ${kind}`);
+  if (![...operatorSaid.keys()].some((k) => k.endsWith(`:${kind}`))) console.error(`operator problem: ${kind}: ${operatorNext(kind)}`);
   operatorSaid.set(id, Date.now());
   return true;
 }
