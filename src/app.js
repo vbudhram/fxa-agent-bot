@@ -2524,7 +2524,7 @@ async function refuseRoutine(r, reason) {
 const lastLine = (t) => String(t ?? '').trim().split('\n').pop().replace(/^ERROR: /, '').slice(0, 300);
 // The end of a routine run (D12, D22). done comes first, before the session stops, so the report and the cost land
 // on a live row (the tick's reconcile waits 10 min after a session ends, as a backstop). Then the session stops, the
-// report posts when ctl's scan allows it, the start message becomes a one-line state, and the full end text goes once, as a broadcast reply.
+// report posts when ctl's scan allows it, the start message becomes a one-line state, and the full end text goes once, as a thread reply.
 // end: {state: ok|report|nochange|failed|stopped, pr, reason, report, cost}
 async function endRoutine(key, end) {
   const s = fresh(key), r = s?.routine;
@@ -2552,7 +2552,7 @@ async function endRoutine(key, end) {
   if (fresh(key)?.routine) sessions.patch(key, { routine: { ...fresh(key).routine, hint: posted ? 'report' : shown.state === 'ok' ? 'pr' : 'run' } });
   const text = routineEnd(r, { ...shown, post, posted, blank: !end.report?.trim(), next: a?.next });
   await app.client.chat.update({ channel: s.channel, ts: r.start_ts, text: routineEndLine(r, shown) }).catch((e) => console.error('routine', key, `start edit: ${e.data?.error ?? e.message}`));
-  await app.client.chat.postMessage({ ...at, text, reply_broadcast: true }).catch((e) => console.error('routine', key, `end post: ${e.data?.error ?? e.message}`));
+  await app.client.chat.postMessage({ ...at, text }).catch((e) => console.error('routine', key, `end post: ${e.data?.error ?? e.message}`));
 }
 // A routine run's events, as a state machine (D12, D19). Report mode never ships. A pr mode ships only a ready turn
 // with changes, then waits for the PR (ok) or the wrap-up's error (failed). A ready turn with no change in a pr mode
