@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { routineStart, routineEnd, routineEndLine, routineSkip, routineHint, routineReport, dateToken } from '../src/render.js';
-import { botChannels } from '../src/routines.js';
+import { botChannels, pollChannels } from '../src/routines.js';
 
 const R = { name: 'Code review', team: 'fxa', template: 'code-review', repos: ['mozilla/fxa'], branch: 'main', mode: 'pr+notes', since: 1792414800 };
 const ENDS = [{ state: 'ok', pr: 'https://github.com/mozilla/fxa/pull/12', next: 1792501200 }, { state: 'report', post: true, next: 1792501200 },
@@ -160,4 +160,18 @@ test('without channels:read the channel list falls back to private channels; ano
   assert.deepEqual(c.calls, ['public_channel,private_channel', 'private_channel']);
   await assert.rejects(botChannels(client(() => slackErr('ratelimited'))), /ratelimited/);
   await assert.rejects(botChannels(client(() => slackErr('missing_scope'))), /missing_scope/);
+});
+
+test('a missing scope stops the channel list polling; another error keeps it', async () => {
+  const quiet = console.error; console.error = () => {};
+  try {
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const scope = client(() => slackErr('missing_scope'));
+    await pollChannels(scope, () => {}, 5); await wait(40);
+    assert.equal(scope.calls.length, 2, 'the public try, then the private one, and no more');
+    const lists = [], busy = client(() => slackErr('ratelimited')), ok = client(() => ({ channels: [{ id: 'G1', name: 'p', is_private: true }] }));
+    await pollChannels(busy, () => {}, 5); await pollChannels(ok, (l) => lists.push(l), 5); await wait(40);
+    assert.ok(busy.calls.length > 2, `a rate limit polls again (${busy.calls.length} calls)`);
+    assert.ok(lists.length > 1 && lists[0][0].id === 'G1', 'each list is written');
+  } finally { console.error = quiet; }
 });

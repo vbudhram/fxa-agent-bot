@@ -42,6 +42,19 @@ export async function botChannels(client) {
   }
 }
 
+// Lists the channels at start and every 10 minutes, and gives each list to write. Without the scopes Slack answers
+// missing_scope every time, so that stops the polling: one error each start, not one every 10 minutes.
+export function pollChannels(client, write, every = 600_000) {
+  let timer = null;
+  const list = () => botChannels(client).then(write, (e) => {
+    console.error('channel list', e.data?.error || e.message);
+    if (e.data?.error === 'missing_scope') clearInterval(timer);
+  });
+  timer = setInterval(list, every);
+  timer.unref?.();
+  return list();
+}
+
 // A call while the last one still runs does nothing, so a slow tick never overlaps the next.
 export function inFlightGuard(fn) {
   let running = false;
