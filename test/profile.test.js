@@ -50,3 +50,20 @@ test('a profile: word inside the text is not a flag (a pasted scope list)', () =
   assert.deepEqual(r('why did the client lose avatar? log: scope=openid profile:email profile:avatar'),
     { profile: undefined, text: 'why did the client lose avatar? log: scope=openid profile:email profile:avatar' });
 });
+
+test('a team that takes secret tickets does not claim its Jira project as a prefix: an FXA key still starts an FxA session', async () => {
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = mkdtempSync(join(tmpdir(), 'secret-team-'));
+  const index = join(dir, 'index.json');
+  writeFileSync(index, JSON.stringify({ schema: 1, teams: { 'fxa-private': { label: 'FxA Private', status: 'active', jira: 'FXA', secret: true, access: { users: ['U0SECRET1'] } },
+    rusty: { status: 'active', jira: 'RUST', access: { users: ['U0SECRET1'] } } } }));
+  const env = { FXA_TEAMS_INDEX: index };
+  const other = resolveProfile({ text: 'fix FXA-12345 please', channel: 'C0PUBLIC1', user: 'U0OTHER01', env });
+  assert.equal(other.error, undefined);
+  assert.notEqual(other.profile, 'fxa-private');
+  assert.notEqual(resolveProfile({ text: 'fix FXA-1', channel: 'C0PUBLIC1', user: 'U0SECRET1', env }).profile, 'fxa-private');
+  assert.equal(resolveProfile({ text: 'fix RUST-1', channel: 'C0PUBLIC1', user: 'U0SECRET1', env }).profile, 'rusty');
+  assert.equal(resolveProfile({ text: 'team:fxa-private fix it', channel: 'C0PUBLIC1', user: 'U0SECRET1', env }).profile, 'fxa-private');
+});

@@ -20,7 +20,8 @@ function clean(index) {
     const a = t.access ?? {};
     teams[name] = { label: typeof t.label === 'string' ? t.label : name, status: t.status === 'active' ? 'active' : String(t.status ?? 'draft'),
       open: a.open === true, users: only(a.users, ID.user), channels: only(a.channels, ID.channel),
-      prefixes: [...only(a.jira_prefixes, ID.prefix), ...(ID.prefix.test(t.jira ?? '') ? [t.jira] : [])] };
+      // A team that takes a project's secret tickets does not claim the project: its key still starts the public team's session.
+      prefixes: [...only(a.jira_prefixes, ID.prefix), ...(t.secret !== true && ID.prefix.test(t.jira ?? '') ? [t.jira] : [])] };
   }
   return teams;
 }
