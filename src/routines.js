@@ -23,6 +23,25 @@ export async function channelRefusal(client, run) {
   return null;
 }
 
+// The channels this bot is in, for the channel picker of the dashboard's routine form. Without channels:read
+// Slack answers missing_scope for public channels, so the list then holds the private ones only.
+export async function botChannels(client) {
+  for (const types of ['public_channel,private_channel', 'private_channel']) {
+    const out = [];
+    let cursor;
+    try {
+      do {
+        const r = await client.users.conversations({ types, limit: 200, exclude_archived: true, cursor });
+        for (const c of r.channels ?? []) out.push({ id: c.id, name: c.name, private: !!c.is_private, shared: !!(c.is_ext_shared || c.is_shared) });
+        cursor = r.response_metadata?.next_cursor;
+      } while (cursor);
+      return out;
+    } catch (e) {
+      if (e.data?.error !== 'missing_scope' || types === 'private_channel') throw e;
+    }
+  }
+}
+
 // A call while the last one still runs does nothing, so a slow tick never overlaps the next.
 export function inFlightGuard(fn) {
   let running = false;

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { routineStart, routineEnd, routineEndLine, routineSkip, routineHint, routineReport, dateToken } from '../src/render.js';
+import { botChannels } from '../src/routines.js';
 
 const R = { name: 'Code review', team: 'fxa', template: 'code-review', repos: ['mozilla/fxa'], branch: 'main', mode: 'pr+notes', since: 1792414800 };
 const ENDS = [{ state: 'ok', pr: 'https://github.com/mozilla/fxa/pull/12', next: 1792501200 }, { state: 'report', post: true, next: 1792501200 },
@@ -142,4 +143,21 @@ test('a routine thread says a report is there only when one posted, and its hint
   assert.match(routineEnd(R, { state: 'report', post: true, posted: true }), /the report is in this thread/);
   assert.match(routineHint('run'), /^This thread is for a routine run\. I do not take requests here\./);
   assert.doesNotMatch(routineHint('run'), /holds a routine's report|PR link/);
+});
+
+const slackErr = (error) => Object.assign(new Error(error), { data: { error } });
+const client = (pages) => { const calls = []; return { calls, users: { conversations: async (a) => { calls.push(a.types); const p = pages(a); if (p instanceof Error) throw p; return p; } } }; };
+
+test('the channel list reads every page, with private and shared from Slack', async () => {
+  const c = client((a) => (a.cursor ? { channels: [{ id: 'C2', name: 'two', is_private: true, is_ext_shared: true }] }
+    : { channels: [{ id: 'C1', name: 'one' }], response_metadata: { next_cursor: 'p2' } }));
+  assert.deepEqual(await botChannels(c), [{ id: 'C1', name: 'one', private: false, shared: false }, { id: 'C2', name: 'two', private: true, shared: true }]);
+});
+
+test('without channels:read the channel list falls back to private channels; another error is thrown', async () => {
+  const c = client((a) => (a.types.includes('public') ? slackErr('missing_scope') : { channels: [{ id: 'G1', name: 'priv', is_private: true }] }));
+  assert.deepEqual(await botChannels(c), [{ id: 'G1', name: 'priv', private: true, shared: false }]);
+  assert.deepEqual(c.calls, ['public_channel,private_channel', 'private_channel']);
+  await assert.rejects(botChannels(client(() => slackErr('ratelimited'))), /ratelimited/);
+  await assert.rejects(botChannels(client(() => slackErr('missing_scope'))), /missing_scope/);
 });

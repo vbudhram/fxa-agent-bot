@@ -14,7 +14,8 @@ import { pollEvery, reachable, missed, replayMark } from './poll.js';
 import * as unfurl from './unfurl.js';
 import { resolveProfile, mayStart } from './profile.js';
 import { teamChannels } from './teams.js';
-import { ROUTINES_ENV, TICK_MS, NO_CHANNEL, channelRefusal, inFlightGuard, muted, mutedReply } from './routines.js';
+import { ROUTINES_ENV, TICK_MS, NO_CHANNEL, channelRefusal, inFlightGuard, muted, mutedReply, botChannels } from './routines.js';
+import { ingest } from './db.js';
 import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
 import { codeAllowed, PRIVATE_ONLY, sessionTeam, parseGates, gateAllows, loadMembers } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, LINE_BREAK, laterMessage } from './render.js';
@@ -2601,4 +2602,10 @@ if (GATES.size) { await loadMembers(app.client, GATES, gateMembers); setInterval
 for (const s of sessions.all()) if (s.state === 'queued') launch(s.key, app.client).catch((e) => console.error('launch', s.key, e.message));
 replayMissed(replayMarks).catch((e) => console.error('replay', e.message));
 if (ROUTINES_ENV) { const tick = inFlightGuard(() => routineTick().catch((e) => console.error('routine tick', e.stderr || e.message))); setInterval(tick, TICK_MS); }
+// ponytail: polled, so a channel the bot joins shows in the routine form's picker within 10 minutes.
+if (ROUTINES_ENV) {
+  const list = () => botChannels(app.client).then((channels) => ingest('slack_channels', { env: ROUTINES_ENV, at: Math.floor(Date.now() / 1000), channels }),
+    (e) => console.error('channel list', e.data?.error || e.message));
+  list(); setInterval(list, 600_000).unref();
+}
 console.log('fxa-agent is running (Socket Mode)');
