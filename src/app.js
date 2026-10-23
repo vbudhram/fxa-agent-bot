@@ -14,7 +14,7 @@ import { pollEvery, reachable, missed, replayMark } from './poll.js';
 import * as unfurl from './unfurl.js';
 import { resolveProfile, mayStart } from './profile.js';
 import { teamChannels } from './teams.js';
-import { ROUTINES_ENV, TICK_MS, NO_CHANNEL, channelRefusal, inFlightGuard, muted, mutedReply, pollChannels } from './routines.js';
+import { ROUTINES_ENV, TICK_MS, NO_CHANNEL, channelRefusal, inFlightGuard, muted, mutedReply, pollChannels, pollUsers } from './routines.js';
 import { ingest } from './db.js';
 import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
 import { codeAllowed, PRIVATE_ONLY, sessionTeam, parseGates, gateAllows, loadMembers } from './access.js';
@@ -2604,4 +2604,5 @@ replayMissed(replayMarks).catch((e) => console.error('replay', e.message));
 if (ROUTINES_ENV) { const tick = inFlightGuard(() => routineTick().catch((e) => console.error('routine tick', e.stderr || e.message))); setInterval(tick, TICK_MS); }
 // ponytail: polled, so a channel the bot joins shows in the routine form's picker within 10 minutes.
 if (ROUTINES_ENV) pollChannels(app.client, (channels) => ingest('slack_channels', { env: ROUTINES_ENV, at: Math.floor(Date.now() / 1000), channels }));
+if (ROUTINES_ENV) pollUsers(app.client, (users) => ingest('slack_users', { env: ROUTINES_ENV, at: Math.floor(Date.now() / 1000), users }));
 console.log('fxa-agent is running (Socket Mode)');

@@ -42,18 +42,36 @@ export async function botChannels(client) {
   }
 }
 
-// Lists the channels at start and every 10 minutes, and gives each list to write. Without the scopes Slack answers
-// missing_scope every time, so that stops the polling: one error each start, not one every 10 minutes.
-export function pollChannels(client, write, every = 600_000) {
+// The people in the workspace, for the people picker of a team's Settings: no bot, no deactivated account.
+export async function workspaceUsers(client) {
+  const out = [];
+  let cursor;
+  do {
+    const r = await client.users.list({ limit: 200, cursor });
+    for (const u of r.members ?? []) {
+      if (u.deleted || u.is_bot || u.id === 'USLACKBOT') continue;
+      out.push({ id: u.id, name: u.profile?.real_name || u.real_name || u.name, handle: u.profile?.display_name || u.name || '', email: u.profile?.email || '' });
+    }
+    cursor = r.response_metadata?.next_cursor;
+  } while (cursor);
+  return out;
+}
+
+// Runs fetch at start and every `every` ms, and gives each list to write. Without the scopes Slack answers
+// missing_scope every time, so that stops the polling: one error each start, not one every interval.
+function pollList(label, fetch, write, every) {
   let timer = null;
-  const list = () => botChannels(client).then(write, (e) => {
-    console.error('channel list', e.data?.error || e.message);
+  const list = () => fetch().then(write, (e) => {
+    console.error(label, e.data?.error || e.message);
     if (e.data?.error === 'missing_scope') clearInterval(timer);
   });
   timer = setInterval(list, every);
   timer.unref?.();
   return list();
 }
+export const pollChannels = (client, write, every = 600_000) => pollList('channel list', () => botChannels(client), write, every);
+// People change slowly, and users.list is a page per 200 people: every 6 hours.
+export const pollUsers = (client, write, every = 21_600_000) => pollList('user list', () => workspaceUsers(client), write, every);
 
 // A call while the last one still runs does nothing, so a slow tick never overlaps the next.
 export function inFlightGuard(fn) {

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { routineStart, routineEnd, routineEndLine, routineSkip, routineHint, routineReport, dateToken } from '../src/render.js';
-import { botChannels, pollChannels } from '../src/routines.js';
+import { botChannels, pollChannels, workspaceUsers } from '../src/routines.js';
 
 const R = { name: 'Code review', team: 'fxa', template: 'code-review', repos: ['mozilla/fxa'], branch: 'main', mode: 'pr+notes', since: 1792414800 };
 const ENDS = [{ state: 'ok', pr: 'https://github.com/mozilla/fxa/pull/12', next: 1792501200 }, { state: 'report', post: true, next: 1792501200 },
@@ -160,6 +160,13 @@ test('without channels:read the channel list falls back to private channels; ano
   assert.deepEqual(c.calls, ['public_channel,private_channel', 'private_channel']);
   await assert.rejects(botChannels(client(() => slackErr('ratelimited'))), /ratelimited/);
   await assert.rejects(botChannels(client(() => slackErr('missing_scope'))), /missing_scope/);
+});
+
+test('the user list reads every page, and leaves out bots, deactivated accounts and Slackbot', async () => {
+  const c = { users: { list: async (a) => (a.cursor
+    ? { members: [{ id: 'U2', name: 'pat', profile: { real_name: 'Pat Doe', display_name: 'pat', email: 'pat@example.com' } }, { id: 'U3', deleted: true, name: 'x' }] }
+    : { members: [{ id: 'USLACKBOT', name: 'slackbot' }, { id: 'B1', is_bot: true, name: 'bot' }, { id: 'U1', name: 'sam', real_name: 'Sam' }], response_metadata: { next_cursor: 'p2' } }) } };
+  assert.deepEqual(await workspaceUsers(c), [{ id: 'U1', name: 'Sam', handle: 'sam', email: '' }, { id: 'U2', name: 'Pat Doe', handle: 'pat', email: 'pat@example.com' }]);
 });
 
 test('a missing scope stops the channel list polling; another error keeps it', async () => {
