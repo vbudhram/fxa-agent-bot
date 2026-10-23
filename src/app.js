@@ -187,7 +187,7 @@ async function onMention({ event, body, client }) {
     if (!inChannels(event.channel) && (USERS.includes('*') || USERS.includes(event.user))) {
       console.log('channel_not_watched', event.channel);
       const t = `${event.channel}:${event.thread_ts || event.ts}`;
-      if (!unwatchedSaid.has(t)) { unwatchedSaid.add(t); await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts,
+      if (!unwatchedSaid.has(t)) { unwatchedSaid.add(t); if (unwatchedSaid.size > 500) unwatchedSaid.delete(unwatchedSaid.values().next().value); await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts,
         text: "I don't work in this channel yet. Ask an admin to add it." }).catch(() => {}); }
       return;
     }
@@ -418,6 +418,7 @@ function quickStatus(p) {
     }), 3000);
   });
   return {
+    close,
     count: () => n,
     step: (text) => {
       st = stepRows(st, defuse(text)); n++; lastStep = text;
@@ -454,6 +455,10 @@ const HANDOFF = 'Looked into it';
 async function quick(key, p, client) {
   if (p.card_ts) await client.chat.update({ channel: p.channel, ts: p.card_ts, text: ON_IT, blocks: [] }).catch(() => {});
   const status = quickStatus(p);
+  // A throw below (a render, a store write) skipped done and answer: the count of live quick looks stayed up.
+  try { return await quickWith(key, p, client, status); } finally { status.close(); }
+}
+async function quickWith(key, p, client, status) {
   let res;
   try { res = await ctl.askStream({ id: askId(key), prompt: p.prompt, thread: `${p.channel}:${p.thread_ts}`, onStep: status.step }); }
   catch (e) {
