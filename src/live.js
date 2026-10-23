@@ -102,7 +102,8 @@ export function lineRows(st, rows) {
 // Lost contact: the polls of a running turn keep failing. One warning after LOST_MS, a
 // recovery when a poll works again, and one give-up after GIVE_UP_MS. st: {since, warned,
 // gave_up} or null; returns the next st and what to show: 'warn', 'recover', 'give_up' or null.
-export const LOST_MS = 60_000, GIVE_UP_MS = 600_000;
+// The e2e sets them shorter; the give-up message says 10 minutes, the default.
+export const LOST_MS = Number(process.env.LOST_MS) || 60_000, GIVE_UP_MS = Number(process.env.GIVE_UP_MS) || 600_000;
 export function lostContact(st, ok, now) {
   if (ok) return { st: null, show: st?.warned && !st.gave_up ? 'recover' : null };
   const cur = st ?? { since: now, warned: false, gave_up: false };
