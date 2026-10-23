@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pollEvery, IDLE_MS, reachable, missed, REPLAY_S } from '../src/poll.js';
+import { pollEvery, IDLE_MS, reachable, missed, REPLAY_S, replayable, REPLAY_IDLE_S } from '../src/poll.js';
 
 test('a session waiting for its person polls slowly; one with work polls every 5 s', () => {
   const now = 1_000_000;
@@ -32,4 +32,12 @@ test('missed: replies after the last handled one, within the replay window', () 
   assert.deepEqual(missed({ thread_ts: '1000.000000' }, msgs, 2000), [], 'no mark and no start: nothing replays');
   assert.deepEqual(missed({ thread_ts: '1000.000000', started_at: 1960_000 }, msgs, 2000).map((m) => m.ts), ['1970.000000'], 'no reply handled yet: from the session start');
   assert.deepEqual(missed({ ...s, last_ts: '1975.000000' }, msgs, 2000, s.last_ts).map((m) => m.ts), ['1950.000000', '1970.000000'], 'the mark from before a live reply moved last_ts');
+});
+
+test('replayable: a restart reads only threads with a reply in the last day', () => {
+  const s = { thread_ts: '1000.000000', last_ts: '1900.000000' };
+  assert.equal(replayable(s, 1900 + REPLAY_IDLE_S - 1), true);
+  assert.equal(replayable(s, 1900 + REPLAY_IDLE_S), false, 'idle a day: no replies call');
+  assert.equal(replayable({ thread_ts: '1000.000000', started_at: 1960_000 }, 2000), true, 'no reply yet: from the start');
+  assert.equal(replayable({ thread_ts: '1000.000000' }, 2000), false, 'no mark: nothing to read');
 });

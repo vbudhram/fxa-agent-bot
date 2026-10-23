@@ -10,7 +10,7 @@ import { installErrorLog } from './errors.js';
 import * as sessions from './sessions.js';
 import * as live from './live.js';
 import { statusMessage } from './status.js';
-import { pollEvery, reachable, missed, replayMark } from './poll.js';
+import { pollEvery, reachable, missed, replayMark, replayable } from './poll.js';
 import * as unfurl from './unfurl.js';
 import { resolveProfile, mayStart } from './profile.js';
 import { teamChannels } from './teams.js';
@@ -842,7 +842,7 @@ async function replayMissed(marks) {
   const now = Date.now() / 1000;
   for (const s of sessions.all()) {
     const mark = marks.get(s.key);
-    if (!mark || !here(s) || ![...LIVE, 'answered', 'paused', 'pr_open'].includes(s.state)) continue;
+    if (!replayable(s, now, mark) || !here(s) || ![...LIVE, 'answered', 'paused', 'pr_open'].includes(s.state)) continue;
     const r = await app.client.conversations.replies({ channel: s.channel, ts: s.thread_ts, oldest: mark, limit: 200 }).catch(() => null);
     for (const m of missed(s, r?.messages ?? [], now, mark).filter((m) => !fromBot(m)).sort((a, b) => (a.ts < b.ts ? -1 : 1))) {
       console.log(`replay ${s.key} ${m.ts}`);
