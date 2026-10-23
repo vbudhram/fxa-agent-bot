@@ -20,6 +20,9 @@ export const REPLAY_S = 900;
 // The mark to replay from: the last reply handled, else the session's start (after the message that
 // started it, so that one does not come again). A quick answer with neither replays nothing.
 export const replayMark = (s) => s.last_ts ?? (s.started_at ? (s.started_at / 1000).toFixed(6) : null);
+// One replies call per thread on each restart hit Slack's rate limit for minutes (170 threads on the dev bot), so a thread idle a day is not read.
+export const REPLAY_IDLE_S = 86_400;
+export const replayable = (s, now, mark = replayMark(s)) => !!mark && now - Number(mark) < REPLAY_IDLE_S;
 export function missed(s, messages, now, mark = replayMark(s)) {
   if (!mark) return [];
   const floor = (now - REPLAY_S).toFixed(6), from = mark > floor ? mark : floor;
