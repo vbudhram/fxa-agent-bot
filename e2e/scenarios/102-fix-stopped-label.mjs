@@ -10,7 +10,7 @@ export default {
       edited: { match: /^Dependency fix for <https:\/\/github\.com\/mozilla\/fxa\/pull\/90001\|#90001>: stopped\.$/ },
       ctl: { cmd: 'routine', match: /"done","102","--state","stopped"/, n: 1 },
       calls: { method: 'chat.postMessage', match: /"reply_broadcast":true/, n: 1 } } },
-    { expect: { noText: /stopped by a team admin|draft PR/i, ctl: { cmd: 'finish', n: 0 } } },
+    { expect: { postCount: { match: /stopped by a team admin|draft PR/i, n: 0 }, ctl: { cmd: 'finish', n: 0 } } },
   ],
   judge: 'The thread says why the fix stopped and that nothing was pushed, in the words of the PR comment; it does not blame a team admin.',
 };
