@@ -1,0 +1,2 @@
+[{"run": 102, "routine": 30, "team": "fxa", "channel": "C_TEST", "name": "Dependency fix", "mode": "pr", "template": "fix-pr", "repos": ["mozilla/fxa"], "branch": null, "private": false, "since": null,
+  "trigger": "label", "fix": {"pr": 90001, "url": "https://github.com/mozilla/fxa/pull/90001", "actor": "octocat", "package": "nx"}, "done": {"state": "stopped", "changed": false, "why": "label"}}]

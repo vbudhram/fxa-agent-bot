@@ -22,7 +22,7 @@ import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel
 import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
-import { routineStart, routineSkip, routineEnd, routineEndLine, routineReport, routineHint, routineLabel } from './render.js';
+import { routineStart, routineSkip, routineEnd, routineEndLine, routineReport, routineHint, routineLabel, fixStart, fixEnd, fixEndLine, fixSkip } from './render.js';
 import { render, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, toSomeoneElse, asideBlock, REBASE_PROMPT, operatorNext, fileRefs, distinctFiles, maskSecrets, maskUpload } from './render.js';
 
 const { App } = bolt;
@@ -180,7 +180,7 @@ async function onMention({ event, body, client }) {
   // A routine's thread: a tag gets a hint for that person only, and never steers or starts anything (D24).
   // The hint follows what the thread shows (rt.hint, set at the run's end); a run still at work gets 'run'.
   const rt = event.thread_ts && sessions.get(event.channel, event.thread_ts)?.routine;
-  if (rt) { await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts, text: routineHint(rt.hint ?? (rt.ended === 'report' ? 'report' : rt.ended === 'ok' ? 'pr' : 'run')) }).catch(() => {}); return; }
+  if (rt) { await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts, text: routineHint(rt.fix ? 'fix' : rt.hint ?? (rt.ended === 'report' ? 'report' : rt.ended === 'ok' ? 'pr' : 'run')) }).catch(() => {}); return; }
   if (!allowed(event.channel, event.user)) {
     // A channel the bot does not watch: one short reply per thread to a person it would serve, and a log line,
     // so a channel that dropped out of ALLOWED_CHANNELS is not a silent bot. Nothing starts.
@@ -2517,7 +2517,7 @@ async function routineTick() {
     const why = await channelRefusal(app.client, k);
     if (why) { console.error('routine', `run ${k.run}: the skip is not posted: ${why}`); continue; }
     // A skip counts as posted only once its post works, so a failed post does not mute the next one.
-    const ok = await app.client.chat.postMessage({ channel: k.channel, text: routineSkip(k) }).then(() => true, (e) => { console.error('routine', `run ${k.run}: the skip post failed: ${e.data?.error ?? e.message}`); return false; });
+    const ok = await app.client.chat.postMessage({ channel: k.channel, text: k.fix ? fixSkip(k.fix) : routineSkip(k) }).then(() => true, (e) => { console.error('routine', `run ${k.run}: the skip post failed: ${e.data?.error ?? e.message}`); return false; });
     if (ok) await ctl.routinePosted(k.run).catch((e) => console.error('routine', `run ${k.run} posted`, e.stderr || e.message));
   }
   for (const r of runs) await startRoutine(r).catch((e) => console.error('routine', `run ${r.run}`, e.stderr || e.message));
@@ -2547,6 +2547,8 @@ async function endRoutine(key, end) {
   const shown = !a ? { state: 'store' } : a.changed ? end : a.state === 'stopped' ? { state: 'stopped' }
     : a.state === 'failed' ? { state: 'failed', reason: 'the run ended before its result came in' } : { state: 'ended' };
   const at = { channel: s.channel, thread_ts: r.start_ts };
+  // A dependency fix run shows ctl's state and fix code, also when this call changed nothing, and never a stderr line.
+  const fix = r.fix && { state: a ? a.state : 'store', fix: { ...r.fix, ...a?.fix } };
   // posted: the report is really in the thread, so the end text may say so (a blank report or a failed post is not).
   let posted = false;
   if (end.report?.trim() && post) {
@@ -2556,9 +2558,9 @@ async function endRoutine(key, end) {
   }
   // A later tag's hint follows what the thread shows: a report only when one posted, a PR only when the end names one.
   if (fresh(key)?.routine) sessions.patch(key, { routine: { ...fresh(key).routine, hint: posted ? 'report' : shown.state === 'ok' ? 'pr' : 'run' } });
-  const text = routineEnd(r, { ...shown, post, posted, blank: !end.report?.trim(), next: a?.next });
-  await app.client.chat.update({ channel: s.channel, ts: r.start_ts, text: routineEndLine(r, shown) }).catch((e) => console.error('routine', key, `start edit: ${e.data?.error ?? e.message}`));
-  await app.client.chat.postMessage({ ...at, text }).catch((e) => console.error('routine', key, `end post: ${e.data?.error ?? e.message}`));
+  const text = fix ? fixEnd(fix.state, fix.fix, { post: a?.changed ? a.post : undefined, posted }) : routineEnd(r, { ...shown, post, posted, blank: !end.report?.trim(), next: a?.next });
+  await app.client.chat.update({ channel: s.channel, ts: r.start_ts, text: fix ? fixEndLine(fix.state, fix.fix) : routineEndLine(r, shown) }).catch((e) => console.error('routine', key, `start edit: ${e.data?.error ?? e.message}`));
+  await app.client.chat.postMessage({ ...at, text, ...(fix ? { reply_broadcast: true } : {}) }).catch((e) => console.error('routine', key, `end post: ${e.data?.error ?? e.message}`));
 }
 // A routine run's events, as a state machine (D12, D19). Report mode never ships. A pr mode ships only a ready turn
 // with changes, then waits for the PR (ok) or the wrap-up's error (failed). A ready turn with no change in a pr mode
@@ -2579,7 +2581,8 @@ async function routineEvent(key, ev) {
     return ctl.finish(key, false, changed[0].slug).catch((e) => endRoutine(key, { state: 'failed', reason: lastLine(e.stderr) || 'the wrap-up did not start' }));
   }
   // pr+notes lists what it did not fix: with no fix, those findings are the report.
-  if (r.mode !== 'report' && !r.finishing && ev.status === 'ready') return endRoutine(key, r.mode === 'pr+notes' && ev.text?.trim() ? { state: 'report', report: ev.text } : { state: 'nochange' });
+  // A fix run's reason for no fix goes as its report, through ctl's scan.
+  if (r.mode !== 'report' && !r.finishing && ev.status === 'ready') return endRoutine(key, r.fix ? { state: 'nochange', report: ev.text ?? '' } : r.mode === 'pr+notes' && ev.text?.trim() ? { state: 'report', report: ev.text } : { state: 'nochange' });
   return endRoutine(key, { state: 'report', report: ev.text ?? '' });
 }
 async function startRoutine(r) {
@@ -2587,12 +2590,12 @@ async function startRoutine(r) {
   if (why) return refuseRoutine(r, why);
   // No channel (D32): the same path, in NO_CHANNEL, where every Slack call does nothing.
   r = { ...r, channel: r.channel || NO_CHANNEL };
-  const start = await app.client.chat.postMessage({ channel: r.channel, text: routineStart(r) }).catch((e) => ({ error: e.data?.error ?? e.message }));
+  const start = await app.client.chat.postMessage({ channel: r.channel, text: r.fix ? fixStart(r) : routineStart(r) }).catch((e) => ({ error: e.data?.error ?? e.message }));
   if (!start.ts) return refuseRoutine(r, `the start message did not post in ${r.channel}: ${start.error}`);
   const key = sessions.newKey();
   // owner: the run's sentinel (D26), so nobody has owner buttons; the session's live status goes in this thread.
   sessions.put({ key, channel: r.channel, thread_ts: start.ts, owner: `routine:${r.team}/${r.routine}`, profile: r.team, source: 'routine', private: Boolean(r.private),
-    routine: { run: r.run, routine: r.routine, team: r.team, name: r.name, mode: r.mode, start_ts: start.ts }, prompt: '', cursor: 0, state: 'queued', started_at: Date.now() });
+    routine: { run: r.run, routine: r.routine, team: r.team, name: r.name, mode: r.mode, start_ts: start.ts, ...(r.fix ? { fix: r.fix } : {}) }, prompt: '', cursor: 0, state: 'queued', started_at: Date.now() });
   await launch(key, app.client);
 }
 // Watch streams run in their own process groups; end them with the bot.
