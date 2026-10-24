@@ -593,4 +593,12 @@ test('dependency fix texts: the start names the trigger, and each end code gives
   for (const why of whys) assert.match(fixSkip({ ...fix, why }), /^Dependency fix for <[^>]+> not started: [^.]+\. [A-Z][^]*\.$/, String(why));
   // A PR link that is not a github PR shows as the number only.
   assert.equal(fixEndLine('ok', { pr: 5, url: 'https://evil.example/pull/5', sha: 'zz' }), 'Dependency fix for #5: pushed.');
+  // The routine's own label (ctl's fix.label) is the one each next step names; a bad one falls back to agent-help.
+  const dep = { ...fix, label: 'deps-fix' };
+  for (const t of [fixSkip({ ...dep, why: 'expired' }), fixSkip({ ...dep, why: 'no-write' }), fixEnd('report', { ...dep, why: 'moved' }), fixEnd('stopped', { ...dep, why: 'label' }),
+    fixEnd('failed', dep), fixSkip({ ...dep, why: 'odd' }), routineHint('fix', dep)]) {
+    assert.match(t, /deps-fix/, t);
+    assert.doesNotMatch(t, /agent-help/, t);
+  }
+  assert.match(fixEnd('failed', { ...fix, label: '<!channel>' }), /Add agent-help again/);
 });
