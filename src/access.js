@@ -3,6 +3,9 @@ export const parseGates = (v) => new Map((v || '').split(',').map((p) => p.trim(
 
 // Fails closed: a gate whose member list never loaded lets nobody in.
 export const gateAllows = (gates, members, channel, user) => !gates.has(channel) || Boolean(members.get(gates.get(channel))?.has(user));
+// Who a plain reply in a live session steers: a person the channel still allows, the owner included,
+// so leaving a gate's channel or the user list stops the owner's steers as it stops their commands.
+export const maySteer = (owner, user, allowedHere, steerAnyone, team) => allowedHere && (user === owner || (steerAnyone && team));
 
 // Reads each source channel's members. A failed read keeps the last list.
 export async function loadMembers(client, gates, members) {

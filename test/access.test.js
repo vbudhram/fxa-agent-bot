@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseGates, gateAllows, loadMembers, codeAllowed, sessionTeam } from '../src/access.js';
+import { parseGates, gateAllows, loadMembers, codeAllowed, sessionTeam, maySteer } from '../src/access.js';
 
 test('a gated channel allows only members of its source channel', () => {
   const gates = parseGates('CPUBLIC:CPRIVATE');
@@ -47,4 +47,13 @@ test('a pending resume or move belongs to the earlier session\'s team, not FxA',
   assert.equal(sessionTeam({ resume_from: 'a2' }, look), 'monitor', 'through a chain of resumes');
   assert.equal(sessionTeam({ resumed_profile: 'monitor' }, look), 'monitor');
   assert.equal(sessionTeam({}, look), 'fxa');
+});
+
+test('a live-session reply steers only a person the channel still allows, owner included', () => {
+  // maySteer(owner, user, allowedHere, steerAnyone, onTeam)
+  assert.equal(maySteer('U1', 'U1', true, false, false), true, 'the owner, still allowed');
+  assert.equal(maySteer('U1', 'U1', false, false, false), false, 'the owner, removed from the gate or the user list');
+  assert.equal(maySteer('U1', 'U2', true, true, true), true, 'a teammate when anyone on the team may steer');
+  assert.equal(maySteer('U1', 'U2', true, false, true), false, 'a teammate when only the owner may steer');
+  assert.equal(maySteer('U1', 'U2', false, true, true), false, 'a teammate the channel does not allow');
 });

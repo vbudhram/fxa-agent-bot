@@ -17,7 +17,7 @@ import { teamChannels } from './teams.js';
 import { ROUTINES_ENV, TICK_MS, NO_CHANNEL, channelRefusal, inFlightGuard, muted, mutedReply, pollChannels, pollUsers } from './routines.js';
 import { ingest } from './db.js';
 import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
-import { codeAllowed, PRIVATE_ONLY, sessionTeam, parseGates, gateAllows, loadMembers } from './access.js';
+import { codeAllowed, PRIVATE_ONLY, sessionTeam, parseGates, gateAllows, loadMembers, maySteer } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, LINE_BREAK, laterMessage } from './render.js';
 import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
@@ -816,7 +816,7 @@ async function onMessage({ message, client, replay = false }) {
         : "I'm wrapping up and opening the PR, so I can't act on this now. I kept it as context. Reply here once the PR is open, and I'll pick it up." }).catch(() => {});
     return;
   }
-  if (message.user !== s.owner && !(STEER_ANYONE && allowed(message.channel, message.user) && onTeam(s, message.user))) {
+  if (!maySteer(s.owner, message.user, allowed(message.channel, message.user), STEER_ANYONE, onTeam(s, message.user))) {
     // Someone who may not use the bot here: their tag already got the one refusal (onMention).
     if (!allowed(message.channel, message.user) || (s.told ?? []).includes(message.user)) return;
     sessions.patch(s.key, { told: [...(fresh(s.key).told ?? []), message.user] });
