@@ -559,3 +559,37 @@ test('the Diff message counts files from a plain unified diff too', async () => 
   assert.equal(diffStat('--- a/x.js\n+++ b/x.js\n@@ -1 +1 @@\n-a\n+b\n'), '1 file changed, +1 −1');
   assert.equal(diffStat('diff --git a/x b/x\n--- a/x\n+++ b/x\n-a\n+b\ndiff --git a/y b/y\n--- a/y\n+++ b/y\n+c\n'), '2 files changed, +2 −1');
 });
+
+test('dependency fix texts: the start names the trigger, and each end code gives one fixed text with its next step', async () => {
+  const { fixStart, fixEnd, fixEndLine, fixSkip, routineHint } = await import('../src/render.js');
+  const url = 'https://github.com/mozilla/fxa/pull/90001', n = `<${url}|#90001>`, sha = '0123456789abcdef0123456789abcdef01234567';
+  const fix = { pr: 90001, url };
+  assert.equal(fixStart({ trigger: 'blender', fix: { ...fix, package: '@opentelemetry/api' } }), `Dependency fix for ${n} (@opentelemetry/api): BLEnder gave up.`);
+  assert.equal(fixStart({ trigger: 'label', fix: { ...fix, actor: 'octocat' } }), `Dependency fix for ${n}: label by octocat.`);
+  assert.equal(fixStart({ trigger: 'manual', fix: { ...fix, actor: 'octocat', package: 'Bad Package <x>' } }), `Dependency fix for ${n}: Run now by octocat.`);
+  assert.equal(fixEndLine('ok', { ...fix, sha }), `Dependency fix for ${n}: pushed 0123456.`);
+  assert.equal(fixEnd('ok', { ...fix, sha }), `Pushed 0123456 to ${n}. Next: review the fix commit, then approve the functional tests gate.`);
+  assert.equal(fixEnd('nochange', fix, { post: true, posted: true }), `No fix found for ${n}. The reason is in this thread. A new commit allows a new run.`);
+  assert.equal(fixEnd('nochange', fix, { post: false }), `No fix found for ${n}. A team admin can read the reason in History. A new commit allows a new run.`);
+  assert.equal(fixEnd('nochange', fix, { post: true, posted: false }), `No fix found for ${n}. A new commit allows a new run.`);
+  assert.equal(fixEnd('report', { ...fix, why: 'moved' }), `The branch of ${n} moved, so nothing was pushed. Add agent-help again to retry.`);
+  assert.equal(fixEnd('report', { ...fix, why: 'guard:lock' }), `Nothing was pushed to ${n}. The fix changes yarn.lock entries, which I do not push. Fix it by hand.`);
+  assert.equal(fixEnd('stopped', { ...fix, why: 'label' }), 'Stopped: the agent-help label was removed. Nothing was pushed.');
+  assert.equal(fixEnd('stopped', { ...fix, why: 'merged' }), `Stopped: ${n} was merged. Nothing was pushed.`);
+  assert.equal(fixEnd('skipped', { ...fix, why: 'new-commit' }), `Dependency fix for ${n} not started: the PR has a new commit. Add agent-help again to fix the new head.`);
+  assert.equal(fixSkip({ ...fix, why: 'expired' }), `Dependency fix for ${n} not started: it waited 24 h. Add agent-help again to retry.`);
+  assert.equal(fixEnd('failed', fix), `The dependency fix for ${n} failed, and nothing was pushed. Add agent-help again to retry. A team admin can see the log in History.`);
+  assert.equal(routineHint('fix'), 'This thread is for a dependency fix run. To ask again, push a new commit and add agent-help on the PR, or tag me in a new thread with the PR link.');
+  // Every state and why gives a text with no draft PR, no admin stop for a label stop, and no report in the thread when nothing posted.
+  const whys = [undefined, 'moved', 'guard:tooling', 'guard:frozen', 'guard:pii', 'guard:lock', 'label', 'closed', 'merged', 'admin', 'new-commit', 'not-red', 'expired', 'boot', 'used', 'no-write', 'fork', 'base', 'odd'];
+  for (const state of ['ok', 'report', 'nochange', 'failed', 'stopped', 'skipped', 'store']) for (const why of whys) {
+    const t = fixEnd(state, { ...fix, why, sha }, { post: true, posted: false });
+    assert.match(t, /\.$/, `${state} ${why}`);
+    assert.doesNotMatch(t, /draft PR|undefined|null|the report is in this thread|reason is in this thread/i, `${state} ${why}`);
+    if (why === 'label') assert.doesNotMatch(t, /stopped by a team admin/i);
+    assert.match(fixEndLine(state, { ...fix, why, sha }), /^Dependency fix for <[^>]+>: [a-z0-9 ]+\.$/, `${state} ${why}`);
+  }
+  for (const why of whys) assert.match(fixSkip({ ...fix, why }), /^Dependency fix for <[^>]+> not started: [^.]+\. [A-Z][^]*\.$/, String(why));
+  // A PR link that is not a github PR shows as the number only.
+  assert.equal(fixEndLine('ok', { pr: 5, url: 'https://evil.example/pull/5', sha: 'zz' }), 'Dependency fix for #5: pushed.');
+});

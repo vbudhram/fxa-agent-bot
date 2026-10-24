@@ -667,7 +667,45 @@ export const routineSkip = (s) => `${esc(s.name ?? 'A routine')} skipped: ${esc(
 export const routineHint = (kind) => (kind === 'report'
   ? 'This thread holds a routine\'s report. To work on a finding, tag me in a new thread and paste the finding.'
   : kind === 'pr' ? 'To work on this PR, tag me in a new thread with the PR link.'
+  : kind === 'fix' ? 'This thread is for a dependency fix run. To ask again, push a new commit and add agent-help on the PR, or tag me in a new thread with the PR link.'
   : 'This thread is for a routine run. I do not take requests here. To start work, tag me in a new thread.');
+// A dependency fix run (epic i420): fixed texts from ctl's state and fix.why codes, never agent text or stderr.
+const prRef = (f) => (/^\d+$/.test(String(f?.pr ?? '')) ? (gh(f.url) ? `<${f.url}|#${f.pr}>` : `#${f.pr}`) : 'the PR');
+const sha7 = (f) => (/^[0-9a-f]{7,40}$/.test(String(f?.sha ?? '')) ? f.sha.slice(0, 7) : '');
+const TRIGGER = { blender: () => 'BLEnder gave up', label: (a) => `label by ${a}`, manual: (a) => `Run now by ${a}` };
+export function fixStart(r) {
+  const f = r.fix ?? {}, pkg = /^[@a-z0-9._/-]{1,80}$/.test(String(f.package ?? '')) ? ` (${f.package})` : '';
+  const how = TRIGGER[r.trigger]?.(esc(String(f.actor ?? 'someone').slice(0, 60)));
+  return `Dependency fix for ${prRef(f)}${pkg}${how ? `: ${how}` : ''}.`;
+}
+const NOT_STARTED = { 'new-commit': ['the PR has a new commit', 'Add agent-help again to fix the new head.'], expired: ['it waited 24 h', 'Add agent-help again to retry.'],
+  'not-red': ['CI passes on its head', 'Add agent-help again if CI fails.'], used: ['a run on its head already ended', 'A new commit allows a new run.'],
+  'no-write': ['the label needs a person with write access', 'Ask a person with write access to add agent-help.'], fork: ['the PR is from a fork', 'Fix it by hand.'],
+  base: ['the PR branch is a base or release branch', 'Fix it by hand.'], closed: ['the PR is closed', 'Reopen it and add agent-help again.'],
+  merged: ['the PR is merged', 'No step is needed.'], boot: ['the sandbox did not start', 'Add agent-help again to retry.'],
+  label: ['the agent-help label was removed', 'Add agent-help again to retry.'], admin: ['a team admin stopped it', 'Use Run now to retry.'] };
+export const fixSkip = (f) => { const [why, next] = NOT_STARTED[f?.why] ?? ['the run could not start', 'Add agent-help again to retry.']; return `Dependency fix for ${prRef(f)} not started: ${why}. ${next}`; };
+const GUARD = { lock: 'The fix changes yarn.lock entries, which I do not push. Fix it by hand.', tooling: 'The fix changes Yarn tooling files, which I do not push. Fix it by hand.',
+  frozen: 'The fix changes protected files, which I do not push. Fix it by hand.', pii: 'The fix may hold personal data or a secret, so I do not push it. A team admin can read it in History.' };
+const guardOf = (f) => (String(f?.why ?? '').startsWith('guard:') ? GUARD[f.why.slice(6)] ?? 'A guard refused the fix. Fix it by hand.' : null);
+// state: ctl's (ok, report, nochange, failed, stopped, skipped) or 'store' when done did not answer. posted: the agent's reason is in the thread.
+export function fixEnd(state, f, { post, posted } = {}) {
+  const n = prRef(f);
+  if (state === 'ok') return `Pushed ${sha7(f) || 'the fix'} to ${n}. Next: review the fix commit, then approve the functional tests gate.`;
+  if (state === 'report' && f?.why === 'moved') return `The branch of ${n} moved, so nothing was pushed. Add agent-help again to retry.`;
+  if (state === 'report' && guardOf(f)) return `Nothing was pushed to ${n}. ${guardOf(f)}`;
+  if (state === 'report' || state === 'nochange') return `No fix found for ${n}.${posted ? ' The reason is in this thread.' : post === false ? ' A team admin can read the reason in History.' : ''} A new commit allows a new run.`;
+  if (state === 'stopped') return f?.why === 'label' ? 'Stopped: the agent-help label was removed. Nothing was pushed.'
+    : ['closed', 'merged'].includes(f?.why) ? `Stopped: ${n} was ${f.why}. Nothing was pushed.` : 'Stopped by a team admin. Nothing was pushed.';
+  if (state === 'skipped') return fixSkip(f);
+  if (state === 'store') return `I could not record the result of the dependency fix for ${n}, so I post nothing from it.`;
+  return `The dependency fix for ${n} failed, and nothing was pushed. Add agent-help again to retry. A team admin can see the log in History.`;
+}
+export function fixEndLine(state, f) {
+  const word = state === 'ok' ? `pushed${sha7(f) ? ` ${sha7(f)}` : ''}` : state === 'report' && f?.why === 'moved' ? 'branch moved' : state === 'report' && guardOf(f) ? 'not pushed'
+    : { report: 'no fix found', nochange: 'no fix found', stopped: 'stopped', skipped: 'not started', store: 'not recorded' }[state] ?? 'failed';
+  return `Dependency fix for ${prRef(f)}: ${word}.`;
+}
 // A report as posted: mentions made inert; over the limit it goes as a file (snippet: true).
 export const ROUTINE_SNIPPET_AT = 2900;
 export const routineReport = (text) => { const t = defuse(text).trim(); return { text: t, snippet: t.length > ROUTINE_SNIPPET_AT }; };
