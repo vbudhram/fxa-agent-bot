@@ -578,10 +578,11 @@ test('dependency fix texts: the start names the trigger, and each end code gives
   assert.equal(fixEnd('stopped', { ...fix, why: 'merged' }), `Stopped: ${n} was merged. Nothing was pushed.`);
   assert.equal(fixEnd('skipped', { ...fix, why: 'new-commit' }), `Dependency fix for ${n} not started: the PR has a new commit. Add agent-help again to fix the new head.`);
   assert.equal(fixSkip({ ...fix, why: 'expired' }), `Dependency fix for ${n} not started: it waited 24 h. Add agent-help again to retry.`);
+  assert.equal(fixSkip({ ...fix, why: 'target' }), `Dependency fix for ${n} not started: the PR no longer matches the routine's repo, author or branch rules. Fix it by hand.`);
   assert.equal(fixEnd('failed', fix), `The dependency fix for ${n} failed, and nothing was pushed. Add agent-help again to retry. A team admin can see the log in History.`);
   assert.equal(routineHint('fix'), 'This thread is for a dependency fix run. To ask again, push a new commit and add agent-help on the PR, or tag me in a new thread with the PR link.');
   // Every state and why gives a text with no draft PR, no admin stop for a label stop, and no report in the thread when nothing posted.
-  const whys = [undefined, 'moved', 'guard:tooling', 'guard:frozen', 'guard:pii', 'guard:lock', 'label', 'closed', 'merged', 'admin', 'new-commit', 'not-red', 'expired', 'boot', 'used', 'no-write', 'fork', 'base', 'odd'];
+  const whys = [undefined, 'moved', 'guard:tooling', 'guard:frozen', 'guard:pii', 'guard:lock', 'label', 'closed', 'merged', 'admin', 'new-commit', 'not-red', 'expired', 'boot', 'used', 'no-write', 'fork', 'base', 'target', 'odd'];
   for (const state of ['ok', 'report', 'nochange', 'failed', 'stopped', 'skipped', 'store']) for (const why of whys) {
     const t = fixEnd(state, { ...fix, why, sha }, { post: true, posted: false });
     assert.match(t, /\.$/, `${state} ${why}`);

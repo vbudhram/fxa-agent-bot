@@ -683,7 +683,8 @@ const NOT_STARTED = { 'new-commit': ['the PR has a new commit', 'Add agent-help 
   'no-write': ['the label needs a person with write access', 'Ask a person with write access to add agent-help.'], fork: ['the PR is from a fork', 'Fix it by hand.'],
   base: ['the PR branch is a base or release branch', 'Fix it by hand.'], closed: ['the PR is closed', 'Reopen it and add agent-help again.'],
   merged: ['the PR is merged', 'No step is needed.'], boot: ['the sandbox did not start', 'Add agent-help again to retry.'],
-  label: ['the agent-help label was removed', 'Add agent-help again to retry.'], admin: ['a team admin stopped it', 'Use Run now to retry.'] };
+  label: ['the agent-help label was removed', 'Add agent-help again to retry.'], admin: ['a team admin stopped it', 'Use Run now to retry.'],
+  target: ['the PR no longer matches the routine\'s repo, author or branch rules', 'Fix it by hand.'] };
 export const fixSkip = (f) => { const [why, next] = NOT_STARTED[f?.why] ?? ['the run could not start', 'Add agent-help again to retry.']; return `Dependency fix for ${prRef(f)} not started: ${why}. ${next}`; };
 const GUARD = { lock: 'The fix changes yarn.lock entries, which I do not push. Fix it by hand.', tooling: 'The fix changes Yarn tooling files, which I do not push. Fix it by hand.',
   frozen: 'The fix changes protected files, which I do not push. Fix it by hand.', pii: 'The fix may hold personal data or a secret, so I do not push it. A team admin can read it in History.' };
