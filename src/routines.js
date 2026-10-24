@@ -62,8 +62,10 @@ export async function workspaceUsers(client) {
 function pollList(label, fetch, write, every) {
   let timer = null;
   const list = () => fetch().then(write, (e) => {
-    console.error(label, e.data?.error || e.message);
-    if (e.data?.error === 'missing_scope') clearInterval(timer);
+    if (e.data?.error !== 'missing_scope') return console.error(label, e.data?.error || e.message);
+    // The scopes come from manifest.yml, but an installed app keeps its old ones until someone reinstalls it.
+    console.error(label, `missing_scope: needs ${e.data.needed || 'a scope'} (has ${e.data.provided || 'unknown'}). Update the app from manifest.yml at api.slack.com/apps, then reinstall it.`);
+    clearInterval(timer);
   });
   timer = setInterval(list, every);
   timer.unref?.();

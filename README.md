@@ -4,7 +4,7 @@ A Slack front door for `fxa-sandbox-ctl`. An engineer tags `@fxa-agent` in a thr
 
 ## Setup (personal workspace)
 
-1. Create the app from `manifest.yml` at api.slack.com/apps.
+1. Create the app from `manifest.yml` at api.slack.com/apps. After a change to `manifest.yml`, update each app (live and dev) from it and reinstall it: an installed app keeps its old scopes until then.
 2. Install it to the workspace. Copy the `xoxb-` bot token.
 3. Create an app-level token with `connections:write`. Copy the `xapp-` token.
 4. Copy `.env.example` to `.env` and fill it in.

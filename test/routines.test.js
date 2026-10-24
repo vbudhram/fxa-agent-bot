@@ -169,6 +169,16 @@ test('the user list reads every page, and leaves out bots, deactivated accounts 
   assert.deepEqual(await workspaceUsers(c), [{ id: 'U1', name: 'Sam', handle: 'sam', email: '' }, { id: 'U2', name: 'Pat Doe', handle: 'pat', email: 'pat@example.com' }]);
 });
 
+test('a missing scope names the scope Slack wants and the reinstall step', async () => {
+  const quiet = console.error, said = []; console.error = (...a) => said.push(a.join(' '));
+  try {
+    const e = Object.assign(new Error('missing_scope'), { data: { error: 'missing_scope', needed: 'groups:read', provided: 'chat:write' } });
+    await pollChannels(client(() => { throw e; }), () => {}, 60000);
+    assert.match(said.join('\n'), /groups:read/);
+    assert.match(said.join('\n'), /reinstall/);
+  } finally { console.error = quiet; }
+});
+
 test('a missing scope stops the channel list polling; another error keeps it', async () => {
   const quiet = console.error; console.error = () => {};
   try {
