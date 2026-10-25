@@ -601,4 +601,11 @@ test('dependency fix texts: the start names the trigger, and each end code gives
     assert.doesNotMatch(t, /agent-help/, t);
   }
   assert.match(fixEnd('failed', { ...fix, label: '<!channel>' }), /Add agent-help again/);
+test('a boot failure says what to do in plain words, with no raw ERROR line', () => {
+  const stock = render('k', { type: 'error', text: 'ERROR: every zone in FXA_GCE_ZONES (us-central1-a) is stocked out for c4a-standard-4.' }).text;
+  assert.doesNotMatch(stock, /ERROR:|\.\./); assert.match(stock, /few minutes/);
+  const base = render('k', { type: 'error', text: "ERROR: runner is at '23f99c4227', slot is at '787237a2a0'. Refusing to launch on a base the host did not choose." });
+  assert.doesNotMatch(base.text, /ERROR:|23f99c4227/); assert.equal(base.operator, 'host');
+  const other = render('k', { type: 'error', text: 'ERROR: something else broke.' }).text;
+  assert.doesNotMatch(other, /ERROR:|\.\./); assert.match(other, /something else broke/);
 });

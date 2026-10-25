@@ -102,6 +102,9 @@ const OPERATOR = [
   [/could not mint a GitHub App installation token/i, 'github-app',
     'The GitHub App could not get a token. The operator must check its key and installation. The work is not lost; try again after that.',
     'check the GitHub App key (fxa-github-app-key) and its installation'],
+  [/Refusing to launch on a base|egress firewall did not apply/i, 'host',
+    'The sandbox host refused to start the session safely, so a retry now fails the same way. The operator must check the host. Tag me again after that.',
+    'check the runner pin and the egress firewall: vm.sh status, then the session log'],
 ];
 // The operator's next step for an operator-problem kind, for the error row.
 export const operatorNext = (kind) => OPERATOR.find(([, k]) => k === kind)?.[3] ?? '';
@@ -339,7 +342,10 @@ export function render(key, ev) {
       // A failed ship keeps the session and its work; a !restart would leave that work behind.
       const ship = String(ev.text ?? '').match(/^(Open PR|Push branch) failed/);
       if (ship) return { text: `${esc(ev.text)}. The work is kept: reply to fix it, then \`!${ship[1] === 'Push branch' ? 'push' : 'pr'}\` to try again.` };
-      return { text: `Something went wrong: ${esc(ev.text)} Try again, or \`!restart\` to start fresh.` };
+      // No free sandbox is a wait, not a fault.
+      if (/is stocked out for/i.test(ev.text ?? '')) return { text: 'Google Cloud has no free sandbox right now. Tag me again in a few minutes.' };
+      const why = String(ev.text ?? '').replace(/^ERROR:\s*/, '').replace(/\.\s*$/, '');
+      return { text: `Something went wrong: ${esc(why)}. Try again, or \`!restart\` to start fresh.` };
     }
     default: return null;
   }

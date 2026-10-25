@@ -1887,7 +1887,8 @@ function explain(e, key) {
   if (op) return key && !firstOperatorNote(key, op.kind) ? null : op.text;
   // gcloud puts the reason on the next line ("Could not fetch resource:\n - Internal error ...").
   const m = err.match(/ERROR: ([^\n]+)(?:\n\s*-\s*([^\n]+))?/);
-  const line = m && (m[1].endsWith(':') && m[2] ? `${m[1]} ${m[2]}` : m[1]);
+  // No trailing period: each text below adds its own, and a ctl line that ends in one gave '..'.
+  const line = m && (m[1].endsWith(':') && m[2] ? `${m[1]} ${m[2]}` : m[1]).replace(/\.\s*$/, '');
   if (/takes no messages/.test(err)) return 'This session has ended. Tag me again to start a new one.';
   if (/ is from a fork\. /.test(err) && line) return `${line}.`; // a refusal, not a failure: a retry gets the same answer
   if (/is (paused|stopped); reply in the thread to resume it/.test(err)) return 'This session is paused. Reply here to pick it up, then try that again.';
