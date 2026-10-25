@@ -572,7 +572,7 @@ async function launch(key, client, since = Date.now(), retry = false) {
     const pos = line.findIndex((x) => x.key === key) + 1;
     // The status line from the start: it says the place in line, and becomes the session's status when it starts.
     const who = await askerName(s);
-    const msg = statusMessage({ title: `In line${who ? ` for ${defuse(who)}` : ''} · ${ordinal(pos)} in line · all sessions are busy, so I start as soon as one frees up` });
+    const msg = statusMessage({ title: `In line${who ? ` for ${defuse(who)}` : ''} · ${ordinal(pos)} in line · all sessions are busy, so I start as soon as one frees up · I wait up to ${Math.round(QUEUE_GIVE_UP_MS / 60_000)} min · \`!stop\` to cancel` });
     const cur = fresh(key);
     if (!cur.queue_ts) {
       const r = await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...msg }).catch(() => null);
@@ -1145,6 +1145,12 @@ async function bang(s, text, m, client) {
   } else if (cmd === 'stop') {
     if (ownerOnly()) return;
     sessions.patch(s.key, { hand_stopped: true });
+    // Still in line: nothing ran, so there is no work to save and no end card.
+    if (fresh(s.key)?.state === 'queued') {
+      await stopSession(s.key); sessions.patch(s.key, { end_posted: true });
+      await say(s, 'Stopped. It had not started, so nothing ran.');
+      return;
+    }
     await sayWhile(s, 'Stopping… saving the work first.', () => stoppedText(s.key));
   } else if (cmd === 'new' || cmd === 'restart') {
     if (ownerOnly()) return;
