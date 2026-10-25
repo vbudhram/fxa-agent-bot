@@ -23,7 +23,7 @@ import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { routineStart, routineSkip, routineEnd, routineEndLine, routineReport, routineHint, routineLabel, fixStart, fixEnd, fixEndLine, fixSkip } from './render.js';
-import { render, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, toSomeoneElse, asideBlock, REBASE_PROMPT, operatorNext, fileRefs, distinctFiles, maskSecrets, maskUpload } from './render.js';
+import { render, rateLimitLine, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, toSomeoneElse, asideBlock, REBASE_PROMPT, operatorNext, fileRefs, distinctFiles, maskSecrets, maskUpload } from './render.js';
 
 const { App } = bolt;
 installErrorLog(ctl.errorsPush);
@@ -70,7 +70,7 @@ app.use(async ({ body, next }) => {
 // Timing: Slack's client waits out a rate limit silently, and anything queued
 // behind that call for the same session waits with it. A rate limit is recorded
 // as an error; the slow and timing lines below only go to the log.
-app.client.on('rate_limited', (sec, info) => console.error(`slack rate limited: ${info?.method ?? 'a call'} waits ${sec}s`));
+app.client.on('rate_limited', (sec, info) => console.error(rateLimitLine(sec, info)));
 const SLOW_MS = 3000;
 
 // Watchdog: the socket client drops a connection whose pings go unanswered and

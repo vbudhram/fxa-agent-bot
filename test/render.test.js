@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { threadStarter, endWord, render, operatorProblem, operatorNext, summaryLine, closestCommand, watchUrl, threadLine, maskSecrets, maskUpload, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, fromOther, othersLines, laterMessage } from '../src/render.js';
+import { threadStarter, endWord, render, operatorProblem, operatorNext, summaryLine, closestCommand, watchUrl, threadLine, maskSecrets, maskUpload, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, fromOther, othersLines, laterMessage, rateLimitLine } from '../src/render.js';
 
 test('operator problems are named, other errors are not', () => {
   assert.equal(operatorProblem('ERROR: (gcloud.compute.ssh) Reauthentication failed. cannot prompt').kind, 'gcloud');
@@ -601,6 +601,8 @@ test('dependency fix texts: the start names the trigger, and each end code gives
     assert.doesNotMatch(t, /agent-help/, t);
   }
   assert.match(fixEnd('failed', { ...fix, label: '<!channel>' }), /Add agent-help again/);
+});
+
 test('a boot failure says what to do in plain words, with no raw ERROR line', () => {
   const stock = render('k', { type: 'error', text: 'ERROR: every zone in FXA_GCE_ZONES (us-central1-a) is stocked out for c4a-standard-4.' }).text;
   assert.doesNotMatch(stock, /ERROR:|\.\./); assert.match(stock, /few minutes/);
@@ -608,4 +610,10 @@ test('a boot failure says what to do in plain words, with no raw ERROR line', ()
   assert.doesNotMatch(base.text, /ERROR:|23f99c4227/); assert.equal(base.operator, 'host');
   const other = render('k', { type: 'error', text: 'ERROR: something else broke.' }).text;
   assert.doesNotMatch(other, /ERROR:|\.\./); assert.match(other, /something else broke/);
+});
+
+test('a Slack rate limit names the method from the URL the client gives', () => {
+  assert.equal(rateLimitLine(10, { url: 'chat.update', body: {} }), 'slack rate limited: chat.update waits 10s');
+  assert.equal(rateLimitLine(3, { url: 'https://slack.com/api/users.info' }), 'slack rate limited: users.info waits 3s');
+  assert.equal(rateLimitLine(5, {}), 'slack rate limited: a call waits 5s');
 });

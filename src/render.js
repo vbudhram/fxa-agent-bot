@@ -718,3 +718,5 @@ export function fixEndLine(state, f) {
 // A report as posted: mentions made inert; over the limit it goes as a file (snippet: true).
 export const ROUTINE_SNIPPET_AT = 2900;
 export const routineReport = (text) => { const t = defuse(text).trim(); return { text: t, snippet: t.length > ROUTINE_SNIPPET_AT }; };
+// The Slack client's rate_limited event gives { url, body }; the method is the URL's last part.
+export const rateLimitLine = (sec, info) => `slack rate limited: ${info?.method || String(info?.url ?? '').split('/').pop() || 'a call'} waits ${sec}s`;
