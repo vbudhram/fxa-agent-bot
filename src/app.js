@@ -530,6 +530,11 @@ async function launch(key, client, since = Date.now(), retry = false) {
   const linkP = app.client.chat.getPermalink({ channel: s.channel, message_ts: s.thread_ts }).then((r) => r.permalink, () => undefined);
   let inbox;
   try {
+    // The line keeps its order: while an earlier request waits at the cap, this one waits behind it,
+    // through the same path as a cap refusal, so a freed slot goes to the first in line.
+    if (!routine && sessions.all().some((x) => x.key !== key && x.state === 'queued' && x.queued_note && (x.started_at ?? 0) < (s.started_at ?? 0))) {
+      throw Object.assign(new Error('in line'), { stderr: 'an earlier request waits in line: cap 0 (FXA_SESSION_MAX)' });
+    }
     // Together, not one after the other: both are on the path to the first status.
     const [link, who] = await Promise.all([linkP, routine ? null : whoIs(app.client, s.owner)]);
     // A request that waited at the cap reports the wait, for the dashboard's load card.
