@@ -407,7 +407,7 @@ function quickStatus(p) {
     // The same look as a sandbox turn's status: the asker in the title, the current step and its command in the box.
     const who = { asker_name: await askerName({ acks: p.acks, owner: p.owner }) };
     const msg = () => statusMessage({ title: statusTitle(who, 'Working', Date.now() - t0, n, n ? st.label : null), rows: n ? [`› ${rowTitle(st)}`] : [],
-      cmd: n ? lastStep.replace(/^Running /, '') : null, id: `quick-${t0}` });
+      id: `quick-${t0}` });
     ({ ts } = await app.client.chat.postMessage({ channel: p.channel, thread_ts: p.thread_ts, ...msg() }));
     // answer() or done() may come before this run ends: then no timer, or it would edit a closed status.
     // An edit only for a new step, or for the clock every 15 s, as a sandbox turn's status does.
@@ -1603,8 +1603,8 @@ async function updateStatusNow(s, state, activity) {
     const body = rows ? [...(bootRow ? [bootRow] : []), ...live.lineRows(liveTurn.get(s.key)?.st, rows)]
       : bootRows ?? log.map((t, i) => `${i === log.length - 1 ? '›' : '✓'} ${defuse(t)}`);
     const n = rows?.step_n ?? 0;
-    const msg = statusMessage({ title: statusTitle(s, VERB[state] ?? 'Working', Date.now() - since, n, nowOf(body)), rows: body,
-      cmd: rows ? log.at(-1)?.replace(/^Running /, '') : null, id: `${s.key}-${s.status_opened_at ?? since}` });
+    const msg = statusMessage({ title: statusTitle(s, VERB[state] ?? 'Working', Date.now() - since, n, rows ? live.progress(liveTurn.get(s.key)?.st) : nowOf(body)), rows: body,
+      id: `${s.key}-${s.status_opened_at ?? since}` });
     // The rows, and the state word: a change of either is news; the clock alone is not.
     const nl = msg.text.indexOf('\n'), box = `${state}\n${nl < 0 ? '' : msg.text.slice(nl + 1)}`, age = Date.now() - (s.edit_at ?? 0);
     const keep = { busy_since: since, last_act: doing, ...(rows ?? {}), ...ready };

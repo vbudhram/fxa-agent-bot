@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { start, reduce, todoRows, currentRow, facts, summary, todoLine, openTodoLine, advanceRows, lineRows, lostContact, LOST_MS, GIVE_UP_MS, MAX_ROWS, lastNote } from '../src/live.js';
+import { start, reduce, todoRows, currentRow, facts, summary, todoLine, openTodoLine, advanceRows, lineRows, progress, lostContact, LOST_MS, GIVE_UP_MS, MAX_ROWS, lastNote } from '../src/live.js';
 
 const feed = (evs) => evs.reduce(reduce, start());
 const todos = (...s) => ({ type: 'todos', items: s.map(([content, status, active]) => ({ content, status, active })) });
@@ -100,6 +100,14 @@ test('the status line shows stage rows, not raw commands', () => {
   assert.deepEqual(lineRows(start(), advanceRows({}, ['Running node x.js'])), ['› Exploring the code · 1 step']);
   const todos = reduce(start(), { type: 'todos', items: [{ content: 'a', status: 'completed' }, { content: 'b', status: 'in_progress' }, { content: 'c', status: 'pending' }] });
   assert.deepEqual(lineRows(todos, r), ['✓ a', '› b', '○ c']);
+  assert.equal(progress(todos), 'step 2 of 3');
+  assert.equal(progress(start()), null);
+});
+
+test('a long turn keeps its last three stage rows and folds the older ones into one Earlier row', () => {
+  const done = ['Exploring the code · 1 step', 'Reviewing · 8 steps', 'Exploring the code · 1 step', 'Making changes · 1 step', 'Verifying · 2 steps', 'Reviewing · 7 steps'];
+  assert.deepEqual(lineRows(start(), { rows_done: done, cur_label: 'Exploring the code', cur_count: 2 }), [
+    '✓ Earlier · Exploring the code, Reviewing · 10 steps', '✓ Making changes · 1 step', '✓ Verifying · 2 steps', '✓ Reviewing · 7 steps', '› Exploring the code · 2 steps']);
 });
 
 test('lost contact: one warning, a recovery, one give-up, and quiet for a short blip', () => {

@@ -93,10 +93,19 @@ export function advanceRows(rows, news) {
   return { rows_done: done, cur_kind: kind, cur_label: label, cur_count: count };
 }
 // The line's body: the todos when there are any, else the stage rows; the running one is marked ›.
+// Stage rows keep the last few: a long turn swings between the same stages, so the older ones fold into one Earlier row.
+const FOLD = 4, STEPS = / · (\d+) steps?$/;
 export function lineRows(st, rows) {
   const todos = todoRows(st ?? start());
   if (todos.length) { const cur = currentRow(todos); return todos.map((r) => `${r.status === 'complete' ? '✓' : r.id === cur ? '›' : '○'} ${r.title}`); }
-  return [...(rows?.rows_done ?? []).map((r) => `✓ ${defuse(r)}`), ...(rows?.cur_count ? [`› ${defuse(rows.cur_label)} · ${steps(rows.cur_count)}`] : [])];
+  const done = (rows?.rows_done ?? []).map(defuse), old = done.length > FOLD ? done.slice(0, 1 - FOLD) : [];
+  const fold = old.length ? [`✓ Earlier · ${[...new Set(old.map((r) => r.replace(STEPS, '')))].join(', ')} · ${steps(old.reduce((a, r) => a + Number(r.match(STEPS)?.[1] ?? 0), 0))}`] : [];
+  return [...fold, ...done.slice(old.length).map((r) => `✓ ${r}`), ...(rows?.cur_count ? [`› ${defuse(rows.cur_label)} · ${steps(rows.cur_count)}`] : [])];
+}
+// "step 5 of 6" while the agent has a todo list, for the status title; else nothing.
+export function progress(st) {
+  const todos = st?.todos ?? [];
+  return todos.length ? `step ${Math.min(todos.filter((t) => t.status === 'completed').length + 1, todos.length)} of ${todos.length}` : null;
 }
 
 // Lost contact: the polls of a running turn keep failing. One warning after LOST_MS, a
