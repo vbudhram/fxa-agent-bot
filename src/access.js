@@ -6,6 +6,10 @@ export const gateAllows = (gates, members, channel, user) => !gates.has(channel)
 // Who a plain reply in a live session steers: a person the channel still allows, the owner included,
 // so leaving a gate's channel or the user list stops the owner's steers as it stops their commands.
 export const maySteer = (owner, user, allowedHere, steerAnyone, team) => allowedHere && (user === owner || (steerAnyone && team));
+// The PR buttons go as far as steering does; the desktop, the diff and Stop stay the owner's.
+export const SHIP_ACTIONS = ['open_pr', 'push_branch', 'create_jira', 'pr_ready', 'fix_review', 'rebase_pr', 'auto_round'];
+export const mayTap = (action, owner, user, allowedHere, steerAnyone, team) =>
+  SHIP_ACTIONS.includes(action) ? maySteer(owner, user, allowedHere, steerAnyone, team) : allowedHere && user === owner;
 
 // Reads each source channel's members. A failed read keeps the last list.
 export async function loadMembers(client, gates, members) {

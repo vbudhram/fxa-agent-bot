@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseGates, gateAllows, loadMembers, codeAllowed, codeRefusal, NO_GROUPS_READ, START_PRIVATE, PRIVATE_ONLY, sessionTeam, maySteer } from '../src/access.js';
+import { parseGates, gateAllows, loadMembers, codeAllowed, codeRefusal, NO_GROUPS_READ, START_PRIVATE, PRIVATE_ONLY, sessionTeam, maySteer, mayTap } from '../src/access.js';
 
 test('a gated channel allows only members of its source channel', () => {
   const gates = parseGates('CPUBLIC:CPRIVATE');
@@ -71,4 +71,14 @@ test('a live-session reply steers only a person the channel still allows, owner 
   assert.equal(maySteer('U1', 'U2', true, true, true), true, 'a teammate when anyone on the team may steer');
   assert.equal(maySteer('U1', 'U2', true, false, true), false, 'a teammate when only the owner may steer');
   assert.equal(maySteer('U1', 'U2', false, true, true), false, 'a teammate the channel does not allow');
+});
+
+test('a teammate may tap the PR buttons, but not the desktop, the diff or Stop', () => {
+  // mayTap(action, owner, user, allowedHere, steerAnyone, onTeam)
+  assert.equal(mayTap('open_pr', 'U1', 'U2', true, true, true), true, 'Open PR, a teammate');
+  assert.equal(mayTap('pr_ready', 'U1', 'U2', true, true, true), true, 'Mark ready, a teammate');
+  assert.equal(mayTap('open_pr', 'U1', 'U2', true, false, true), false, 'Open PR, a teammate under STEER=owner');
+  assert.equal(mayTap('open_pr', 'U1', 'U2', true, true, false), false, 'Open PR, not on the team');
+  assert.equal(mayTap('desktop', 'U1', 'U2', true, true, true), false, 'the desktop, a teammate');
+  assert.equal(mayTap('stop', 'U1', 'U1', true, true, true), true, 'Stop, the owner');
 });

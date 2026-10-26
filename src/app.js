@@ -17,7 +17,7 @@ import { teamChannels } from './teams.js';
 import { ROUTINES_ENV, TICK_MS, NO_CHANNEL, channelRefusal, inFlightGuard, muted, mutedReply, pollChannels, pollUsers } from './routines.js';
 import { ingest } from './db.js';
 import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
-import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateAllows, loadMembers, maySteer } from './access.js';
+import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateAllows, loadMembers, maySteer, mayTap, SHIP_ACTIONS } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, LINE_BREAK, laterMessage } from './render.js';
 import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
@@ -1110,7 +1110,7 @@ async function bang(s, text, m, client) {
     const extra = notes.length ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: notes.join(' ') }] }] : [];
     await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: c.text, blocks: [...c.blocks.slice(0, -1), ...extra, c.blocks.at(-1)] });
   } else if (cmd === 'pr' || cmd === 'push') {
-    if (ownerOnly()) return;
+    if (steerOnly()) return;
     // A team stack ships one repo: !pr <name> or !pr <owner/repo>.
     const repo = treeArg(s, text);
     if (repo === false) { await note(`Name the repo: \`!${cmd} <repo>\`, one of ${(fresh(s.key).trees ?? []).map((t) => `\`${t.name}\``).join(', ')}.`); return; }
@@ -1122,7 +1122,7 @@ async function bang(s, text, m, client) {
     await (cmd === 'push' ? pushBranch(s, client, repo) : openPr(s, client, repo)).catch((e) => shipFailed(client, s, e, what));
   } else if (cmd === 'rebase') {
     // The agent owns its git: it rebases and resolves; the host only pushes.
-    if (ownerOnly() || !readyToShip()) return;
+    if (steerOnly() || !readyToShip()) return;
     await steerAndAck(s, REBASE_PROMPT, client, null, m.ts);
   } else if (cmd === 'diff') {
     if (ownerOnly()) return;
@@ -1640,10 +1640,11 @@ const ownerAction = (id, fn) => app.action(id, async ({ ack, body, action, clien
   // A value can carry more after the key: "<key>|<login>".
   const s = sessions.all().find((x) => x.key === action.value.split('|')[0]);
   if (!s) return;
-  if (body.user.id !== s.owner || !allowed(s.channel, body.user.id)) {
+  if (!mayTap(id, s.owner, body.user.id, allowed(s.channel, body.user.id), STEER_ANYONE, onTeam(s, body.user.id))) {
     // Say why nothing happened: a silent tap looked broken.
+    const who = SHIP_ACTIONS.includes(id) && STEER_ANYONE ? `<@${s.owner}> and their team` : `<@${s.owner}>`;
     if (allowed(s.channel, body.user.id)) await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: body.user.id,
-      text: `Only <@${s.owner}> can use these buttons: it is their session. Ask them, or tag me with what you need.` }).catch(() => {});
+      text: `Only ${who} can use this button: it is their session. Ask them, or tag me with what you need.` }).catch(() => {});
     return;
   }
   await fn(s, client, action, body).catch((e) => fail(client, s, e));
