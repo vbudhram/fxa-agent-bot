@@ -1,3 +1,4 @@
+import { lacksGroupsRead } from './access.js';
 // Routines (epic i168): the bot's tick is the only clock routines have (D4). It runs only when ROUTINES_ENV
 // is live or dev, and each bot ticks only its own env (D5).
 export const ROUTINES_ENV = /^(live|dev)$/.test(process.env.ROUTINES_ENV ?? '') ? process.env.ROUTINES_ENV : null;
@@ -16,7 +17,9 @@ const RULE = 'a team with a private repo, and every security review, posts only 
 export async function channelRefusal(client, run) {
   if (!run.channel) return null;
   if (!run.private && run.template !== 'security-review') return null;
-  const c = await client.conversations.info({ channel: run.channel }).then((r) => r.channel ?? null, () => null);
+  let scope = false;
+  const c = await client.conversations.info({ channel: run.channel }).then((r) => r.channel ?? null, (e) => { scope = lacksGroupsRead(e); return null; });
+  if (scope) return `the Slack app lacks the groups:read scope, so I cannot tell whether channel ${run.channel} is private, and ${RULE}. The operator must update the app from manifest.yml and reinstall it`;
   if (!c) return `I cannot read channel ${run.channel}, and ${RULE}`;
   if (!c.is_private) return `channel ${run.channel} is public, and ${RULE}`;
   if (c.is_ext_shared || c.is_shared) return `channel ${run.channel} is shared, and ${RULE}`;

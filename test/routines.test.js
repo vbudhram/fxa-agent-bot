@@ -96,6 +96,17 @@ test('the channel check fails closed for a private-repo team and a security revi
   assert.equal(await channelRefusal(info(new Error('no')), { ...run, private: false }), null, 'a public team code review needs no lookup');
 });
 
+test('a missing groups:read scope still refuses a routine run, and names the scope, not the channel', async (t) => {
+  const { channelRefusal } = await import('../src/routines.js');
+  t.mock.method(console, 'error', () => {});
+  const err = Object.assign(new Error('missing_scope'), { data: { error: 'missing_scope', needed: 'groups:read', provided: 'channels:read,chat:write' } });
+  const client = { conversations: { info: async () => { throw err; } } };
+  const why = await channelRefusal(client, { channel: 'G1', private: true, template: 'code-review' });
+  assert.match(why, /groups:read/);
+  assert.match(why, /manifest\.yml/);
+  assert.doesNotMatch(why, /I cannot read channel/);
+});
+
 test('a tick that is still running makes the next call do nothing', async () => {
   const { inFlightGuard } = await import('../src/routines.js');
   let n = 0, release;
