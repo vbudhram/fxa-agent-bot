@@ -2622,7 +2622,8 @@ await app.start();
 // ponytail: polled, so a person who joins the source channel waits up to 10 minutes.
 if (GATES.size) { await loadMembers(app.client, GATES, gateMembers); setInterval(() => loadMembers(app.client, GATES, gateMembers), 600_000).unref(); }
 // A request waiting for capacity lived only in a timer; pick it up again.
-for (const s of sessions.all()) if (s.state === 'queued') launch(s.key, app.client).catch((e) => console.error('launch', s.key, e.message));
+// From the time it joined the line (started_at), so a restart neither resets the give-up clock nor the wait it reports.
+for (const s of sessions.all()) if (s.state === 'queued') launch(s.key, app.client, s.started_at ?? Date.now()).catch((e) => console.error('launch', s.key, e.message));
 replayMissed(replayMarks).catch((e) => console.error('replay', e.message));
 if (ROUTINES_ENV) { const tick = inFlightGuard(() => routineTick().catch((e) => console.error('routine tick', e.stderr || e.message))); setInterval(tick, TICK_MS); }
 // ponytail: polled, so a channel the bot joins shows in the routine form's picker within 10 minutes.
