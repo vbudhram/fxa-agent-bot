@@ -11,7 +11,7 @@ export default {
     { A: '@bot fix the blur on the verify code input' },
     { advance: 'setup' }, { advance: 'turn', wait: { buttons: /Open PR/ } },
     { A: '@bot !stop', only: { end: ['stop'] }, wait: { text: /Session ended/ },
-      expect: { postCount: { match: /Session ended.*Stopped\. The work so far is kept/, n: 1 } } },
+      expect: { postCount: { match: /Session ended.*Stopped\. The work so far is kept\. Tag me in this thread to pick it up again\./, n: 1 } } },
     { A: { tap: 'Open PR' }, only: { end: ['merge', 'merge_mid_turn'] } },
     { advance: 'finish', only: { end: ['merge', 'merge_mid_turn'] }, wait: { text: /pull\/999999/ } },
     { A: 'also add a test for it', only: { end: ['merge_mid_turn'] }, wait: { ctl: /also add a test for it/ } },

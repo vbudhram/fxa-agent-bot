@@ -2160,7 +2160,7 @@ async function stopSession(key) {
   sessions.patch(key, { stop_failed: !ok });
   return ok;
 }
-const STOPPED_TEXT = (ok) => ok ? 'Stopped. The work so far is kept.'
+const STOPPED_TEXT = (ok) => ok ? 'Stopped. The work so far is kept. Tag me in this thread to pick it up again.'
   : "I couldn't stop the sandbox cleanly. It shuts down at its time limit anyway; `!stop` tries again.";
 // Stop, then the end card with the session's summary, which the stop recorded before the runner went.
 async function stoppedText(key) {
