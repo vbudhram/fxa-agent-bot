@@ -24,9 +24,9 @@ export async function channelRefusal(client, run) {
 }
 
 // The channels this bot is in, for the channel picker of the dashboard's routine form. Without channels:read
-// Slack answers missing_scope for public channels, so the list then holds the private ones only.
+// or groups:read Slack answers missing_scope for that type, so the list then holds the other type only.
 export async function botChannels(client) {
-  for (const types of ['public_channel,private_channel', 'private_channel']) {
+  for (const types of ['public_channel,private_channel', 'private_channel', 'public_channel']) {
     const out = [];
     let cursor;
     try {
@@ -37,7 +37,7 @@ export async function botChannels(client) {
       } while (cursor);
       return out;
     } catch (e) {
-      if (e.data?.error !== 'missing_scope' || types === 'private_channel') throw e;
+      if (e.data?.error !== 'missing_scope' || types === 'public_channel') throw e;
     }
   }
 }

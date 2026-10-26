@@ -162,6 +162,12 @@ test('without channels:read the channel list falls back to private channels; ano
   await assert.rejects(botChannels(client(() => slackErr('missing_scope'))), /missing_scope/);
 });
 
+test('without groups:read the channel list falls back to public channels', async () => {
+  const c = client((a) => (a.types.includes('private') ? slackErr('missing_scope') : { channels: [{ id: 'C1', name: 'pub' }] }));
+  assert.deepEqual(await botChannels(c), [{ id: 'C1', name: 'pub', private: false, shared: false }]);
+  assert.deepEqual(c.calls, ['public_channel,private_channel', 'private_channel', 'public_channel']);
+});
+
 test('the user list reads every page, and leaves out bots, deactivated accounts and Slackbot', async () => {
   const c = { users: { list: async (a) => (a.cursor
     ? { members: [{ id: 'U2', name: 'pat', profile: { real_name: 'Pat Doe', display_name: 'pat', email: 'pat@example.com' } }, { id: 'U3', deleted: true, name: 'x' }] }
