@@ -160,7 +160,9 @@ export async function runScenario(app, view, scenario) {
     i++;
     if (!keep(step)) continue;
     played.push(step);
-    const snap = { chg: view.chg(), seq: Math.max(0, ...view.msgs.map((m) => m.seq)), ctl: ctlLines().length };
+    // The first step also sees what the bot posted at start (a restart's refusal), however fast it posts.
+    const first = played.length === 1;
+    const snap = { chg: first ? 0 : view.chg(), seq: first ? 0 : Math.max(0, ...view.msgs.map((m) => m.seq)), ctl: ctlLines().length };
     const person = Object.keys(step).find((k) => k in scenario.people), t = step.thread ?? 'T1';
     stepAt = Date.now();
     try {
