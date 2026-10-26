@@ -28,10 +28,23 @@ export async function loadMembers(client, gates, members) {
 // A team with a private repo posts code and files only in a private channel. The bot reads only
 // private channels (groups:read), so a public channel's lookup fails, and that counts as public.
 export const PRIVATE_ONLY = 'This team has a private repo, so I post its code and files only in a private channel.';
-export async function codeAllowed(s, client) {
-  if (!s.private) return true;
-  return client.conversations.info({ channel: s.channel }).then((r) => Boolean(r.channel?.is_private)).catch(() => false);
+export const START_PRIVATE = 'This team has a private repo, so its sessions run only in a private channel. Start it there.';
+export const NO_GROUPS_READ = 'I cannot tell whether this channel is private, because the Slack app lacks the groups:read scope. The operator must update the app from manifest.yml and reinstall it.';
+let scopeLogged = false;
+// Why a private team's code may not go to this channel (text, or the missing scope), or null when it may.
+export async function codeRefusal(s, client, text = PRIVATE_ONLY) {
+  if (!s.private) return null;
+  try {
+    return (await client.conversations.info({ channel: s.channel })).channel?.is_private ? null : text;
+  } catch (e) {
+    // Without groups:read a private channel's lookup fails like a public one's, so "start it there" would be false.
+    const has = e.data?.provided;
+    if (e.data?.error !== 'missing_scope' || (has ? has.split(',').includes('groups:read') : !String(e.data?.needed ?? '').includes('groups:read'))) return text;
+    if (!scopeLogged) { scopeLogged = true; console.error(`channel check: missing_scope: needs groups:read (has ${has || 'unknown'}). Update the app from manifest.yml at api.slack.com/apps, then reinstall it.`); }
+    return NO_GROUPS_READ;
+  }
 }
+export const codeAllowed = async (s, client) => !(await codeRefusal(s, client));
 
 // The team a session (or a pending start) belongs to. A pending resume or move has no profile of its
 // own yet, so its team is the earlier session's: falling back to FxA there let anyone in.

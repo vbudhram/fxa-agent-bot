@@ -17,7 +17,7 @@ import { teamChannels } from './teams.js';
 import { ROUTINES_ENV, TICK_MS, NO_CHANNEL, channelRefusal, inFlightGuard, muted, mutedReply, pollChannels, pollUsers } from './routines.js';
 import { ingest } from './db.js';
 import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
-import { codeAllowed, PRIVATE_ONLY, sessionTeam, parseGates, gateAllows, loadMembers, maySteer } from './access.js';
+import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateAllows, loadMembers, maySteer } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, LINE_BREAK, laterMessage } from './render.js';
 import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
@@ -334,9 +334,10 @@ async function begin(key, client) {
     rest.private = from?.private ?? (prof && prof !== 'fxa' ? await ctl.profileInfo(prof).then((i) => i.private !== false).catch(() => true) : false);
   }
   // A team with a private repo runs only in a private channel: its replies hold its code, not only its diffs.
-  if (rest.private && !(await codeAllowed({ private: true, channel: rest.channel }, client))) {
+  const refusal = rest.private && await codeRefusal({ private: true, channel: rest.channel }, client, START_PRIVATE);
+  if (refusal) {
     pending.delete(key);
-    const text = 'This team has a private repo, so its sessions run only in a private channel. Start it there.';
+    const text = refusal;
     if (card_ts) await client.chat.update({ channel: rest.channel, ts: card_ts, text, blocks: [] }).catch(() => {});
     else await client.chat.postMessage({ channel: rest.channel, thread_ts: rest.thread_ts, text }).catch(() => {});
     for (const ts of [src_ts, ...(rest.acks ?? [])].filter(Boolean)) await client.reactions.remove({ channel: rest.channel, timestamp: ts, name: 'eyes' }).catch(() => {});
@@ -516,10 +517,11 @@ async function launch(key, client, since = Date.now(), retry = false) {
   // The private-channel rule of begin(), again: a session queued before a bot restart comes here with no begin().
   // Not a routine run: it has its own channel rule (D8), and a routine with no channel posts nothing.
   // Not a retry at the cap: the first try checked it, and a Slack error on a later try must not stop it.
-  if (!retry && !routine && s.private && !(await codeAllowed({ private: true, channel: s.channel }, client))) {
+  const refusal = !retry && !routine && s.private && await codeRefusal({ private: true, channel: s.channel }, client, START_PRIVATE);
+  if (refusal) {
     sessions.patch(key, { state: 'stopped' });
     dropInbox(key, inboxes.get(key));
-    const text = 'This team has a private repo, so its sessions run only in a private channel. Start it there.';
+    const text = refusal;
     // A session queued before a restart has an "In line" message: it stops promising a start, and the reply notifies.
     if (s.queue_ts) { await app.client.chat.update({ channel: s.channel, ts: s.queue_ts, text: 'Not started.', blocks: [] }).catch(() => {}); sessions.patch(key, { queue_ts: null }); }
     await say(s, text).catch(() => {});
@@ -1658,7 +1660,8 @@ ownerAction('diff', async (s, client, action, body) => {
 });
 // repo: one repo of a team stack; without it, every repo (each under its own name).
 async function postDiff(s, client, repo) {
-  if (!(await codeAllowed(s, client))) { await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: PRIVATE_ONLY }); return; }
+  const refusal = await codeRefusal(s, client);
+  if (refusal) { await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: refusal }); return; }
   const d = await ctl.diff(s.key, repo);
   if (!d.trim()) { await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: `No changes yet${repo ? ` in ${repo}` : ''}.` }); return; }
   await client.files.uploadV2({ channel_id: s.channel, thread_ts: s.thread_ts, filename: `${repo ? repo.split('/')[1] : 'changes'}.diff`, content: d,
