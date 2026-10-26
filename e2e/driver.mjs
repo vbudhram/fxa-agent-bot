@@ -213,16 +213,15 @@ export async function runScenario(app, view, scenario) {
   }
 
   // Who may do what, whatever the steps were: a person not allowed owns nothing, and every ship
-  // (finish) comes from an action of the session's owner.
+  // (finish) comes from a ship action of an allowed person: the owner or a teammate.
   const all = ctlLines(), arg = (l, f) => l.argv[l.argv.indexOf(f) + 1];
   const banned = Object.entries(scenario.people).filter(([, d]) => /not allowed/.test(d)).map(([p]) => uid(p));
   for (const l of all.filter((x) => x.argv[0] === 'task' && banned.includes(arg(x, '--owner')))) failures.push(`a session is owned by ${arg(l, '--owner')}, who is not allowed`);
-  const owners = new Set(all.filter((x) => x.argv[0] === 'task').map((x) => arg(x, '--owner')));
-  const shipAsks = played.filter((s) => Object.entries(s).some(([p, a]) => owners.has(uid(p)) && (typeof a === 'string' ? /^!(pr|push)\b/.test(a) : /Open PR|Push|Update PR|open_pr|push_branch/.test(String(a.tap ?? ''))))).length;
+  const shipAsks = played.filter((s) => Object.entries(s).some(([p, a]) => /^[A-Z]$/.test(p) && !banned.includes(uid(p)) && (typeof a === 'string' ? /^!(pr|push)\b/.test(a) : /Open PR|Push|Update PR|open_pr|push_branch/.test(String(a.tap ?? ''))))).length;
   // A routine run ships with no person (the host's mode rules, D19), so its finish needs no owner's action.
   const routineKeys = new Set(all.filter((x) => x.argv[0] === 'task' && arg(x, '--source') === 'routine').map((x) => arg(x, '--id')));
   const ships = all.filter((x) => x.argv[0] === 'finish' && !routineKeys.has(arg(x, '--session'))).length;
-  if (ships > shipAsks) failures.push(`${ships} ship(s) (finish) but only ${shipAsks} ship action(s) by an owner`);
+  if (ships > shipAsks) failures.push(`${ships} ship(s) (finish) but only ${shipAsks} ship action(s) by an allowed person`);
 
   const botLog = existsSync(join(out, 'bot.log')) ? readFileSync(join(out, 'bot.log'), 'utf8') : '';
   const global = globalChecks({ view, botLog, stepOf: (seq) => stepSeq[seq] ?? -1 });

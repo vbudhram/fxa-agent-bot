@@ -5,7 +5,7 @@ export default {
     { A: 'the blur on the verify input looks off' },
     { B: '@bot can you fix this?', expect: { ctl: { cmd: 'task', match: /--owner\",\"UA/ } } },
     { advance: 'setup' }, { advance: 'turn', wait: 'turn_end' },
-    { B: { tap: 'Open PR' }, expect: { ephemeral: { to: 'B', match: /Only <@UA>/ } } },
+    { B: { tap: 'Open PR' }, expect: { ctl: { cmd: 'finish', n: 1 } } },
   ],
-  judge: 'The thread starter owns the session. B is told who can ship.',
+  judge: 'The thread starter owns the session. B, a teammate, can ship.',
 };
