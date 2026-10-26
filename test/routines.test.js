@@ -191,7 +191,7 @@ test('a missing scope stops the channel list polling; another error keeps it', a
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     const scope = client(() => slackErr('missing_scope'));
     await pollChannels(scope, () => {}, 5); await wait(40);
-    assert.equal(scope.calls.length, 2, 'the public try, then the private one, and no more');
+    assert.equal(scope.calls.length, 3, 'both types, then private, then public, and no more');
     const lists = [], busy = client(() => slackErr('ratelimited')), ok = client(() => ({ channels: [{ id: 'G1', name: 'p', is_private: true }] }));
     await pollChannels(busy, () => {}, 5); await pollChannels(ok, (l) => lists.push(l), 5); await wait(40);
     assert.ok(busy.calls.length > 2, `a rate limit polls again (${busy.calls.length} calls)`);
