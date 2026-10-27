@@ -2585,6 +2585,8 @@ async function routineEvent(key, ev) {
   const r = fresh(key)?.routine;
   if (!r || r.ended) return;
   if (r.finishing && ev.type === 'pr' && ev.url) return endRoutine(key, { state: 'ok', pr: ev.url });
+  // ctl's wrap-up error when the agent chose to ship nothing: its reason is already in the thread.
+  if (r.finishing && ev.type === 'error' && /I wrote no handoff/.test(ev.text ?? '')) return endRoutine(key, { state: 'nochange' });
   if (ev.type === 'error') return endRoutine(key, { state: 'failed', reason: String(ev.text ?? '').split('\n')[0].slice(0, 300) || 'the turn failed' });
   // The wrap-up's own reply (ctl's wrap_reply) comes before its error: only the PR or the error ends a shipping run.
   if (r.finishing) return;
