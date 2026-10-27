@@ -82,3 +82,15 @@ test('a teammate may tap the PR buttons, but not the desktop, the diff or Stop',
   assert.equal(mayTap('desktop', 'U1', 'U2', true, true, true), false, 'the desktop, a teammate');
   assert.equal(mayTap('stop', 'U1', 'U1', true, true, true), true, 'Stop, the owner');
 });
+
+test('a team admin takes over every control, and a PR list limits Open PR and Push', () => {
+  // mayTap(action, owner, user, allowedHere, steerAnyone, onTeam, admin, prOk)
+  assert.equal(mayTap('stop', 'U1', 'UADM', true, true, true, true), true, 'Stop, a team admin');
+  assert.equal(mayTap('desktop', 'U1', 'UADM', true, false, false, true), true, 'the desktop, a team admin under STEER=owner');
+  assert.equal(mayTap('stop', 'U1', 'UADM', false, true, true, true), false, 'a team admin the channel does not allow');
+  assert.equal(maySteer('U1', 'UADM', true, false, false, true), true, 'a team admin steers under STEER=owner');
+  assert.equal(mayTap('open_pr', 'U1', 'U2', true, true, true, false, false), false, 'Open PR, a teammate not on the PR list');
+  assert.equal(mayTap('push_branch', 'U1', 'U1', true, true, true, false, false), false, 'Push, the owner not on the PR list');
+  assert.equal(mayTap('pr_ready', 'U1', 'U2', true, true, true, false, false), true, 'Mark ready is not on the PR list rule');
+  assert.equal(mayTap('open_pr', 'U1', 'U2', true, true, true, false, true), true, 'Open PR, a teammate on the PR list');
+});

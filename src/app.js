@@ -12,12 +12,12 @@ import * as live from './live.js';
 import { statusMessage } from './status.js';
 import { pollEvery, reachable, missed, replayMark, replayable } from './poll.js';
 import * as unfurl from './unfurl.js';
-import { resolveProfile, mayStart } from './profile.js';
+import { resolveProfile, mayStart, isAdmin, mayOpenPr } from './profile.js';
 import { teamChannels } from './teams.js';
 import { ROUTINES_ENV, TICK_MS, NO_CHANNEL, channelRefusal, inFlightGuard, muted, mutedReply, pollChannels, pollUsers } from './routines.js';
 import { ingest } from './db.js';
 import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
-import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateAllows, loadMembers, maySteer, mayTap, SHIP_ACTIONS } from './access.js';
+import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateAllows, loadMembers, maySteer, mayTap, SHIP_ACTIONS, PR_ACTIONS } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, LINE_BREAK, laterMessage } from './render.js';
 import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
@@ -105,7 +105,11 @@ const allowed = (channel, user) => inChannels(channel) && (USERS.includes('*') |
 // The session's owner, or someone on its team: only they may steer, answer, interrupt or resume it. The channel gate
 // alone let a person allowed in the channel but not on a gated team drive that team's repos and secrets.
 // A routine run has no person on it: nobody steers, answers, interrupts or resumes it (D24).
-const onTeam = (s, user) => !s?.routine && (user === s?.owner || mayStart(sessionTeam(s, fresh), user));
+// A team admin takes over any control in the team's threads, as the owner can.
+const adminOf = (s, user) => !!s && !s.routine && isAdmin(sessionTeam(s, fresh), user);
+const boss = (s, user) => user === s?.owner || adminOf(s, user);
+const prOk = (s, user) => mayOpenPr(sessionTeam(s, fresh), user);
+const onTeam = (s, user) => !s?.routine && (boss(s, user) || mayStart(sessionTeam(s, fresh), user));
 // A routine posts in the channel its admin set (checked at its start), which need not be an allowed one.
 const here = (s) => Boolean(s.routine) || reachable(s, [...CHANNELS, ...teamChannels()]);
 
@@ -694,6 +698,7 @@ async function threadContext(client, event, { withBot = false, files } = {}) {
 // owner, and tells anyone else once, privately, why the bot does not answer them.
 const STEER_MODE = process.env.STEER || 'mention';
 const STEER_ANYONE = STEER_MODE !== 'owner';
+const PR_REFUSAL = 'Only the people a team admin lists can open a PR or push from Slack. Ask one of them, or a team admin, to tap the button. You can still steer the session.';
 let botUserId = null; // set at start; until then no message counts as one for someone else
 // Messages for someone else wait on the session (the last 10) until the agent's next turn.
 function keepAside(s, message) {
@@ -772,7 +777,7 @@ async function onMessage({ message, client, replay = false }) {
     }
     return;
   }
-  const steers = allowed(message.channel, message.user) && (message.user === s.owner || (STEER_ANYONE && onTeam(s, message.user)));
+  const steers = allowed(message.channel, message.user) && (boss(s, message.user) || (STEER_ANYONE && onTeam(s, message.user)));
   // A reply continues a session that has ended, as a tag does: paused, stopped,
   // failed, or with its PR still open (the reply is often about the review).
   const prDone = ['MERGED', 'CLOSED'].includes(s.pr_seen?.state);
@@ -823,7 +828,7 @@ async function onMessage({ message, client, replay = false }) {
         : "I'm wrapping up and opening the PR, so I can't act on this now. I kept it as context. Reply here once the PR is open, and I'll pick it up." }).catch(() => {});
     return;
   }
-  if (!maySteer(s.owner, message.user, allowed(message.channel, message.user), STEER_ANYONE, onTeam(s, message.user))) {
+  if (!maySteer(s.owner, message.user, allowed(message.channel, message.user), STEER_ANYONE, onTeam(s, message.user), adminOf(s, message.user))) {
     // Someone who may not use the bot here: their tag already got the one refusal (onMention).
     if (!allowed(message.channel, message.user) || (s.told ?? []).includes(message.user)) return;
     sessions.patch(s.key, { told: [...(fresh(s.key).told ?? []), message.user] });
@@ -869,7 +874,7 @@ async function steerEdit(message, client) {
   // A link unfurl or a reaction edits the message without changing its text.
   if (!m.thread_ts || fromBot(m) || !after || after === before || after.startsWith('!') || toSomeoneElse(m.text, botUserId)) return;
   const s = sessions.get(message.channel, m.thread_ts);
-  if (!s || !(allowed(message.channel, m.user) && (m.user === s.owner || (STEER_ANYONE && onTeam(s, m.user))))) return;
+  if (!s || !(allowed(message.channel, m.user) && (boss(s, m.user) || (STEER_ANYONE && onTeam(s, m.user))))) return;
   if (!forBotFromOthers(m, s, botUserId, STEER_MODE, untaggedOwner(m, s) && await crowded(client, s))) return; // an untagged edit that may be to a person
   // Only a message the agent received: one sent after the session started.
   if (Number(m.ts) * 1000 < (s.started_at ?? Infinity) - 60_000) return;
@@ -1078,8 +1083,9 @@ async function bang(s, text, m, client) {
   if (!allowed(m.channel, m.user)) { await note("Sorry, you're not on the list of people who can use the agent here."); return; }
   // Interrupt and mute go as far as steering does: anyone allowed, or only the
   // owner under STEER=owner.
-  const steerOnly = () => { if (s && m.user !== s.owner && (!STEER_ANYONE || !onTeam(s, m.user))) { note(`Only <@${s.owner}> can do that in this session.`); return true; } return false; };
-  const ownerOnly = () => { if (s && m.user !== s.owner) { note(`Only <@${s.owner}> can do that in this session.`); return true; } return false; };
+  const steerOnly = () => { if (s && !boss(s, m.user) && (!STEER_ANYONE || !onTeam(s, m.user))) { note(`Only <@${s.owner}> can do that in this session.`); return true; } return false; };
+  const ownerOnly = () => { if (s && !boss(s, m.user)) { note(`Only <@${s.owner}> can do that in this session.`); return true; } return false; };
+  const prOnly = () => { if (s && !prOk(s, m.user)) { note(PR_REFUSAL); return true; } return false; };
   if (cmd === 'stack') { await stackCmd(s, text, m, client, note); return; }
   if (cmd === 'help' || !s) {
     if (cmd === 'status' && !s) { await note(await statusList(client, m.channel)); return; }
@@ -1110,7 +1116,7 @@ async function bang(s, text, m, client) {
     const extra = notes.length ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: notes.join(' ') }] }] : [];
     await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: c.text, blocks: [...c.blocks.slice(0, -1), ...extra, c.blocks.at(-1)] });
   } else if (cmd === 'pr' || cmd === 'push') {
-    if (steerOnly()) return;
+    if (steerOnly() || prOnly()) return;
     // A team stack ships one repo: !pr <name> or !pr <owner/repo>.
     const repo = treeArg(s, text);
     if (repo === false) { await note(`Name the repo: \`!${cmd} <repo>\`, one of ${(fresh(s.key).trees ?? []).map((t) => `\`${t.name}\``).join(', ')}.`); return; }
@@ -1206,7 +1212,7 @@ app.event('reaction_added', async ({ event, client }) => {
   const { channel, ts } = event.item;
   const s = sessions.all().find((x) => x.channel === channel && [x.thread_ts, x.status_ts, x.buttons_msg?.ts].includes(ts));
   if (!s || !LIVE.includes(s.state) || !allowed(channel, event.user)) return;
-  if (event.user !== s.owner && (!STEER_ANYONE || !onTeam(s, event.user))) return;
+  if (!boss(s, event.user) && (!STEER_ANYONE || !onTeam(s, event.user))) return;
   sessions.patch(s.key, { muted: true, interrupted: true });
   const stopped = await ctl.interrupt(s.key).then(() => true, (e) => { console.error('interrupt', s.key, e.stderr || e.message); return false; });
   await client.chat.postEphemeral({ channel, thread_ts: s.thread_ts, user: event.user,
@@ -1645,11 +1651,12 @@ const ownerAction = (id, fn) => app.action(id, async ({ ack, body, action, clien
   // A value can carry more after the key: "<key>|<login>".
   const s = sessions.all().find((x) => x.key === action.value.split('|')[0]);
   if (!s) return;
-  if (!mayTap(id, s.owner, body.user.id, allowed(s.channel, body.user.id), STEER_ANYONE, onTeam(s, body.user.id))) {
+  const u = body.user.id, pr = prOk(s, u);
+  if (!mayTap(id, s.owner, u, allowed(s.channel, u), STEER_ANYONE, onTeam(s, u), adminOf(s, u), pr)) {
     // Say why nothing happened: a silent tap looked broken.
     const who = SHIP_ACTIONS.includes(id) && STEER_ANYONE ? `<@${s.owner}> and their team` : `<@${s.owner}>`;
-    if (allowed(s.channel, body.user.id)) await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: body.user.id,
-      text: `Only ${who} can use this button: it is their session. Ask them, or tag me with what you need.` }).catch(() => {});
+    if (allowed(s.channel, u)) await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: u,
+      text: PR_ACTIONS.includes(id) && !pr ? PR_REFUSAL : `Only ${who} can use this button: it is their session. Ask them, or tag me with what you need.` }).catch(() => {});
     return;
   }
   await fn(s, client, action, body).catch((e) => fail(client, s, e));
@@ -1701,7 +1708,7 @@ app.action('more', async ({ ack, body, action, client }) => {
 app.action('interrupt', async ({ ack, body, action, client }) => {
   await ack();
   const s = fresh(action.value);
-  if (!s || !allowed(s.channel, body.user.id) || (body.user.id !== s.owner && (!STEER_ANYONE || !onTeam(s, body.user.id)))) return;
+  if (!s || !allowed(s.channel, body.user.id) || (!boss(s, body.user.id) && (!STEER_ANYONE || !onTeam(s, body.user.id)))) return;
   await interrupt(s, client, body).catch((e) => fail(client, s, e));
 });
 async function interrupt(s, client, body) {
@@ -1840,7 +1847,7 @@ app.action(/^answer_\d+(_\d+)?$/, async ({ ack, body, action, client }) => {
   // Only an option this message offered, for the session this thread holds.
   const offered = (body.message.blocks ?? []).flatMap((b) => b.elements ?? []).map((e) => e.value).filter(Boolean);
   if (!offered.includes(action.value) || s.channel !== body.channel?.id || s.thread_ts !== (body.message.thread_ts ?? body.message.ts)) return;
-  if (body.user.id !== s.owner && (!STEER_ANYONE || !onTeam(s, body.user.id))) {
+  if (!boss(s, body.user.id) && (!STEER_ANYONE || !onTeam(s, body.user.id))) {
     await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: body.user.id, text: `Only <@${s.owner}> can answer in this session.` }).catch(() => {});
     return;
   }

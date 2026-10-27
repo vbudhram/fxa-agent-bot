@@ -30,6 +30,22 @@ export function resolveProfile({ text, channel, user, env = process.env }) {
   return { profile, text };
 }
 
+// A team's admins and the people who may open a PR from Slack: a record's, else PROFILE_ADMINS and
+// PROFILE_PR_USERS (fxa:U1+U2), for a team with no record such as fxa.
+export function teamPeople(profile, env = process.env) {
+  const t = teamIndex(env)[profile];
+  if (t) return { admins: t.admins, prUsers: t.prUsers };
+  const ids = (v) => (pairs(v).get(profile) || '').split('+').filter((x) => /^[UW][A-Z0-9]{6,}$/.test(x));
+  return { admins: ids(env.PROFILE_ADMINS), prUsers: ids(env.PROFILE_PR_USERS) };
+}
+// An admin can take over any control in the team's threads.
+export const isAdmin = (profile, user, env = process.env) => teamPeople(profile, env).admins.includes(user);
+// With no PR list, anyone who can steer opens a PR, as before; with one, its people and the admins.
+export function mayOpenPr(profile, user, env = process.env) {
+  const p = teamPeople(profile, env);
+  return !p.prUsers.length || p.prUsers.includes(user) || p.admins.includes(user);
+}
+
 // The one gate for a team: fxa for everyone; a team record by its own status and access alone, so an
 // env entry left from before the move cannot reopen a draft, disabled or gated team; a team with no
 // record by PROFILE_OPEN (everyone allowed here) or PROFILE_USERS. The !stack picker (teamsFor) uses it too.

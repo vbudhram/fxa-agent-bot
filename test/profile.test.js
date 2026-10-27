@@ -67,3 +67,12 @@ test('a team that takes secret tickets does not claim its Jira project as a pref
   assert.equal(resolveProfile({ text: 'fix RUST-1', channel: 'C0PUBLIC1', user: 'U0SECRET1', env }).profile, 'rusty');
   assert.equal(resolveProfile({ text: 'team:fxa-private fix it', channel: 'C0PUBLIC1', user: 'U0SECRET1', env }).profile, 'fxa-private');
 });
+
+test('PROFILE_ADMINS and PROFILE_PR_USERS: an admin opens PRs; with no list anyone may; bad IDs are dropped', async () => {
+  const { isAdmin, mayOpenPr } = await import('../src/profile.js');
+  const e = { FXA_TEAMS_INDEX: '/nonexistent/index.json', PROFILE_ADMINS: 'fxa:U0ADMIN1+bad', PROFILE_PR_USERS: 'fxa:U0PRUSE1' };
+  assert.equal(isAdmin('fxa', 'U0ADMIN1', e), true);
+  assert.equal(isAdmin('fxa', 'bad', e), false);
+  assert.deepEqual(['U0PRUSE1', 'U0ADMIN1', 'U0OTHER1'].map((u) => mayOpenPr('fxa', u, e)), [true, true, false]);
+  assert.equal(mayOpenPr('monitor', 'U0OTHER1', e), true, 'a team with no PR list');
+});

@@ -5,11 +5,15 @@ export const parseGates = (v) => new Map((v || '').split(',').map((p) => p.trim(
 export const gateAllows = (gates, members, channel, user) => !gates.has(channel) || Boolean(members.get(gates.get(channel))?.has(user));
 // Who a plain reply in a live session steers: a person the channel still allows, the owner included,
 // so leaving a gate's channel or the user list stops the owner's steers as it stops their commands.
-export const maySteer = (owner, user, allowedHere, steerAnyone, team) => allowedHere && (user === owner || (steerAnyone && team));
-// The PR buttons go as far as steering does; the desktop, the diff and Stop stay the owner's.
+// A team admin counts as the owner.
+export const maySteer = (owner, user, allowedHere, steerAnyone, team, admin = false) => allowedHere && (user === owner || admin || (steerAnyone && team));
+// The PR buttons go as far as steering does; the desktop, the diff and Stop stay the owner's and the admins'.
 export const SHIP_ACTIONS = ['open_pr', 'push_branch', 'create_jira', 'pr_ready', 'fix_review', 'rebase_pr', 'auto_round'];
-export const mayTap = (action, owner, user, allowedHere, steerAnyone, team) =>
-  SHIP_ACTIONS.includes(action) ? maySteer(owner, user, allowedHere, steerAnyone, team) : allowedHere && user === owner;
+// Open PR and Push also need the team's PR list (prOk: mayOpenPr).
+export const PR_ACTIONS = ['open_pr', 'push_branch'];
+export const mayTap = (action, owner, user, allowedHere, steerAnyone, team, admin = false, prOk = true) =>
+  PR_ACTIONS.includes(action) && !prOk ? false
+    : SHIP_ACTIONS.includes(action) ? maySteer(owner, user, allowedHere, steerAnyone, team, admin) : allowedHere && (user === owner || admin);
 
 // Reads each source channel's members. A failed read keeps the last list.
 export async function loadMembers(client, gates, members) {

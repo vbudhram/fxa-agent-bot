@@ -87,3 +87,10 @@ test("only active teams' channels count as allowed channels", () => {
   write({ rusty: rusty(), off: rusty({ status: 'disabled', access: { channels: ['C0OFF001'] } }) });
   assert.deepEqual(teamChannels(env), ['C0RUSTY1']);
 });
+
+test('a record team carries its admins and PR users to isAdmin and mayOpenPr', async () => {
+  const { isAdmin, mayOpenPr } = await import('../src/profile.js');
+  write({ ex: { label: 'Ex', status: 'active', access: { open: true }, admins: ['U0ADMIN1'], pr_users: ['U0PRUSE1', 'nope'] } });
+  assert.equal(isAdmin('ex', 'U0ADMIN1', env), true);
+  assert.deepEqual(['U0PRUSE1', 'U0ADMIN1', 'U0OTHER1', 'nope'].map((u) => mayOpenPr('ex', u, env)), [true, true, false, false]);
+});
