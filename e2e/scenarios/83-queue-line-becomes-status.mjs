@@ -5,8 +5,8 @@ export default {
   env: { FAKE_TASK_CAP: '1', QUEUE_RETRY_MS: '2000' },
   steps: [
     { A: '@bot fix the blur on the verify code input', wait: { text: /^In line for A · 1st in line/ } },
-    { pause: 3, wait: { ctl: /"task".*"--owner","UA"/ }, expect: { edited: { match: /^Getting ready for A · / }, postCount: { match: /In line|Getting ready|Working for|Worked for/, n: 1 } } },
-    { advance: 'setup' }, { advance: 'turn', wait: 'turn_end', expect: { postCount: { match: /In line|Getting ready|Working for|Worked for/, n: 1 }, noText: /Waiting for capacity|freed up/ } },
+    { pause: 3, wait: { ctl: /"task".*"--owner","UA"/ }, expect: { edited: { match: /^Getting ready for A · / }, postCount: { match: /In line|Getting ready|for A|Worked for/, n: 1 } } },
+    { advance: 'setup' }, { advance: 'turn', wait: 'turn_end', expect: { postCount: { match: /In line|Getting ready|for A|Worked for/, n: 1 }, noText: /Waiting for capacity|freed up/ } },
   ],
   judge: 'One bot message carries the request from the line to the answer; nothing else says the bot is waiting.',
 };

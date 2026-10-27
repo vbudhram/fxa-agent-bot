@@ -5,7 +5,7 @@ export default {
   steps: [
     { A: 'the blur on the verify input looks off' },
     { B: '@bot can you fix this?', expect: { ctl: { cmd: 'task', match: /--owner","UA/ }, text: /^Getting ready for B · /, noText: /<@UB>/ } },
-    { advance: 'setup', pause: 6, expect: { edited: { match: /^Working for B · / } } }, // edits wait 3 s, and the turn polls every 5 s
+    { advance: 'setup', pause: 6, expect: { edited: { match: /for B( · |\n|$)/ } } }, // edits wait 3 s, and the turn polls every 5 s
     { advance: 'turn', wait: 'turn_end', expect: { text: /Worked for .*Fake turn 1/s } },
   ],
   judge: 'B asked, so the live status names B, and it is a plain message that A, B and everyone else can read while the turn runs.',

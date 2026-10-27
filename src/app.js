@@ -406,7 +406,7 @@ function quickStatus(p) {
   run(async () => {
     // The same look as a sandbox turn's status: the asker in the title, the current step and its command in the box.
     const who = { asker_name: await askerName({ acks: p.acks, owner: p.owner }) };
-    const msg = () => statusMessage({ title: statusTitle(who, 'Working', Date.now() - t0, n, n ? st.label : null), rows: n ? [`› ${rowTitle(st)}`] : [],
+    const msg = () => statusMessage({ title: statusTitle(who, 'Working', Date.now() - t0, n ? st.label : null), rows: n ? [`› ${rowTitle(st)}`] : [],
       id: `quick-${t0}` });
     ({ ts } = await app.client.chat.postMessage({ channel: p.channel, thread_ts: p.thread_ts, ...msg() }));
     // answer() or done() may come before this run ends: then no timer, or it would edit a closed status.
@@ -1388,15 +1388,16 @@ const readyWord = (s) => (s?.resume_from ? 'Picking up where we left off' : 'Get
 async function startStatusNow(s, verb) {
   const cur = fresh(s.key);
   if (!cur || cur.status_ts || cur.muted) return;
-  steps.delete(s.key); unsent.delete(s.key); stepAt.delete(s.key); said.delete(s.key);
+  steps.delete(s.key); unsent.delete(s.key); stepAt.delete(s.key); said.delete(s.key); saidAt.delete(s.key); thinkAt.delete(s.key);
   liveTurn.set(s.key, newLive());
   const asker_name = await askerName(cur);
-  const msg = statusMessage({ title: statusTitle({ ...cur, asker_name }, verb, 0, 0) });
+  const msg = statusMessage({ title: statusTitle({ ...cur, asker_name }, verb, 0) });
   // A request that waited in line already has its status message: it changes in place.
   const ts = cur.queue_ts ? await app.client.chat.update({ channel: s.channel, ts: cur.queue_ts, ...msg }).then(() => cur.queue_ts, () => null) : null;
   const status_ts = ts ?? (await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...msg })).ts;
   sessions.patch(cur.key, { status_ts, queue_ts: null, status_text: msg.text, status_box: `${cur.state}\n`, asker_name, edit_at: Date.now(), busy_since: Date.now(), status_opened_at: Date.now(), last_act: null,
-    step_n: 0, rows_done: null, cur_kind: null, cur_count: 0, cur_label: null });
+    step_n: 0, rows_done: null, cur_kind: null, cur_count: 0, cur_label: null, cur_since: null });
+  said.delete(cur.key); saidAt.delete(cur.key); thinkAt.delete(cur.key); // the last turn's reply is not this turn's note
   if (cur.state === 'active') ensureWatch(s.key);
 }
 const secs = (ms) => { const t = Math.round(ms / 1000); return t < 60 ? `${t}s` : `${Math.floor(t / 60)}m ${t % 60}s`; };
@@ -1409,10 +1410,11 @@ async function askerName(s) {
   return /^[UW][A-Z0-9]+$/.test(asker ?? '') ? (await whoIs(app.client, asker))?.name ?? null : null;
 }
 // The name is plain text, not a mention: a mention would notify the asker each time a turn starts.
-// now: the running task, so the collapsed plan says what the agent does; else the step count.
-function statusTitle(s, verb, ms, n, now) {
-  const who = s.asker_name ? ` for ${defuse(s.asker_name)}` : '';
-  return `${verb === 'Setting up' ? readyWord(s) : verb}${who} · ${secs(ms)}${now ? ` · ${now}` : n ? ` · ${stepCount(n)}` : ''}`;
+// now: what the agent does, so the collapsed plan says it in words, with the asker last; tail: the setup step or todo position.
+function statusTitle(s, verb, ms, now, tail) {
+  const who = s.asker_name ? `for ${defuse(s.asker_name)}` : '';
+  if (now) return [now, live.clock(ms), tail, who].filter(Boolean).join(' · ');
+  return `${verb === 'Setting up' ? readyWord(s) : verb}${who ? ` ${who}` : ''} · ${live.clock(ms)}${tail ? ` · ${tail}` : ''}`;
 }
 // The running row's label, without its step count: "› Exploring the code · 4 steps" is "Exploring the code".
 const nowOf = (rows) => rows.find((r) => r.startsWith('›'))?.slice(2).replace(/ · \d+ steps?$/, '');
@@ -1425,7 +1427,7 @@ const MOVE_MS = Number(process.env.STATUS_MOVE_MS) || 60_000; // a status moves 
 // The status is an edited message that everyone in the thread sees: a native stream shows its steps to one person only.
 const unsent = new Map(); // key → steps not yet shown in the status
 // status_kind: a field old records may hold ('stream' or 'line'); nothing reads it, and a clear drops it.
-const STATUS_CLEAR = { status_ts: null, status_kind: null, busy_since: null, last_act: null, last_detail: null, last_step: null, step_n: null, task_n: null, cur_kind: null, cur_count: null, cur_label: null, cur_lines: null, title_at: null, rows_done: null, interrupted: null, wrap_done: null, boot_row: null, status_below: null, moved_at: null };
+const STATUS_CLEAR = { status_ts: null, status_kind: null, busy_since: null, last_act: null, last_detail: null, last_step: null, step_n: null, task_n: null, cur_kind: null, cur_count: null, cur_label: null, cur_since: null, cur_lines: null, title_at: null, rows_done: null, interrupted: null, wrap_done: null, boot_row: null, status_below: null, moved_at: null };
 // The finished turn's checklist, compact: every work row, ticked.
 
 const turnSummary = (s, word) => {
@@ -1527,6 +1529,7 @@ function ensureWatch(key) {
   const w = ctl.watch(key, (ev) => {
     if (ev.type === 'step') { pushStep(key, ev.text); unsent.set(key, [...(unsent.get(key) ?? []), ev.text]); liveEdit(key); }
     if (ev.type === 'result') { resultAt.set(key, Date.now()); setTimeout(() => pollOne(key), 300); }
+    if (ev.type === 'thinking') thinkAt.set(key, Date.now());
     if (ev.type === 'text_start') saidText(key, null);
     if (ev.type === 'text') saidText(key, ev.text);
     if (ev.type === 'edit') sessions.patch(key, { edited_at: Date.now() }); // work not yet pushed (autoRound)
@@ -1542,6 +1545,7 @@ function ensureWatch(key) {
 function stopWatch(key) { watchers.get(key)?.stop(); watchers.delete(key); }
 
 const said = new Map(), stepAt = new Map(); // key → the latest text block; when the last step started
+const saidAt = new Map(), thinkAt = new Map(); // key → when that block started; when a thinking block started, until the next step or text
 // The answer to a status question while a turn runs.
 function statusNow(key) {
   const s = fresh(key), log = steps.get(key) ?? [];
@@ -1550,14 +1554,14 @@ function statusNow(key) {
 }
 // The agent's latest text block, for the status reply.
 function saidText(key, text) {
-  if (text === null) { said.set(key, ''); return; }
+  if (text === null) { said.set(key, ''); saidAt.set(key, Date.now()); thinkAt.delete(key); return; }
   said.set(key, ((said.get(key) ?? '') + text).slice(-600));
   liveEdit(key);
 }
 function pushStep(key, text) {
   if (!text) return;
   const list = steps.get(key) ?? [];
-  list.push(text); stepAt.set(key, Date.now());
+  list.push(text); stepAt.set(key, Date.now()); thinkAt.delete(key);
   steps.set(key, list.slice(-5));
 }
 // At most one Slack call per 1.2 s per session.
@@ -1602,11 +1606,12 @@ async function updateStatusNow(s, state, activity) {
     const bootRow = ready.boot_row ?? s.boot_row;
     const body = rows ? [...(bootRow ? [bootRow] : []), ...live.lineRows(liveTurn.get(s.key)?.st, rows)]
       : bootRows ?? log.map((t, i) => `${i === log.length - 1 ? '›' : '✓'} ${defuse(t)}`);
-    const n = rows?.step_n ?? 0;
-    const msg = statusMessage({ title: statusTitle(s, VERB[state] ?? 'Working', Date.now() - since, n, rows ? live.progress(liveTurn.get(s.key)?.st) : nowOf(body)), rows: body,
+    const lt = liveTurn.get(s.key)?.st, now = Date.now();
+    const head = rows ? live.headline(lt, rows, { said: said.get(s.key), saidAgoMs: now - (saidAt.get(s.key) ?? now), thinkMs: thinkAt.has(s.key) ? now - thinkAt.get(s.key) : 0 }) : null;
+    const msg = statusMessage({ title: statusTitle(s, VERB[state] ?? 'Working', now - since, head, rows ? live.progress(lt) : nowOf(body)), rows: body,
       id: `${s.key}-${s.status_opened_at ?? since}` });
-    // The rows, and the state word: a change of either is news; the clock alone is not.
-    const nl = msg.text.indexOf('\n'), box = `${state}\n${nl < 0 ? '' : msg.text.slice(nl + 1)}`, age = Date.now() - (s.edit_at ?? 0);
+    // The headline, the rows and the state word: a change of any is news; the clock alone is not.
+    const nl = msg.text.indexOf('\n'), box = `${state}\n${head ?? ''}\n${nl < 0 ? '' : msg.text.slice(nl + 1)}`, age = now - (s.edit_at ?? 0);
     const keep = { busy_since: since, last_act: doing, ...(rows ?? {}), ...ready };
     if (!s.status_ts) return { ...keep, status_ts: (await post(msg)).ts, status_text: msg.text, status_box: box, edit_at: Date.now() };
     // People replied below it: post it again at the bottom and delete the old one, so the live status stays in view.

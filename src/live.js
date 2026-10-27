@@ -77,30 +77,50 @@ export const todoLine = (st) => (st.todos ?? []).length
 // The same line only when a todo is still open: a turn that finished its list says nothing more.
 export const openTodoLine = (st) => (st?.todos ?? []).some((t) => t.status !== 'completed') ? todoLine(st) : null;
 
-// The status's stage rows, not raw commands. rows: {rows_done, cur_kind, cur_label, cur_count}
-// as the last update left them; each new step joins its stage row or opens the next one.
-const steps = (n) => `${n} step${n === 1 ? '' : 's'}`;
-export function advanceRows(rows, news) {
-  let { rows_done: done = [], cur_kind: kind = null, cur_label: label = null, cur_count: count = 0 } = rows ?? {};
-  done = [...(done ?? [])];
+// The status's stage rows, not raw commands: one row per stage, with its time. rows: {rows_done:
+// [{kind, ms}], cur_kind, cur_label, cur_count, cur_since} as the last update left them.
+export const clock = (ms) => { const t = Math.max(0, Math.round(ms / 1000)); return t < 60 ? `${t}s` : `${Math.floor(t / 60)}m`; };
+const PAST = { explore: 'Explored the code', edit: 'Made the change', verify: 'Verified', review: 'Reviewed' };
+export function advanceRows(rows, news, now = Date.now()) {
+  let { rows_done: done = [], cur_kind: kind = null, cur_label: label = null, cur_count: count = 0, cur_since: since = now } = rows ?? {};
+  done = (done ?? []).filter((r) => r?.kind); // a record from before this layout held strings
   for (const step of news) {
     const st = stage(step) ?? (kind ? { kind, label } : { kind: 'explore', label: 'Exploring the code' });
     if (st.kind !== kind) {
-      if (count) done.push(`${label} · ${steps(count)}`);
-      kind = st.kind; label = st.label; count = 1;
+      if (count) done = done.some((r) => r.kind === kind) ? done.map((r) => (r.kind === kind ? { ...r, ms: r.ms + now - since } : r)) : [...done, { kind, ms: now - since }];
+      kind = st.kind; label = st.label; count = 1; since = now;
     } else count += 1;
   }
-  return { rows_done: done, cur_kind: kind, cur_label: label, cur_count: count };
+  return { rows_done: done, cur_kind: kind, cur_label: label, cur_count: count, cur_since: since };
 }
-// The line's body: the todos when there are any, else the stage rows; the running one is marked ›.
-// Stage rows keep the last few: a long turn swings between the same stages, so the older ones fold into one Earlier row.
-const FOLD = 4, STEPS = / · (\d+) steps?$/;
-export function lineRows(st, rows) {
+// The line's body: the todos when there are any, else the stage rows, the running one last and marked ›.
+// The running row shows whole minutes only, so the clock alone never changes the rows.
+export function lineRows(st, rows, now = Date.now()) {
   const todos = todoRows(st ?? start());
   if (todos.length) { const cur = currentRow(todos); return todos.map((r) => `${r.status === 'complete' ? '✓' : r.id === cur ? '›' : '○'} ${r.title}`); }
-  const done = (rows?.rows_done ?? []).map(defuse), old = done.length > FOLD ? done.slice(0, 1 - FOLD) : [];
-  const fold = old.length ? [`✓ Earlier · ${[...new Set(old.map((r) => r.replace(STEPS, '')))].join(', ')} · ${steps(old.reduce((a, r) => a + Number(r.match(STEPS)?.[1] ?? 0), 0))}`] : [];
-  return [...fold, ...done.slice(old.length).map((r) => `✓ ${r}`), ...(rows?.cur_count ? [`› ${defuse(rows.cur_label)} · ${steps(rows.cur_count)}`] : [])];
+  const done = (rows?.rows_done ?? []).filter((r) => r?.kind);
+  const cur = rows?.cur_count ? (done.find((r) => r.kind === rows.cur_kind)?.ms ?? 0) + now - (rows.cur_since ?? now) : 0;
+  return [...done.filter((r) => !rows?.cur_count || r.kind !== rows.cur_kind).map((r) => `✓ ${PAST[r.kind] ?? r.kind} · ${clock(r.ms)}`),
+    ...(rows?.cur_count ? [`› ${defuse(rows.cur_label)}${cur >= 60_000 ? ` · ${clock(cur)}` : ''}`] : [])];
+}
+// The agent's latest note for the status title: the first whole sentence of its newest text block.
+export function note(said) {
+  // No < > &: the plan title is plain text, so an escaped &lt; would show as it is.
+  const t = String(said ?? '').replace(/[*_`#<>&]/g, '').replace(/\s+/g, ' ').trim();
+  const m = t.match(/^(.+?[.!?])(\s|$)/);
+  if (!m) return '';
+  const s = defuse(m[1]).replace(/\.$/, '');
+  return s.length > 70 ? `${s.slice(0, 70).replace(/\s+\S*$/, '')}…` : s;
+}
+// What the collapsed status says the agent does now: thinking for a while, its recent note, else the running todo or stage.
+export const NOTE_MS = 180_000, THINK_MS = 20_000;
+export function headline(st, rows, { said = '', saidAgoMs = Infinity, thinkMs = 0 } = {}) {
+  if (thinkMs >= THINK_MS) return 'Thinking';
+  const n = saidAgoMs < NOTE_MS ? note(said) : '';
+  if (n) return n;
+  const todos = todoRows(st ?? start()), cur = todos.find((r) => r.id === currentRow(todos));
+  if (cur) return cur.status === 'complete' ? 'Finishing up' : cur.title;
+  return rows?.cur_count ? defuse(rows.cur_label) : null;
 }
 // "step 5 of 6" while the agent has a todo list, for the status title; else nothing.
 export function progress(st) {

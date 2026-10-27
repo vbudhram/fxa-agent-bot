@@ -8,7 +8,7 @@ export default {
     { advance: 'setup' },
     { B: 'nice, curious what it finds' },
     { pause: 2 }, // the move waits STATUS_MOVE_MS after the status opened
-    { advance: 'turn', wait: 'turn_end', expect: { calls: { method: 'chat.delete', n: 1 }, postCount: { match: /Getting ready|Working for|Worked for/, n: 1 }, text: /Worked for .*Fake turn 1/s } },
+    { advance: 'turn', wait: 'turn_end', expect: { calls: { method: 'chat.delete', n: 1 }, postCount: { match: /Getting ready|for A|Worked for/, n: 1 }, text: /Worked for .*Fake turn 1/s } },
   ],
   judge: 'The live status and then the answer sit below B\'s reply, and the thread holds one status, not two.',
 };

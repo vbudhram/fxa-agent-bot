@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { start, reduce, todoRows, currentRow, facts, summary, todoLine, openTodoLine, advanceRows, lineRows, progress, lostContact, LOST_MS, GIVE_UP_MS, MAX_ROWS, lastNote } from '../src/live.js';
+import { start, reduce, todoRows, currentRow, facts, summary, todoLine, openTodoLine, advanceRows, lineRows, progress, note, headline, clock, NOTE_MS, THINK_MS, lostContact, LOST_MS, GIVE_UP_MS, MAX_ROWS, lastNote } from '../src/live.js';
 
 const feed = (evs) => evs.reduce(reduce, start());
 const todos = (...s) => ({ type: 'todos', items: s.map(([content, status, active]) => ({ content, status, active })) });
@@ -93,21 +93,38 @@ test('a turn that ends with work left lists its todos, ticked and open', () => {
   assert.equal(openTodoLine(start()), null);
 });
 
-test('the status line shows stage rows, not raw commands', () => {
-  const left = { rows_done: ['Exploring the code · 5 steps'], cur_kind: 'verify', cur_label: 'Verifying', cur_count: 1 };
-  const r = advanceRows(left, ['Running npx jest pushbox', 'Running node x.js', 'Editing index.ts', '↳ Running git diff']);
-  assert.deepEqual(lineRows(start(), r), ['✓ Exploring the code · 5 steps', '✓ Verifying · 3 steps', '› Making changes · 2 steps']);
-  assert.deepEqual(lineRows(start(), advanceRows({}, ['Running node x.js'])), ['› Exploring the code · 1 step']);
+test('the status line shows one row per stage with its time, the running one last', () => {
+  const t = 1_000_000;
+  let r = advanceRows({}, ['Reading a.ts', 'Searching for x'], t);
+  r = advanceRows(r, ['Editing a.ts'], t + 70_000);
+  r = advanceRows(r, ['Running npx jest a'], t + 95_000);
+  r = advanceRows(r, ['Reading b.ts'], t + 125_000);
+  assert.deepEqual(lineRows(start(), r, t + 130_000), ['✓ Made the change · 25s', '✓ Verified · 30s', '› Exploring the code · 1m']);
+  // under a minute the running row has no time, so the clock alone never changes the rows
+  assert.deepEqual(lineRows(start(), advanceRows({}, ['Running node x.js'], t), t + 59_000), ['› Exploring the code']);
+  // a record from before this layout still renders
+  assert.deepEqual(lineRows(start(), { rows_done: ['Exploring the code · 5 steps'], cur_kind: 'verify', cur_label: 'Verifying', cur_count: 1 }, t), ['› Verifying']);
   const todos = reduce(start(), { type: 'todos', items: [{ content: 'a', status: 'completed' }, { content: 'b', status: 'in_progress' }, { content: 'c', status: 'pending' }] });
   assert.deepEqual(lineRows(todos, r), ['✓ a', '› b', '○ c']);
   assert.equal(progress(todos), 'step 2 of 3');
   assert.equal(progress(start()), null);
 });
 
-test('a long turn keeps its last three stage rows and folds the older ones into one Earlier row', () => {
-  const done = ['Exploring the code · 1 step', 'Reviewing · 8 steps', 'Exploring the code · 1 step', 'Making changes · 1 step', 'Verifying · 2 steps', 'Reviewing · 7 steps'];
-  assert.deepEqual(lineRows(start(), { rows_done: done, cur_label: 'Exploring the code', cur_count: 2 }), [
-    '✓ Earlier · Exploring the code, Reviewing · 10 steps', '✓ Making changes · 1 step', '✓ Verifying · 2 steps', '✓ Reviewing · 7 steps', '› Exploring the code · 2 steps']);
+test('the title says what the agent does: thinking, its recent note, else the todo or stage', () => {
+  const rows = advanceRows({}, ['Running npx jest a'], 0);
+  assert.equal(note('Found it: the title is **left** aligned. Now I center it.'), 'Found it: the title is left aligned');
+  assert.equal(note('Still writing this sent'), '');
+  assert.equal(note('Each <li> has py-2 & no test.'), 'Each li has py-2 no test');
+  assert.ok(note(`${'word '.repeat(40)}end.`).length <= 71);
+  assert.equal(headline(start(), rows, { said: 'Running the unit tests.', saidAgoMs: 1000 }), 'Running the unit tests');
+  assert.equal(headline(start(), rows, { said: 'Running the unit tests.', saidAgoMs: NOTE_MS }), 'Verifying');
+  assert.equal(headline(start(), rows, { said: 'Running the unit tests.', saidAgoMs: 1000, thinkMs: THINK_MS }), 'Thinking');
+  assert.equal(headline(start(), rows, { thinkMs: THINK_MS - 1 }), 'Verifying');
+  const todos = reduce(start(), { type: 'todos', items: [{ content: 'a', status: 'completed' }, { content: 'b', status: 'in_progress', active: 'Doing b' }] });
+  assert.equal(headline(todos, rows), 'Doing b');
+  assert.equal(headline(reduce(start(), { type: 'todos', items: [{ content: 'a', status: 'completed' }] }), rows), 'Finishing up');
+  assert.equal(headline(start(), {}), null);
+  assert.equal(clock(59_400), '59s'); assert.equal(clock(195_000), '3m');
 });
 
 test('lost contact: one warning, a recovery, one give-up, and quiet for a short blip', () => {
