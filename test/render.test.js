@@ -388,6 +388,8 @@ test('errorsToDm: new once, reopened once per resolve, never the dev bot', () =>
   assert.deepEqual(errorsToDm([re('2026-10-07T05:59:25Z')], { b: '2026-10-07T05:11:03Z' }), []);
   // The dev bot's errors show on the dashboard, but are not DMed.
   assert.deepEqual(errorsToDm([row('c', '2026-10-07T05:00:00Z', { source: 'bot-dev' })], {}), []);
+  // A gateway answer withheld by policy is not DMed; another gateway error is.
+  assert.deepEqual(errorsToDm([row('w', '2026-10-07T05:00:00Z', { source: 'gateway', kind: 'withheld' }), row('o', '2026-10-07T05:00:00Z', { source: 'gateway', kind: 'oauth' })], {}).map((e) => e.sig), ['o']);
   // A resolved signature: nothing.
   assert.deepEqual(errorsToDm([row('d', '2026-10-01T00:00:00Z', { status: 'resolved', resolved })], {}), []);
 });

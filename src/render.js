@@ -486,7 +486,9 @@ export function planLines(plan) {
 
 // The rows to DM: a new signature once, a reopened one once after each resolve, never the
 // dev bot's. seen: sig → the last occurrence already looked at; null on the first look.
+// A gateway answer withheld by policy is the policy working: the Errors page keeps it, the operator gets no DM.
 export const errorsToDm = (rows, seen) => !seen ? [] : rows.filter((e) => e.status !== 'resolved' && e.source !== 'bot-dev'
+  && !(e.source === 'gateway' && e.kind === 'withheld')
   && (!seen[e.sig] || (e.status === 'reopened' && seen[e.sig] < e.resolved?.at)));
 
 // 6: new or reopened error signatures, as one DM for the operator.
