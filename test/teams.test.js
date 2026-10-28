@@ -94,3 +94,21 @@ test('a record team carries its admins and PR users to isAdmin and mayOpenPr', a
   assert.equal(isAdmin('ex', 'U0ADMIN1', env), true);
   assert.deepEqual(['U0PRUSE1', 'U0ADMIN1', 'U0OTHER1', 'nope'].map((u) => mayOpenPr('ex', u, env)), [true, true, false, false]);
 });
+
+test('an fxa record drives its admins and PR list, PROFILE_ADMINS only fills in with no record, and fxa stays open', async () => {
+  const { isAdmin, mayOpenPr } = await import('../src/profile.js');
+  const { sessionTeam } = await import('../src/access.js');
+  const old = { ...env, PROFILE_ADMINS: 'fxa:UOTHER01', PROFILE_PR_USERS: 'fxa:UOTHER01' };
+  write({ fxa: { label: 'FxA', status: 'draft', admins: ['UADMINX1'], pr_users: ['UPRUSER1'] } });
+  // A pending start has no profile, so it resolves to fxa.
+  const team = sessionTeam({}, () => null);
+  assert.equal(team, 'fxa');
+  assert.equal(isAdmin(team, 'UADMINX1', old), true);
+  assert.equal(isAdmin(team, 'UOTHER01', old), false, 'the env admin is ignored when the record exists');
+  assert.deepEqual(['UPRUSER1', 'UADMINX1', 'UOTHER01'].map((u) => mayOpenPr(team, u, old)), [true, true, false]);
+  assert.equal(mayStart(team, 'UOTHER01', old), true, 'fxa starts for everyone, also as a draft record');
+  write({});
+  assert.equal(isAdmin('fxa', 'UOTHER01', old), true, 'with no fxa record the env admin counts');
+  assert.equal(isAdmin('fxa', 'UADMINX1', old), false);
+  assert.equal(mayOpenPr('fxa', 'UPRUSER1', old), false);
+});
