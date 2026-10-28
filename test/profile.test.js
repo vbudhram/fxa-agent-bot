@@ -41,7 +41,7 @@ test('PROFILE_OPEN: an open team needs no PROFILE_USERS entry', () => {
 });
 
 test('a refused profile keeps the text, for a !stack pick that overrides it', () => {
-  const r2 = resolveProfile({ text: 'MNTOR-12 fix it', channel: 'C1', user: 'U9', env: { PROFILE_JIRA: 'MNTOR:monitor' } });
+  const r2 = resolveProfile({ text: 'MNTOR-12 fix it', channel: 'C1', user: 'U9', env: { FXA_TEAMS_INDEX: '/nonexistent/index.json', PROFILE_JIRA: 'MNTOR:monitor' } });
   assert.match(r2.error, /can't start/);
   assert.equal(r2.text, 'MNTOR-12 fix it');
 });
