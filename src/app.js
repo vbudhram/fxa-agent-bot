@@ -18,7 +18,8 @@ import { ROUTINES_ENV, TICK_MS, NO_CHANNEL, channelRefusal, inFlightGuard, muted
 import { ingest } from './db.js';
 import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
 import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateAllows, loadMembers, maySteer, mayTap, SHIP_ACTIONS, PR_ACTIONS } from './access.js';
-import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, LINE_BREAK, laterMessage, slackLinks, threadFile } from './render.js';
+import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, LINE_BREAK, laterMessage, slackLinks, threadFile,
+  emptyTurn, EMPTY_RETRY, EMPTY_FALLBACK } from './render.js';
 import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
 import { randomBytes } from 'node:crypto';
@@ -1475,7 +1476,7 @@ const finishTurn = (key, msg, ev) => serial(key, async function finishTurn() {
     const summary = withLive(key, turnSummary(s, 'Done'));
     // The rendered answer and, for a question, its options lists; the buttons follow.
     const body = (msg.blocks ?? []).filter((b) => b.type !== 'actions' && b.block_id !== 'answer_hint');
-    if (!body.length) body.push(md(ev.text || 'Over to you.'));
+    if (!body.length) body.push(md(ev.text || EMPTY_FALLBACK));
     try {
       // Rewrite the finished status: summary, answer, and this turn's buttons.
       const lt = liveTurn.get(key);
@@ -2255,6 +2256,13 @@ async function pollOne(key) {
       if ((ev.type === 'pr' || ev.type === 'pushed') && fresh(key)?.status_ts) sessions.patch(key, { wrap_done: ev.type });
       // The wrap-up's result: its flag is done, even when it ended between two polls and none saw 'wrapping'.
       if (ev.type === 'pr' || ev.type === 'pushed') wrapping.delete(key);
+      // A turn that ended with no message gets one automatic follow-up instead of a filler reply; a second empty turn
+      // shows EMPTY_FALLBACK. Any turn with a message clears the mark, so a later empty turn gets its own follow-up.
+      if (emptyTurn(ev)) {
+        const retried = fresh(key)?.empty_retry;
+        sessions.patch(key, { empty_retry: retried ? null : true });
+        if (!retried && await ctl.steer(key, EMPTY_RETRY).then(() => true, (e) => { console.error('steer', key, e.stderr || e.message); return false; })) continue;
+      } else if (ev.type === 'turn_end' && fresh(key)?.empty_retry) sessions.patch(key, { empty_retry: null });
       const msg = render(s.key, { ...ev, desktop: Boolean(process.env.DESKTOP_GATEWAY), read_only: Boolean(s.read_only) });
       // A session resumed by Open PR or Push, or an automatic round, ships after the turn closes.
       const ship = () => {

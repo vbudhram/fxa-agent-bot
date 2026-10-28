@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { threadStarter, endWord, render, operatorProblem, operatorNext, summaryLine, closestCommand, watchUrl, threadLine, maskSecrets, maskUpload, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, slackLinks, threadFile, fromOther, othersLines, laterMessage, rateLimitLine } from '../src/render.js';
+import { threadStarter, endWord, render, operatorProblem, operatorNext, summaryLine, closestCommand, watchUrl, threadLine, maskSecrets, maskUpload, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, slackLinks, threadFile, emptyTurn, EMPTY_FALLBACK, fromOther, othersLines, laterMessage, rateLimitLine } from '../src/render.js';
 
 test('operator problems are named, other errors are not', () => {
   assert.equal(operatorProblem('ERROR: (gcloud.compute.ssh) Reauthentication failed. cannot prompt').kind, 'gcloud');
@@ -234,7 +234,17 @@ test('a long reply shows its first paragraphs, and Show more holds the rest', as
 
 test('a turn that only says no response is requested posts nothing', () => {
   assert.equal(render('agent-x', { type: 'turn_end', status: 'needs-input', text: 'No response requested.' }), null);
-  assert.equal(render('agent-x', { type: 'turn_end', status: 'needs-input', text: '' }).blocks[0].text, 'Over to you.');
+  assert.equal(render('agent-x', { type: 'turn_end', status: 'needs-input', text: '' }).blocks[0].text, EMPTY_FALLBACK);
+});
+
+test('an empty turn is one with only its status line: no text and no questions, at a turn end', () => {
+  assert.equal(emptyTurn({ type: 'turn_end', status: 'needs-input', text: '  ' }), true);
+  assert.equal(emptyTurn({ type: 'turn_end', status: 'ready' }), true);
+  assert.equal(emptyTurn({ type: 'turn_end', status: 'needs-input', text: 'Which option?' }), false);
+  assert.equal(emptyTurn({ type: 'turn_end', status: 'needs-input', text: '', questions: [{ q: 'A or B?' }] }), false);
+  assert.equal(emptyTurn({ type: 'turn_end', status: 'working', text: '' }), false);
+  assert.equal(emptyTurn({ type: 'step', text: '' }), false);
+  assert.doesNotMatch(EMPTY_FALLBACK, /Over to you|All set/);
 });
 
 test('Copilot gets one short note, and its comments go to the agent fenced', async () => {

@@ -1,0 +1,4 @@
+{"sessions": [{"turns": [
+  {"steps": ["Reading packages/fxa-content-server/server/lib/500.js"], "diff": [], "end": {"status": "needs-input", "text": ""}},
+  {"steps": [], "diff": [], "end": {"status": "needs-input", "text": "Two questions before I change anything:\n1. Move the 404 page to fxa-settings with Fluent?\n2. Should I leave the workflow file to you?"}}
+]}]}

@@ -1,0 +1,4 @@
+{"sessions": [{"turns": [
+  {"steps": ["Reading a file"], "diff": [], "end": {"status": "needs-input", "text": ""}},
+  {"steps": [], "diff": [], "end": {"status": "needs-input", "text": ""}}
+]}]}
