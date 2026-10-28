@@ -2459,7 +2459,7 @@ ownerAction('rebase_pr', async (s, client, action, body) => {
   await startRound(prView(fresh(s.key), repo), `${repo ? `This is about ${repo} only.\n\n` : ''}${REBASE_PROMPT}`, false);
 });
 
-// A new Copilot review with comments, or CI failing for the change, starts a round
+// A new Copilot or CodeRabbit review with comments, or CI failing for the change, starts a round
 // by itself: the agent fixes what is simple and valid and asks about the rest, and
 // the host updates the PR when the round changed files and asked nothing
 // (shipAfterResume). After AUTO_MAX rounds on a PR, the owner taps to run another.
@@ -2470,7 +2470,8 @@ async function autoRound(s, prev, cur) {
   // Busy (a turn, a wrap-up, a boot): try again on the next look; nothing is marked seen.
   if (s.status_ts || busy.has(s.key) || ['starting', 'wrapping', 'queued'].includes(s.state)) return;
   if ([...pending.values()].some((p) => p.channel === s.channel && p.thread_ts === s.thread_ts)) return;
-  const cp = (cur.reviews ?? []).find((r) => isCopilot(r.login));
+  // The latest review bot review: a newer one from either bot starts the next round.
+  const cp = (cur.reviews ?? []).filter((r) => isCopilot(r.login) && r.at).sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0];
   // A failure is known by its failing links, not by the CI state: an infra failure first must not hide it.
   // Only once every check is done, so one CI run starts one round.
   const ciKey = cur.ci === 'fail' && !cur.running && cur.links?.length ? [...cur.links].sort().join(' ') : '';
@@ -2478,7 +2479,7 @@ async function autoRound(s, prev, cur) {
   if (cp?.at && cp.at !== s.copilot_seen_at) {
     seen = { copilot_seen_at: cp.at };
     // A review from before the last push is about code that is gone.
-    const comments = Date.parse(cp.at) > s.pr_pushed_at ? await ctl.copilotComments(s.key, s.repo) : [];
+    const comments = Date.parse(cp.at) > s.pr_pushed_at ? (await ctl.copilotComments(s.key, s.repo)).filter((c) => !c.at || Date.parse(c.at) > s.pr_pushed_at) : [];
     if (comments.length) job = { note: (why) => copilotNote(comments, why), text: copilotRound(comments, randomBytes(6).toString('hex')) };
   } else if (ciKey && ciKey !== s.ci_seen) {
     seen = { ci_seen: ciKey };
