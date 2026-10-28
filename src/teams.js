@@ -21,6 +21,7 @@ function clean(index) {
     teams[name] = { label: typeof t.label === 'string' ? t.label : name, status: t.status === 'active' ? 'active' : String(t.status ?? 'draft'),
       open: a.open === true, users: only(a.users, ID.user), channels: only(a.channels, ID.channel),
       admins: only(t.admins, ID.user), prUsers: only(t.pr_users, ID.user),
+      reviewRounds: Number.isInteger(t.review_rounds) && t.review_rounds >= 0 && t.review_rounds <= 5 ? t.review_rounds : 2,
       // A team that takes a project's secret tickets does not claim the project: its key still starts the public team's session.
       prefixes: [...only(a.jira_prefixes, ID.prefix), ...(t.secret !== true && ID.prefix.test(t.jira ?? '') ? [t.jira] : [])] };
   }
@@ -43,4 +44,6 @@ export function teamIndex(env = process.env, fs = { statSync, readFileSync }) {
 }
 
 // The channels that record teams bind: the bot answers there as in ALLOWED_CHANNELS.
+// The automatic fix rounds a team's PR gets: pr.review_rounds, 2 for a team with no record.
+export const reviewRounds = (profile, env = process.env) => teamIndex(env)[profile || 'fxa']?.reviewRounds ?? 2;
 export const teamChannels = (env = process.env) => Object.values(teamIndex(env)).filter((t) => t.status === 'active').flatMap((t) => t.channels);

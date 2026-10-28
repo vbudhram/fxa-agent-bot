@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, utimesSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { teamIndex, teamChannels } from '../src/teams.js';
+import { teamIndex, teamChannels, reviewRounds } from '../src/teams.js';
 import { mayStart, resolveProfile } from '../src/profile.js';
 import { teamsFor } from '../src/stack.js';
 
@@ -111,4 +111,9 @@ test('an fxa record drives its admins and PR list, PROFILE_ADMINS only fills in 
   assert.equal(isAdmin('fxa', 'UOTHER01', old), true, 'with no fxa record the env admin counts');
   assert.equal(isAdmin('fxa', 'UADMINX1', old), false);
   assert.equal(mayOpenPr('fxa', 'UPRUSER1', old), false);
+});
+
+test("a team's automatic review rounds come from its record, 2 when unset or out of range", () => {
+  write({ rusty: rusty({ review_rounds: 4 }), zero: rusty({ review_rounds: 0 }), bad: rusty({ review_rounds: 9 }), plain: rusty() });
+  assert.deepEqual(['rusty', 'zero', 'bad', 'plain', 'norecord'].map((p) => reviewRounds(p, env)), [4, 0, 2, 2, 2]);
 });

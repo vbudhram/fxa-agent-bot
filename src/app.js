@@ -13,7 +13,7 @@ import { statusMessage } from './status.js';
 import { pollEvery, reachable, missed, replayMark, replayable } from './poll.js';
 import * as unfurl from './unfurl.js';
 import { resolveProfile, mayStart, isAdmin, mayOpenPr } from './profile.js';
-import { teamChannels } from './teams.js';
+import { teamChannels, reviewRounds } from './teams.js';
 import { ROUTINES_ENV, TICK_MS, NO_CHANNEL, channelRefusal, inFlightGuard, muted, mutedReply, pollChannels, pollUsers } from './routines.js';
 import { ingest } from './db.js';
 import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
@@ -2460,10 +2460,9 @@ ownerAction('rebase_pr', async (s, client, action, body) => {
 });
 
 // A new Copilot or CodeRabbit review with comments, or CI failing for the change, starts a round
-// by itself: the agent fixes what is simple and valid and asks about the rest, and
+// by itself: the agent fixes what is valid and asks about the rest, and
 // the host updates the PR when the round changed files and asked nothing
-// (shipAfterResume). After AUTO_MAX rounds on a PR, the owner taps to run another.
-const AUTO_MAX = 2;
+// (shipAfterResume). After the team's pr.review_rounds (2 by default), the owner taps to run another.
 async function autoRound(s, prev, cur) {
   // pr_pushed_at: a PR this bot pushed since rounds began, so older PRs' old reviews start nothing.
   if (!s || s.muted || s.pr_ended || !s.pr_pushed_at) return;
@@ -2488,7 +2487,8 @@ async function autoRound(s, prev, cur) {
   const pp = (fields) => sessions.patch(s.key, prPatch(fresh(s.key), s.repo, fields));
   if (!job) { if (seen) pp(seen); return; }
   // Ask, and count nothing, when an automatic round could mix with work the owner has in hand.
-  const why = (s.auto_rounds ?? 0) >= AUTO_MAX ? `I already ran ${AUTO_MAX} automatic rounds on this PR.`
+  const max = reviewRounds(s.profile);
+  const why = (s.auto_rounds ?? 0) >= max ? (max ? `I already ran ${max} automatic round${max === 1 ? '' : 's'} on this PR.` : 'This team runs no automatic rounds.')
     : (s.edited_at ?? 0) > s.pr_pushed_at ? 'Files changed since the last push, so I will fix it without pushing; you push with Update PR.'
     : ['stopped', 'failed'].includes(s.state) ? 'This session was stopped.' : '';
   pp(seen);
