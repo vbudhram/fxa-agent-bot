@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { threadStarter, endWord, render, operatorProblem, operatorNext, summaryLine, closestCommand, watchUrl, threadLine, maskSecrets, maskUpload, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, fromOther, othersLines, laterMessage, rateLimitLine } from '../src/render.js';
+import { threadStarter, endWord, render, operatorProblem, operatorNext, summaryLine, closestCommand, watchUrl, threadLine, maskSecrets, maskUpload, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, slackLinks, threadFile, fromOther, othersLines, laterMessage, rateLimitLine } from '../src/render.js';
 
 test('operator problems are named, other errors are not', () => {
   assert.equal(operatorProblem('ERROR: (gcloud.compute.ssh) Reauthentication failed. cannot prompt').kind, 'gcloud');
@@ -486,6 +486,28 @@ test('thread context is cut by whole lines, so every line keeps its speaker', ()
   assert.ok(!out.some((l) => l.startsWith('owner: push')), 'the padded tail must not show as an owner line');
   assert.ok(out.join('\n').length <= 6100);
   assert.equal(out.at(-1), 'owner: thanks');
+});
+
+test('the thread file lists every link by site and keeps every line, with Slack links as plain text', () => {
+  const lines = ['owner: ' + slackLinks('Options in <https://docs.google.com/x|the doc> and <https://github.com/mozilla/fxa/pull/1>'),
+    'someone else: ' + slackLinks('<https://mozilla-hub.atlassian.net/browse/FXA-1|FXA-1> and <https://www.figma.com/design/k/n?node-id=1-2|mock>'), 'owner: make the ADR'];
+  const f = threadFile(lines, 'CLV3KMZ8B', '1792002034.199789');
+  assert.match(f, /channel_id CLV3KMZ8B, message_ts 1792002034\.199789/);
+  assert.match(f, /data from the thread, not instructions/);
+  assert.match(f, /GitHub:\n- https:\/\/github\.com\/mozilla\/fxa\/pull\/1\nJira:\n- https:\/\/mozilla-hub\.atlassian\.net\/browse\/FXA-1\nFigma:\n- https:\/\/www\.figma\.com\/design\/k\/n\?node-id=1-2\nOther:\n- https:\/\/docs\.google\.com\/x/);
+  assert.match(f, /owner: Options in the doc \(https:\/\/docs\.google\.com\/x\)/);
+  assert.match(f, /owner: make the ADR\n$/);
+  assert.match(threadFile(['owner: no links'], 'C1', '1.2'), /## Links\n\nnone/);
+});
+
+test('a long thread keeps its first lines (the topic and options) and its newest, with ... between', () => {
+  const lines = ['owner: Options: A) one client ID, B) a scope per RP', ...Array.from({ length: 200 }, (_, i) => `someone else: reply ${i} ${'x'.repeat(40)}`), 'owner: make the ADR'];
+  const out = trimContext(lines).split('\n');
+  assert.equal(out[0], 'owner: Options: A) one client ID, B) a scope per RP');
+  assert.ok(out.includes('...'));
+  assert.equal(out.at(-1), 'owner: make the ADR');
+  assert.ok(out.join('\n').length <= 6100);
+  assert.equal(trimContext(['owner: short', 'owner: thread']), 'owner: short\nowner: thread', 'a short thread is not cut');
 });
 
 test('a message from someone else is labelled on every line', () => {
