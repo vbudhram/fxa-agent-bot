@@ -1094,8 +1094,7 @@ async function bang(s, text, m, client) {
   const cmd = text.slice(1).split(/\s+/)[0].toLowerCase();
   const note = (t) => client.chat.postEphemeral({ channel: m.channel, thread_ts: m.thread_ts, user: m.user, text: t }).catch((e) => console.error('note', e.data?.error ?? e.message));
   if (!allowed(m.channel, m.user)) { await note("Sorry, you're not on the list of people who can use the agent here."); return; }
-  // Interrupt and mute go as far as steering does: anyone allowed, or only the
-  // owner under STEER=owner.
+  // Mute goes as far as steering does: anyone allowed, or only the owner under STEER=owner.
   const steerOnly = () => { if (s && !boss(s, m.user) && (!STEER_ANYONE || !onTeam(s, m.user))) { note(`Only <@${s.owner}> can do that in this session.`); return true; } return false; };
   const ownerOnly = () => { if (s && !boss(s, m.user)) { note(`Only <@${s.owner}> can do that in this session.`); return true; } return false; };
   const prOnly = () => { if (s && !prOk(s, m.user)) { note(PR_REFUSAL); return true; } return false; };
@@ -1163,7 +1162,13 @@ async function bang(s, text, m, client) {
       return 'Paused. Everything is saved and the sandbox is freed. Reply here to pick it up again.';
     });
   } else if (cmd === 'interrupt') {
-    if (steerOnly()) return;
+    // Anyone allowed here may stop a turn: it reads and changes nothing, and the work is kept.
+    // While the sandbox boots there is no turn yet: the first one stops as soon as it starts.
+    if (['queued', 'starting'].includes(fresh(s.key)?.state)) {
+      sessions.patch(s.key, { interrupt_pending: true });
+      await say(s, 'I will stop as soon as the sandbox is ready, before the agent does any work. Tell me what to do instead.');
+      return;
+    }
     const out = await ctl.interrupt(s.key).catch(() => '');
     if (!out.includes('interrupted')) { await note('Nothing is running right now.'); return; }
     sessions.patch(s.key, { interrupted: true, then_wrap: null });
@@ -1721,7 +1726,7 @@ app.action('more', async ({ ack, body, action, client }) => {
 app.action('interrupt', async ({ ack, body, action, client }) => {
   await ack();
   const s = fresh(action.value);
-  if (!s || !allowed(s.channel, body.user.id) || (!boss(s, body.user.id) && (!STEER_ANYONE || !onTeam(s, body.user.id)))) return;
+  if (!s || s.routine || !allowed(s.channel, body.user.id)) return;
   await interrupt(s, client, body).catch((e) => fail(client, s, e));
 });
 async function interrupt(s, client, body) {
@@ -2290,6 +2295,15 @@ async function pollOne(key) {
     if (fresh(key).routine && !fresh(key).routine.ended && ['stopped', 'failed', 'paused'].includes(state))
       await endRoutine(key, state === 'stopped' ? { state: 'stopped' } : { state: 'failed', reason: `the session ${state} before it had a result` });
     if (fresh(key).state === 'active' && fresh(key).held_files?.length) deliverHeld(key).catch((e) => console.error('held', key, e.message));
+    // A !interrupt sent while the sandbox booted: stop the first turn now that it runs.
+    if (fresh(key).interrupt_pending && state !== 'starting' && state !== 'queued') {
+      sessions.patch(key, { interrupt_pending: null });
+      const out = state === 'active' ? await ctl.interrupt(key).catch((e) => { console.error('interrupt', key, e.stderr || e.message); return ''; }) : '';
+      if (out.includes('interrupted')) {
+        sessions.patch(key, { interrupted: true, then_wrap: null });
+        await say(fresh(key), 'Interrupted. The work so far is kept. Tell me what to do instead.').catch(() => {});
+      }
+    }
     // Stopped or paused while this poll ran: its state is stale, so it must not
     // open a watch or a new status line that nothing would close.
     if (DONE.includes(fresh(key).state) && !DONE.includes(state)) { stopWatch(key); return; }
