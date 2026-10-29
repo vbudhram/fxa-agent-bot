@@ -970,7 +970,8 @@ async function stackCmd(s, text, m, client, note) {
   if (p.error) { await note(p.error); return; }
   if (s && LIVE.includes(fresh(s.key)?.state)) { await note('This thread has a running session. Use a new thread, or `!stop` first: the next session here then starts with your pick.'); return; }
   // Someone else's pick would start a session that replaces the owner's, as their tag must not (onMention).
-  const refusal = pickerRefusal({ user: m.user, cur: s && fresh(s.key) });
+  // A team admin may check out a PR here: the new session keeps the thread's owner (checkout).
+  const refusal = p.sub === 'checkout' && adminOf(s && fresh(s.key), m.user) ? null : pickerRefusal({ user: m.user, cur: s && fresh(s.key) });
   if (refusal) { await note(refusal); return; }
   const teams = teamsFor(await ctl.profileList().catch((e) => { console.error('profile list', e.message); return []; }), m.user);
   if (!teams.length) { await note('I could not read the teams. Try again in a moment.'); return; }
@@ -1046,12 +1047,14 @@ async function checkout(s, p, text, m, client, note, teams) {
   const rest = text.replace(/^!stack\s+checkout\s+\S+/i, '').trim();
   const prompt = rest || `Continue ${p.url}. Read the PR and its review, and say what is left to do.`;
   const found = await ctl.findPr(p.url).catch((e) => { console.error('find-pr', e.message); return null; });
+  // An admin's checkout in someone else's thread keeps that owner; an admin's move keeps the PR's owner.
+  const cur = s && fresh(s.key), keep = cur && boss(cur, m.user) ? cur.owner : undefined;
   if (found) {
     if (found.live) { await note(`That PR's session is still running in another thread. Stop it there first, then try again.`); return; }
-    if (found.owner !== m.user) { await note(`That PR is <@${found.owner}>'s work. Only they can move it here.`); return; }
     const old = sessions.all().find((x) => x.key === found.key);
+    if (found.owner !== m.user && !adminOf(old, m.user)) { await note(`That PR is <@${found.owner}>'s work. Only they can move it here.`); return; }
     const key = sessions.newKey();
-    pending.set(key, { prompt, request: prompt, owner: m.user, team: old?.team ?? s?.team, channel: m.channel, thread_ts: m.thread_ts,
+    pending.set(key, { prompt, request: prompt, owner: keep ?? found.owner, team: old?.team ?? s?.team, channel: m.channel, thread_ts: m.thread_ts,
       resume_from: found.key, moved_from: found.key, runtime: old?.runtime || 'claude', resumed_profile: found.profile || undefined });
     await say({ channel: m.channel, thread_ts: m.thread_ts }, `Moving ${p.url} here: its branch, its work so far, and its PR card. The old thread stops following it.`);
     const link = await client.chat.getPermalink({ channel: m.channel, message_ts: m.thread_ts }).then((r) => r.permalink, () => null);
@@ -1071,7 +1074,7 @@ async function checkout(s, p, text, m, client, note, teams) {
   const slug = team.repos.find((r) => r.slug.toLowerCase() === p.slug.toLowerCase()).slug;
   const repos = (team.defaults ?? []).length ? [...new Set([...(team.defaults ?? []), slug])] : undefined;
   const key = sessions.newKey();
-  pending.set(key, { prompt, request: prompt, owner: m.user, team: s?.team, channel: m.channel, thread_ts: m.thread_ts,
+  pending.set(key, { prompt, request: prompt, owner: keep ?? m.user, team: s?.team, channel: m.channel, thread_ts: m.thread_ts,
     profile: team.profile, repos, checkout: p.url, runtime: 'claude' });
   await say({ channel: m.channel, thread_ts: m.thread_ts }, `Continuing ${p.url} here, on its own branch. If someone else made it, I push to it only after they comment \`push ok\` on the PR.`);
   await begin(key, client);
