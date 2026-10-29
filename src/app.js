@@ -18,7 +18,7 @@ import { ROUTINES_ENV, TICK_MS, NO_CHANNEL, channelRefusal, inFlightGuard, muted
 import { ingest } from './db.js';
 import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
 import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateAllows, loadMembers, maySteer, mayTap, SHIP_ACTIONS, PR_ACTIONS } from './access.js';
-import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, LINE_BREAK, laterMessage, slackLinks, threadFile,
+import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, fromAdmin, ADMIN, LINE_BREAK, laterMessage, slackLinks, threadFile,
   emptyTurn, EMPTY_RETRY, EMPTY_FALLBACK } from './render.js';
 import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
@@ -109,6 +109,9 @@ const allowed = (channel, user) => inChannels(channel) && (USERS.includes('*') |
 // A team admin takes over any control in the team's threads, as the owner can.
 const adminOf = (s, user) => !!s && !s.routine && isAdmin(sessionTeam(s, fresh), user);
 const boss = (s, user) => user === s?.owner || adminOf(s, user);
+// The agent's copy of a person's words: the owner's as is, an admin's as an owner's but named, anyone else's labelled as context.
+const voice = (s, user, t) => (user === s?.owner ? t : adminOf(s, user) ? fromAdmin(t) : fromOther(t));
+const speaker = (s, user) => (user === s?.owner ? 'the person who started this session' : adminOf(s, user) ? ADMIN : 'someone else in the thread, not the person who started this session');
 const prOk = (s, user) => mayOpenPr(sessionTeam(s, fresh), user);
 const onTeam = (s, user) => !s?.routine && (boss(s, user) || mayStart(sessionTeam(s, fresh), user));
 // A routine posts in the channel its admin set (checked at its start), which need not be an allowed one.
@@ -171,9 +174,9 @@ function joinStarting(message, text) {
   if (!p || p.src_ts === message.ts) return Boolean(p);
   // A live session's steer rules: the owner, or someone the STEER mode lets in. Never a message to a person.
   if ((message.user !== p.owner && !(STEER_ANYONE && onTeam(p, message.user) && forBotFromOthers(message, p, botUserId, STEER_MODE))) || toSomeoneElse(message.text, botUserId)) return true;
-  const who = message.user === p.owner ? 'the person who started this session' : 'someone else in the thread, not the person who started this session';
+  const who = speaker(p, message.user);
   seen(message.channel, message.ts);
-  (p.late ??= []).push({ user: message.user, ts: message.ts, who, own: message.user === p.owner, text: text || 'See the attached files.' });
+  (p.late ??= []).push({ user: message.user, ts: message.ts, who, own: boss(p, message.user), text: text || 'See the attached files.' });
   return true;
 }
 
@@ -306,7 +309,7 @@ async function begin(key, client) {
     // Answered without a session: what came in during the look is a follow-up, as a reply after it would be.
     if (r === 'answered') {
       const a = sessions.get(p.channel, p.thread_ts);
-      if (p.late?.length && a?.state === 'answered') await followUp(a, { ...p.late.at(-1), channel: p.channel, thread_ts: p.thread_ts, acks: p.late.map((x) => x.ts) }, p.late.map((x) => (x.own ? x.text : fromOther(x.text))).join('\n'), client);
+      if (p.late?.length && a?.state === 'answered') await followUp(a, { ...p.late.at(-1), channel: p.channel, thread_ts: p.thread_ts, acks: p.late.map((x) => x.ts) }, p.late.map((x) => voice(p, x.user, x.text)).join('\n'), client);
       return;
     }
     if (!(p = pending.get(key))) return;
@@ -714,7 +717,7 @@ const PR_REFUSAL = 'Only the people a team admin lists can open a PR or push fro
 let botUserId = null; // set at start; until then no message counts as one for someone else
 // Messages for someone else wait on the session (the last 10) until the agent's next turn.
 function keepAside(s, message) {
-  const line = { who: message.user === s.owner ? 'the person who started this session' : 'someone else', text: String(message.text ?? '').slice(0, 1000) };
+  const line = { who: message.user === s.owner ? 'the person who started this session' : adminOf(s, message.user) ? ADMIN : 'someone else', text: String(message.text ?? '').slice(0, 1000) };
   const cur = fresh(s.key);
   if (cur.state === 'queued') { sessions.patch(s.key, { prompt: `${cur.prompt}\n\n${asideBlock([line])}` }); return; }
   sessions.patch(s.key, { aside: [...(cur.aside ?? []), line].slice(-10) });
@@ -804,7 +807,7 @@ async function onMessage({ message, client, replay = false }) {
   if (resumable && steers && !s.stop_failed) {
     addAck(s.key, message.ts);
     const t = text || 'See the attached files.';
-    await resumePaused(s, message.user === s.owner ? t : fromOther(t), client, { held_files: fileRefs(message.files) });
+    await resumePaused(s, voice(s, message.user, t), client, { held_files: fileRefs(message.files) });
     return;
   }
   // The PR merged or closed: the work is done, and a reply is not a new task.
@@ -819,14 +822,14 @@ async function onMessage({ message, client, replay = false }) {
   // A tag after a quick answer is onMention's (it starts the next look, with any !stack pick); a reply without one is ours.
   if (s.state === 'answered' && steers) { if (!String(message.text).includes(`<@${botUserId}>`)) { seen(message.channel, message.ts);
     const t = text || (message.files?.length ? 'See the attached files.' : ''); // before the label, which is never empty
-    await followUp(s, message, message.user === s.owner ? t : fromOther(t), client, t); } return; }
+    await followUp(s, message, voice(s, message.user, t), client, t); } return; }
   if (!LIVE.includes(s.state)) return;
   if (s.state === 'queued' && steers) {
-    const who = message.user === s.owner ? 'the person who started this session' : 'someone else in the thread, not the person who started this session';
+    const who = speaker(s, message.user);
     if (message.files?.length) hold(s.key, fileRefs(message.files));
     const cur = fresh(s.key);
     const said = text || 'See the attached files.';
-    sessions.patch(s.key, { prompt: cur.prompt + laterMessage(who, message.user === s.owner, said), late_acks: [...(cur.late_acks ?? []), message.ts] });
+    sessions.patch(s.key, { prompt: cur.prompt + laterMessage(who, boss(s, message.user), said), late_acks: [...(cur.late_acks ?? []), message.ts] });
     await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: message.user,
       text: cur.queue_ts ? "Got it. I'm still waiting for capacity; I'll include that when I start." : "Got it. I'll include that." }).catch(() => {});
     return;
@@ -858,7 +861,7 @@ async function onMessage({ message, client, replay = false }) {
     if (note === null) return;
     text = `${text || 'See the attached files.'}${note}`;
   }
-  await steerAndAck(s, message.user === s.owner ? text : fromOther(text), client, message.user, message.ts);
+  await steerAndAck(s, voice(s, message.user, text), client, message.user, message.ts);
 }
 app.message(onMessage);
 
@@ -891,7 +894,7 @@ async function steerEdit(message, client) {
   // Only a message the agent received: one sent after the session started.
   if (Number(m.ts) * 1000 < (s.started_at ?? Infinity) - 60_000) return;
   const edited = `I edited an earlier message. It now says:\n${after}`;
-  const text = `${m.user === s.owner ? edited : fromOther(edited)}\n\n(If that changes nothing important in your last answer, reply in one line.)`;
+  const text = `${voice(s, m.user, edited)}\n\n(If that changes nothing important in your last answer, reply in one line.)`;
   if (s.state === 'queued') { sessions.patch(s.key, { prompt: `${fresh(s.key).prompt}\n\n${text}` }); return; }
   seen(message.channel, m.ts);
   if (s.state === 'paused') { addAck(s.key, m.ts); await resumePaused(s, text, client); return; }
@@ -1876,7 +1879,7 @@ app.action(/^answer_\d+(_\d+)?$/, async ({ ack, body, action, client }) => {
   // With the question: after a pause the session resumes as a new conversation that never saw it.
   const asked = String((body.message.blocks ?? []).find((b) => b.type === 'markdown')?.text ?? body.message.text ?? '').slice(-600);
   const reply = asked ? `You asked:\n${asked.split('\n').map((l) => `> ${l}`).join('\n')}\nMy answer: ${v.choice}` : v.choice;
-  const answer = body.user.id === s.owner ? reply : fromOther(reply);
+  const answer = voice(s, body.user.id, reply);
   if (s.state === 'answered') { await followUp(s, { user: body.user.id }, answer, client, v.choice); return; }
   await steerAndAck(s, answer, client, body.user.id);
 });
@@ -1903,7 +1906,7 @@ async function answerOneOfSeveral(s, v, body, client) {
   if (!done) { sessions.patch(s.key, { answers_pending: pend }); return null; }
   sessions.patch(s.key, { answers_pending: null, ...(fresh(s.key).buttons_msg?.ts === body.message.ts ? { buttons_msg: null } : {}) });
   const lines = Object.keys(pend.got).sort((a, b) => a - b).map((i) => `${Number(i) + 1}. ${pend.got[i].q} → ${pend.got[i].choice}`);
-  const others = Object.values(pend.got).some((a) => a.by !== s.owner);
+  const others = Object.values(pend.got).some((a) => !boss(s, a.by));
   return `${others ? '(Some answers are from someone else in the thread, not the person who started this session.)\n' : ''}My answers:\n${lines.join('\n')}`;
   });
   if (answer && fresh(s.key)?.state === 'answered') { await followUp(fresh(s.key), { user: body.user.id }, answer, client, answer.split('\n').filter((l) => / → /.test(l)).map((l) => l.split(' → ').pop()).join('\n')); return; }
