@@ -18,7 +18,7 @@ import { ROUTINES_ENV, TICK_MS, NO_CHANNEL, channelRefusal, inFlightGuard, muted
 import { ingest } from './db.js';
 import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
 import { asksForJira, JIRA_YES, draftCard, filedCard, changedCard, editModal, readEdit } from './jira-draft.js';
-import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateAllows, loadMembers, maySteer, mayTap, SHIP_ACTIONS, PR_ACTIONS } from './access.js';
+import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateAllows, loadMembers, maySteer, mayTap, SHIP_ACTIONS, PR_ACTIONS, askedShip } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, fromAdmin, ADMIN, LINE_BREAK, laterMessage, slackLinks, threadFile,
   emptyTurn, EMPTY_RETRY, EMPTY_FALLBACK } from './render.js';
 import * as cards from './cards.js';
@@ -1373,6 +1373,7 @@ async function steerAndAck(s, text, client, userId, ts) {
   }
   text = takeAside(s.key) + text;
   if (userId && userId === s.owner) sessions.patch(s.key, { last_person_at: Date.now() }); // the owner wrote: a queued ship waits (shipAfterResume)
+  if (userId) sessions.patch(s.key, { asked_by: userId }); // whose request a 'ship: pr' turn answers (shipOnAsk)
   // A tapped answer or an edit after the session ended (paused, Stop, a failure):
   // continue it on a new runner, as a reply to a paused session does.
   const ended = fresh(s.key);
@@ -1865,6 +1866,19 @@ async function shipAfterResume(key, what, ev) {
   await (what === 'push' ? pushBranch(s, app.client, repo) : openPr(s, app.client, repo))
     .catch((e) => shipFailed(app.client, s, e, what === 'push' ? 'Push branch' : 'Open PR'));
 }
+// The person asked for the PR in words and the agent wrote 'ship: pr' (askedShip): the same path as !pr.
+async function shipOnAsk(key, a) {
+  const s = fresh(key);
+  if (!s) return;
+  if (a.refuse) {
+    await postMsg(key, { text: a.refuse === 'access' ? PR_REFUSAL : `Name the repo: \`!pr <repo>\`, one of ${(s.trees ?? []).map((t) => `\`${t.name}\``).join(', ')}.` });
+    return;
+  }
+  const what = prView(s, a.repo).pr_url ? 'Update PR' : 'Open PR';
+  const busy = await startWrap(s, app.client, what, s.asked_by ?? s.owner, undefined, a.repo);
+  if (busy) { await postMsg(key, { text: busy }); return; }
+  await openPr(s, app.client, a.repo).catch((e) => shipFailed(app.client, s, e, what));
+}
 const stopping = new Set();
 ownerAction('stop', async (s, client, action, body) => {
   // Checked before any await: two fast taps both passed a later check.
@@ -2293,7 +2307,9 @@ async function pollOne(key) {
       // A session resumed by Open PR or Push, or an automatic round, ships after the turn closes.
       const ship = () => {
         const tw = i === endAt && fresh(key)?.then_wrap;
-        if (tw) { sessions.patch(key, { then_wrap: null }); setTimeout(() => shipAfterResume(key, tw, ev).catch((e) => console.error('ship', key, e.message)), 1000); }
+        if (tw) { sessions.patch(key, { then_wrap: null }); setTimeout(() => shipAfterResume(key, tw, ev).catch((e) => console.error('ship', key, e.message)), 1000); return; }
+        const cur = i === endAt && fresh(key), a = cur && askedShip(ev, cur, prOk(cur, cur.asked_by ?? cur.owner));
+        if (a) setTimeout(() => shipOnAsk(key, a).catch((e) => console.error('ship', key, e.message)), 1000);
       };
       // A Show-nothing turn end (No response requested) still ends the turn: acks and a pending ship.
       if (!msg) { if (i === endAt) { await settle(fresh(key)); ship(); } continue; }

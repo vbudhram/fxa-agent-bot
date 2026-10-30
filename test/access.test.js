@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseGates, gateAllows, loadMembers, codeAllowed, codeRefusal, NO_GROUPS_READ, START_PRIVATE, PRIVATE_ONLY, sessionTeam, maySteer, mayTap } from '../src/access.js';
+import { parseGates, gateAllows, loadMembers, codeAllowed, codeRefusal, NO_GROUPS_READ, START_PRIVATE, PRIVATE_ONLY, sessionTeam, maySteer, mayTap, askedShip } from '../src/access.js';
 
 test('a gated channel allows only members of its source channel', () => {
   const gates = parseGates('CPUBLIC:CPRIVATE');
@@ -93,4 +93,16 @@ test('a team admin takes over every control, and a PR list limits Open PR and Pu
   assert.equal(mayTap('push_branch', 'U1', 'U1', true, true, true, false, false), false, 'Push, the owner not on the PR list');
   assert.equal(mayTap('pr_ready', 'U1', 'U2', true, true, true, false, false), true, 'Mark ready is not on the PR list rule');
   assert.equal(mayTap('open_pr', 'U1', 'U2', true, true, true, false, true), true, 'Open PR, a teammate on the PR list');
+});
+
+test('a turn that ends with ship: pr opens the PR for a person on the PR list, and only then', () => {
+  const ev = { type: 'turn_end', status: 'ready', ship: true }, s = { state: 'active' };
+  assert.deepEqual(askedShip(ev, s, true), { repo: undefined });
+  assert.deepEqual(askedShip(ev, { ...s, trees: [{ slug: 'o/a' }] }, true), { repo: 'o/a' });
+  assert.deepEqual(askedShip(ev, s, false), { refuse: 'access' });
+  assert.deepEqual(askedShip(ev, { ...s, trees: [{ slug: 'o/a' }, { slug: 'o/b' }] }, true), { refuse: 'repo' });
+  assert.equal(askedShip({ ...ev, ship: undefined }, s, true), null);
+  assert.equal(askedShip({ ...ev, status: 'needs-input' }, s, true), null);
+  assert.equal(askedShip({ type: 'question', ship: true }, s, true), null);
+  assert.equal(askedShip(ev, { state: 'paused' }, true), null);
 });

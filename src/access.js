@@ -16,6 +16,14 @@ export const PR_ACTIONS = ['open_pr', 'push_branch'];
 export const mayTap = (action, owner, user, allowedHere, steerAnyone, team, admin = false, prOk = true) =>
   PR_ACTIONS.includes(action) && !prOk ? false
     : SHIP_ACTIONS.includes(action) ? maySteer(owner, user, allowedHere, steerAnyone, team, admin) : allowedHere && (user === owner || admin);
+// The agent's 'ship: pr' line on a ready turn: the person asked for the PR. prOk: whether that person
+// is on the team's PR list. A stack of more than one repo needs !pr <repo>. Null: nothing to ship.
+export function askedShip(ev, s, prOk) {
+  if (ev?.type !== 'turn_end' || !ev.ship || ev.status !== 'ready' || s?.state !== 'active') return null;
+  if (!prOk) return { refuse: 'access' };
+  const trees = s.trees ?? [];
+  return trees.length > 1 ? { refuse: 'repo' } : { repo: trees[0]?.slug };
+}
 
 // Reads each source channel's members. A failed read keeps the last list.
 export async function loadMembers(client, gates, members) {
