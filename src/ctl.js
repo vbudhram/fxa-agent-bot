@@ -127,6 +127,23 @@ export const errorsPush = () => run(['errors', 'push', '--now'], { timeout: 120_
 export const copilotComments = async (key, repo) => { try { return JSON.parse((await run(['session', 'copilot-comments', key, ...(repo ? ['--repo', repo] : [])], { timeout: 60_000 })).trim() || '[]'); } catch { return []; } };
 export const reviewComments = async (key, login, repo) => { try { return JSON.parse((await run(['session', 'review-comments', key, login, ...(repo ? ['--repo', repo] : [])], { timeout: 60_000 })).trim() || '[]'); } catch { return []; } };
 export const createJira = async (key, repo) => (await run(['session', 'create-jira', key, ...(repo ? ['--repo', repo] : [])], { timeout: 60_000 })).trim();
+// Jira drafts. A person's edit goes on stdin, never in an argument; a refusal's reason is the last stderr line.
+function runIn(args, input, timeout = 60_000) {
+  return new Promise((resolve, reject) => {
+    const c = execFile(CTL, ['--backend', 'gce', ...args], { timeout, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) reject(Object.assign(err, { stdout, stderr }));
+      else resolve(stdout);
+    });
+    c.stdin.end(input);
+  });
+}
+export const jiraDraft = async (key, edit) => JSON.parse(edit ? await runIn(['session', 'jira-draft', key, '--stdin'], JSON.stringify(edit))
+  : await run(['session', 'jira-draft', key], { timeout: 90_000 }));
+export const jiraFile = async (key, sha, user, name, email, fixme) => (await run(['session', 'jira-file', key, sha, user, name,
+  ...(email ? [email] : []), ...(fixme ? ['--fixme'] : [])], { timeout: 90_000 })).trim();
+export const jiraUndo = (key, ticket, name) => run(['session', 'jira-undo', key, ticket, name], { timeout: 90_000 });
+export const jiraEdit = (key, ticket, edit) => runIn(['session', 'jira-edit', key, ticket], JSON.stringify(edit));
+export const jiraQueue = (key, ticket) => run(['session', 'jira-queue', key, ticket], { timeout: 60_000 });
 export const prReady = (key, repo) => run(['session', 'pr-ready', key, ...(repo ? ['--repo', repo] : [])], { timeout: 60_000 });
 // The STE lint the handoff check runs, on a reply's text: its problem lines, [] on any failure.
 const STE = join(dirname(CTL), 'skills/fxa-vm-handoff/ste.sh');

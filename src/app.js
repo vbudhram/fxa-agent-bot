@@ -17,6 +17,7 @@ import { teamChannels, reviewRounds } from './teams.js';
 import { ROUTINES_ENV, TICK_MS, NO_CHANNEL, channelRefusal, inFlightGuard, muted, mutedReply, pollChannels, pollUsers } from './routines.js';
 import { ingest } from './db.js';
 import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
+import { asksForJira, draftCard, filedCard, editModal, readEdit } from './jira-draft.js';
 import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateAllows, loadMembers, maySteer, mayTap, SHIP_ACTIONS, PR_ACTIONS } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, fromAdmin, ADMIN, LINE_BREAK, laterMessage, slackLinks, threadFile,
   emptyTurn, EMPTY_RETRY, EMPTY_FALLBACK } from './render.js';
@@ -230,6 +231,7 @@ async function onMention({ event, body, client }) {
   prompt = prof.text;
   if (!prompt) return;
   const thread_ts = thread;
+  if (!prompt.startsWith('!')) noteJiraAsk(event.channel, thread_ts, event.user, prompt);
   // In a thread with a session, the message handler runs the bang; answer once.
   if (prompt.startsWith('!')) { if (!cur) await bang(null, prompt, { user: event.user, channel: event.channel, thread_ts, ts: event.ts }, client); return; }
   // The work moved to another thread (!stack checkout): the reply handler's resume says so.
@@ -793,6 +795,7 @@ async function onMessage({ message, client, replay = false }) {
     return;
   }
   const steers = allowed(message.channel, message.user) && (boss(s, message.user) || (STEER_ANYONE && onTeam(s, message.user)));
+  if (steers) noteJiraAsk(s.channel, s.thread_ts, message.user, text);
   // A reply continues a session that has ended, as a tag does: paused, stopped,
   // failed, or with its PR still open (the reply is often about the review).
   const prDone = ['MERGED', 'CLOSED'].includes(s.pr_seen?.state);
@@ -2287,6 +2290,9 @@ async function pollOne(key) {
       // message and settles its acks, so the steer queued behind it gets its ✅ from the second.
       } else await (ev.type === 'turn_end' || ev.type === 'question' ? finishTurn(key, msg, ev) : postMsg(key, msg))
         .catch((e) => console.error('post', key, ev.type, e.data?.error ?? e.message));
+      if (ev.jira_draft && fresh(key)) await jiraTurn(key).catch((e) => console.error('jira draft', key, e.data?.error ?? e.message));
+      // A finished turn with no draft dealt with the request another way: a later draft must not file on it.
+      else if (ev.type === 'turn_end' && ev.status === 'ready' && fresh(key)) jiraAsks.delete(`${fresh(key).channel}:${fresh(key).thread_ts}`);
       ship();
     }
     if (!fresh(key)) return; // restarted or replaced while this poll ran
@@ -2442,6 +2448,112 @@ ownerAction('create_jira', async (s, client, action, body) => {
   const url = process.env.JIRA_URL ? `${process.env.JIRA_URL}/browse/${key}` : '';
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts,
     text: `Created ${url ? `<${url}|${key}>` : key} from the PR, and added it to the PR body.` });
+});
+// Jira drafts (the controller's FXA_JIRA_DRAFTS). A clear request in a person's own words ("file a ticket")
+// files the agent's draft at once, as them, with Undo; any other draft waits on its card for a tap.
+const JIRA_URL = process.env.JIRA_URL || 'https://mozilla-hub.atlassian.net';
+const jiraAsks = new Map(); // "<channel>:<thread>" → {by, at}; lost on a restart, which only means a card
+const noteJiraAsk = (channel, thread, user, text) => { if (asksForJira(text)) jiraAsks.set(`${channel}:${thread}`, { by: user, at: Date.now() }); };
+const why = (e) => String(e?.stderr || e?.message || e).trim().split('\n').filter(Boolean).at(-1)?.replace(/^ERROR: */, '') ?? 'unknown error';
+async function person(id) {
+  const { user } = await app.client.users.info({ user: id }).catch(() => ({}));
+  return { name: String(user?.real_name || user?.profile?.display_name || user?.name || id).replace(/\n/g, ' ').slice(0, 80), email: user?.profile?.email ?? '' };
+}
+// A DM, a group DM or a private channel; a failed read counts as private, so the card warns.
+const privateChannel = (channel) => app.client.conversations.info({ channel }).then((r) => Boolean(r.channel?.is_private || r.channel?.is_im || r.channel?.is_mpim), () => true);
+async function jiraTurn(key) {
+  const s = fresh(key), t = `${s.channel}:${s.thread_ts}`, ask = jiraAsks.get(t);
+  jiraAsks.delete(t);
+  let d;
+  try { d = await ctl.jiraDraft(key); } catch (e) { await say(s, `I could not use the Jira draft: ${why(e)}. Ask me for a Jira link instead.`); return; }
+  const priv = await privateChannel(s.channel);
+  if (ask && Date.now() - ask.at < 2 * 3600_000) { await fileDraft(s, d, ask.by, false, priv); return; }
+  const c = draftCard(d, key, { privateChannel: priv, jiraUrl: JIRA_URL });
+  const { ts } = await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...c });
+  sessions.patch(key, { jira_card: { d, ts, priv } });
+}
+async function fileDraft(s, d, by, fixme, priv, cardTs) {
+  const who = await person(by);
+  let ticket;
+  try { ticket = await ctl.jiraFile(s.key, d.sha, by, who.name, who.email, fixme); } catch (e) { await say(s, `I did not file the Jira ticket: ${why(e)}`); return; }
+  const f = { key: s.key, ticket, project: d.project, summary: d.summary, by, fixme, dups: d.dups, privateChannel: priv, jiraUrl: JIRA_URL };
+  const c = filedCard(f);
+  const ts = cardTs ? (await app.client.chat.update({ channel: s.channel, ts: cardTs, ...c }), cardTs)
+    : (await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...c })).ts;
+  sessions.patch(s.key, { jira_card: null, jira_filed: { ...(fresh(s.key)?.jira_filed ?? {}), [ticket]: { f, d, ts } } });
+  // Undo works for 10 minutes on the controller too; the button goes when it would only be refused.
+  setTimeout(() => { const x = fresh(s.key)?.jira_filed?.[ticket]; if (x && !x.undone) app.client.chat.update({ channel: s.channel, ts, ...filedCard({ ...x.f, undo: false }) }).catch(() => {}); }, 10 * 60_000).unref?.();
+}
+const ephemeral = (s, user, text) => app.client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user, text }).catch(() => {});
+const jiraCard = (s, action, user) => {
+  const c = fresh(s.key)?.jira_card;
+  if (c && c.d.sha === action.value.split('|')[1]) return c;
+  ephemeral(s, user, 'This Jira draft is old or was filed already. Use the newest card.');
+  return null;
+};
+for (const fixme of [false, true]) ownerAction(fixme ? 'jira_create_fixme' : 'jira_create', async (s, client, action, body) => {
+  const c = jiraCard(s, action, body.user.id);
+  if (!c) return;
+  sessions.patch(s.key, { jira_card: null });
+  await tapped(client, s, body, 'Filing the Jira ticket');
+  await fileDraft(s, c.d, body.user.id, fixme, c.priv, body.message.ts);
+});
+ownerAction('jira_discard', async (s, client, action, body) => {
+  if (!jiraCard(s, action, body.user.id)) return;
+  sessions.patch(s.key, { jira_card: null });
+  await tapped(client, s, body, 'Discarded the Jira draft');
+});
+ownerAction('jira_edit', async (s, client, action, body) => {
+  const c = jiraCard(s, action, body.user.id);
+  if (c) await client.views.open({ trigger_id: body.trigger_id, view: editModal(c.d, { key: s.key, sha: c.d.sha }) });
+});
+// The filed ticket's own buttons: Undo and Edit are for the person it was filed for, the owner and the admins.
+const filedOf = (s, action, user, own) => {
+  const [, ticket, by] = action.value.split('|'), x = fresh(s.key)?.jira_filed?.[ticket];
+  if (!x || x.undone) { ephemeral(s, user, 'That ticket is no longer open from here.'); return null; }
+  if (own && user !== by && !boss(s, user)) { ephemeral(s, user, `Only <@${by}> or <@${s.owner}> can do that.`); return null; }
+  return { ticket, ...x };
+};
+ownerAction('jira_undo', async (s, client, action, body) => {
+  const x = filedOf(s, action, body.user.id, true);
+  if (!x) return;
+  try { await ctl.jiraUndo(s.key, x.ticket, (await person(body.user.id)).name); } catch (e) { await ephemeral(s, body.user.id, `I could not undo ${x.ticket}: ${why(e)}`); return; }
+  sessions.patch(s.key, { jira_filed: { ...fresh(s.key).jira_filed, [x.ticket]: { ...x, undone: true } } });
+  await tapped(client, s, body, `Withdrew ${x.ticket}`);
+});
+ownerAction('jira_edit_filed', async (s, client, action, body) => {
+  const x = filedOf(s, action, body.user.id, true);
+  if (x) await client.views.open({ trigger_id: body.trigger_id, view: editModal(x.d, { key: s.key, ticket: x.ticket }) });
+});
+ownerAction('jira_queue', async (s, client, action, body) => {
+  const x = filedOf(s, action, body.user.id, false);
+  if (!x) return;
+  try { await ctl.jiraQueue(s.key, x.ticket); } catch (e) { await ephemeral(s, body.user.id, `I could not queue ${x.ticket}: ${why(e)}`); return; }
+  const f = { ...x.f, fixme: true };
+  sessions.patch(s.key, { jira_filed: { ...fresh(s.key).jira_filed, [x.ticket]: { ...x, f } } });
+  await client.chat.update({ channel: s.channel, ts: body.message.ts, ...filedCard(f) }).catch(() => {});
+});
+// The Edit form's Save: the same check as the buttons, then a new draft card, or the ticket's edit.
+app.view('jira_edit_submit', async ({ ack, body, view, client }) => {
+  await ack();
+  let meta; try { meta = JSON.parse(view.private_metadata); } catch { return; }
+  const s = sessions.all().find((x) => x.key === meta.key), u = body.user.id;
+  if (!s || !mayTap('jira_edit', s.owner, u, allowed(s.channel, u), STEER_ANYONE, onTeam(s, u), adminOf(s, u))) return;
+  const edit = readEdit(view.state.values);
+  if (meta.ticket) {
+    const x = fresh(s.key)?.jira_filed?.[meta.ticket];
+    if (!x || x.undone || (u !== x.f.by && !boss(s, u))) return;
+    try { await ctl.jiraEdit(s.key, meta.ticket, edit); } catch (e) { await ephemeral(s, u, `I could not edit ${meta.ticket}: ${why(e)}`); return; }
+    const f = { ...x.f, summary: edit.summary };
+    sessions.patch(s.key, { jira_filed: { ...fresh(s.key).jira_filed, [meta.ticket]: { ...x, f, d: { ...x.d, ...edit } } } });
+    await client.chat.update({ channel: s.channel, ts: x.ts, ...filedCard(f) }).catch(() => {});
+    return;
+  }
+  const c = fresh(s.key)?.jira_card;
+  if (!c || c.d.sha !== meta.sha) { await ephemeral(s, u, 'This Jira draft is old or was filed already.'); return; }
+  let d; try { d = await ctl.jiraDraft(s.key, edit); } catch (e) { await ephemeral(s, u, `I could not save the edit: ${why(e)}`); return; }
+  sessions.patch(s.key, { jira_card: { ...c, d } });
+  await client.chat.update({ channel: s.channel, ts: c.ts, ...draftCard(d, s.key, { privateChannel: c.priv, jiraUrl: JIRA_URL }) }).catch(() => {});
 });
 ownerAction('pr_ready', async (s, client, action, body) => {
   await tapped(client, s, body, 'Marking the PR ready');

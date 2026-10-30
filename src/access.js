@@ -8,7 +8,9 @@ export const gateAllows = (gates, members, channel, user) => !gates.has(channel)
 // A team admin counts as the owner.
 export const maySteer = (owner, user, allowedHere, steerAnyone, team, admin = false) => allowedHere && (user === owner || admin || (steerAnyone && team));
 // The PR buttons go as far as steering does; the desktop, the diff and Stop stay the owner's and the admins'.
-export const SHIP_ACTIONS = ['open_pr', 'push_branch', 'create_jira', 'pr_ready', 'fix_review', 'rebase_pr', 'auto_round'];
+// A Jira draft goes as far too: anyone who may steer can ask for a ticket in words, which files it at once.
+export const SHIP_ACTIONS = ['open_pr', 'push_branch', 'create_jira', 'pr_ready', 'fix_review', 'rebase_pr', 'auto_round',
+  'jira_create', 'jira_create_fixme', 'jira_edit', 'jira_discard', 'jira_queue', 'jira_undo', 'jira_edit_filed'];
 // Open PR and Push also need the team's PR list (prOk: mayOpenPr).
 export const PR_ACTIONS = ['open_pr', 'push_branch'];
 export const mayTap = (action, owner, user, allowedHere, steerAnyone, team, admin = false, prOk = true) =>

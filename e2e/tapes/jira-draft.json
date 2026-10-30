@@ -1,0 +1,3 @@
+{"sessions": [{"turns": [
+  {"steps": ["Reading packages/fxa-auth-client/lib/client.ts"], "diff": [], "end": {"status": "ready", "text": "I drafted a ticket for the sign-in timeout.", "jira_draft": true}}
+]}]}
