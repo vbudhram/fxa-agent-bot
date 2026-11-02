@@ -331,6 +331,17 @@ test('one review reminder a day after CI passed with no person reviewing', async
   assert.equal(reviewNudge({ ...cur, reviews: [{ login: 'rev1', state: 'COMMENTED' }] }, 1000, null, 1000 + NUDGE_MS), null);
   assert.deepEqual(reviewNudge({ ...cur, draft: true }, 1000, null, 1000 + NUDGE_MS).buttons, [['Mark ready for review', 'pr_ready']]);
   assert.equal(reviewNudge({ ...cur, ci: 'running' }, null, null, 1000 + NUDGE_MS), null);
+  assert.match(reviewNudge(cur, 1000, null, 1000 + NUDGE_MS, true), /My question above still waits for your answer\.$/);
+});
+
+test('a round that ends on a question names the person, and the idle pause repeats it', async () => {
+  const { roundAsk, pauseAsk } = await import('../src/render.js');
+  assert.equal(roundAsk({ type: 'question' }, 'U123'), '<@U123> I need your answer above.');
+  assert.equal(roundAsk({ type: 'turn_end', status: 'needs-input' }, 'U123'), '<@U123> I need your answer above.');
+  assert.equal(roundAsk({ type: 'turn_end', status: 'ready' }, 'U123'), null);
+  assert.equal(roundAsk({ type: 'question' }, '<!channel>'), null);
+  assert.match(pauseAsk('U123'), /^Paused: my question above still waits for your answer, <@U123>\./);
+  assert.doesNotMatch(pauseAsk(''), /<@/);
 });
 
 test('a person\'s review is fenced data for the agent', async () => {

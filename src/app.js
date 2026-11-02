@@ -22,7 +22,7 @@ import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateA
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, fromAdmin, ADMIN, LINE_BREAK, laterMessage, slackLinks, threadFile,
   emptyTurn, EMPTY_RETRY, EMPTY_FALLBACK } from './render.js';
 import * as cards from './cards.js';
-import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound, reviewNote } from './render.js';
+import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound, reviewNote, roundAsk, pauseAsk } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { routineStart, routineSkip, routineEnd, routineEndLine, routineReport, routineHint, routineLabel, fixStart, fixEnd, fixEndLine, fixSkip } from './render.js';
 import { render, rateLimitLine, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, toSomeoneElse, asideBlock, REBASE_PROMPT, operatorNext, fileRefs, distinctFiles, maskSecrets, maskUpload } from './render.js';
@@ -1338,7 +1338,7 @@ async function sweepOnce() {
     sessions.patch(key, { state: 'paused' });
     await desktopClosed(key, 'paused');
     // One small grey line, as the design has it: the status of a session at rest, not a chat message.
-    const text = 'Paused: nobody replied for a while. Everything is saved. Reply here to pick it up.';
+    const text = s.buttons_msg?.question ? pauseAsk(s.owner) : 'Paused: nobody replied for a while. Everything is saved. Reply here to pick it up.';
     if (!s.muted) await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text, blocks: [{ type: 'context', elements: [{ type: 'mrkdwn', text: `⏸ ${text}` }] }] }).catch(() => {});
   }
 }
@@ -2301,6 +2301,12 @@ async function pollOne(key) {
       // message and settles its acks, so the steer queued behind it gets its ✅ from the second.
       } else await (ev.type === 'turn_end' || ev.type === 'question' ? finishTurn(key, msg, ev) : postMsg(key, msg))
         .catch((e) => console.error('post', key, ev.type, e.data?.error ?? e.message));
+      // A PR round that ends on a question: a new message that names the person, once.
+      if (fresh(key)?.round_by && (ev.type === 'question' || ['ready', 'needs-input'].includes(ev.status))) {
+        const ask = roundAsk(ev, fresh(key).round_by);
+        sessions.patch(key, { round_by: null });
+        if (ask && !fresh(key).muted) await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: ask }).catch((e) => console.error('round ask', key, e.data?.error ?? e.message));
+      }
       if (ev.jira_draft && fresh(key)) await jiraTurn(key).catch((e) => console.error('jira draft', key, e.data?.error ?? e.message));
       // A finished turn with no draft dealt with the request another way: a later draft must not file on it.
       else if (ev.type === 'turn_end' && ev.status === 'ready' && fresh(key)) jiraAsks.delete(`${fresh(key).channel}:${fresh(key).thread_ts}`);
@@ -2399,7 +2405,7 @@ async function followPrs() {
       const cur = settleMergeable(s.pr_seen, await ctl.prStatus(s.key, s.repo));
       if (!cur) continue;
       const ciPassAt = cur.ci !== 'pass' ? null : s.pr_seen?.ci === 'pass' ? s.ci_pass_at ?? Date.now() : Date.now();
-      const nudge = reviewNudge(cur, ciPassAt, s.nudged_at, Date.now());
+      const nudge = reviewNudge(cur, ciPassAt, s.nudged_at, Date.now(), Boolean(fresh(s.key)?.buttons_msg?.question));
       // One message per event: an automatic round (autoRound) posts a CI failure with its
       // checks, and the stop above posts the merge or close. These mirror their conditions.
       const ciByRound = Boolean(s.pr_pushed_at && !s.pr_ended && cur.state === 'OPEN' && cur.links?.length);
@@ -2615,7 +2621,7 @@ ownerAction('fix_review', async (s, client, action, body) => {
   const comments = await ctl.reviewComments(s.key, login, repo);
   if (!comments.length) { await say(s, `I found no comments from ${login} on the current code.`); return; }
   const v = prView(fresh(s.key), repo);
-  await startRound(v, `${repo ? `This is about ${repo}, in /workspace/${repo.split('/')[1].toLowerCase()}.\n\n` : ''}${reviewRound(login, comments, randomBytes(6).toString('hex'))}`, shipRound(v));
+  await startRound(v, `${repo ? `This is about ${repo}, in /workspace/${repo.split('/')[1].toLowerCase()}.\n\n` : ''}${reviewRound(login, comments, randomBytes(6).toString('hex'))}`, shipRound(v), body.user.id);
 });
 // Draft answers: a review of only questions. The agent answers in the thread, changes no file, and ships nothing.
 ownerAction('answer_review', async (s, client, action, body) => {
@@ -2624,13 +2630,13 @@ ownerAction('answer_review', async (s, client, action, body) => {
   await tapped(client, s, body, 'Drafting the answers');
   const comments = (await ctl.reviewComments(s.key, login, repo)).filter((c) => !c.reply && !c.answered);
   if (!comments.length) { await say(s, `I found no open questions from ${login} on the current code.`); return; }
-  await startRound(prView(fresh(s.key), repo), `${repo ? `This is about ${repo}, in /workspace/${repo.split('/')[1].toLowerCase()}.\n\n` : ''}${reviewRound(login, comments, randomBytes(6).toString('hex'), true)}`, false);
+  await startRound(prView(fresh(s.key), repo), `${repo ? `This is about ${repo}, in /workspace/${repo.split('/')[1].toLowerCase()}.\n\n` : ''}${reviewRound(login, comments, randomBytes(6).toString('hex'), true)}`, false, body.user.id);
 });
 ownerAction('rebase_pr', async (s, client, action, body) => {
   const repo = valueRepo(action.value);
   if (prBusy(s, body, repo)) return;
   await tapped(client, s, body, 'Rebasing onto main');
-  await startRound(prView(fresh(s.key), repo), `${repo ? `This is about ${repo} only.\n\n` : ''}${REBASE_PROMPT}`, false);
+  await startRound(prView(fresh(s.key), repo), `${repo ? `This is about ${repo} only.\n\n` : ''}${REBASE_PROMPT}`, false, body.user.id);
 });
 
 // A new Copilot or CodeRabbit review with comments, or CI failing for the change, starts a round
@@ -2680,8 +2686,10 @@ async function autoRound(s, prev, cur) {
 }
 // ship false: the owner has unpushed edits, so the round fixes and the owner pushes with Update PR.
 // s may be a stack repo's view (s.repo): the PR update after the round goes to that repo.
-async function startRound(s, text, ship = true) {
+// by: who tapped the round's button; the owner for an automatic round. A question at the round's end names them.
+async function startRound(s, text, ship = true, by = null) {
   const cur = fresh(s.key), wrap = { then_wrap: 'pr_auto', then_wrap_at: Date.now(), then_wrap_repo: s.repo ?? null };
+  sessions.patch(cur.key, { round_by: by ?? cur.owner });
   if (['paused', 'stopped', 'failed', 'pr_open'].includes(cur.state)) {
     if (sessions.get(cur.channel, cur.thread_ts)?.key !== cur.key || cur.stop_failed) return;
     await resumePaused(cur, text, app.client, ship ? wrap : {});
@@ -2699,7 +2707,7 @@ ownerAction('auto_round', async (s, client, action, body) => {
   // Not wrapTap: its 30 s lock would refuse the PR update after a short round.
   await client.chat.update({ channel: s.channel, ts: body.message.ts, text: body.message.text,
     blocks: [...(body.message.blocks ?? []).filter((b) => b.type !== 'actions'), { type: 'context', elements: [{ type: 'mrkdwn', text: `Round started by <@${body.user.id}>` }] }] }).catch(() => {});
-  await startRound(prView(fresh(s.key), repo), text, ship);
+  await startRound(prView(fresh(s.key), repo), text, ship, body.user.id);
 });
 
 // 6: DM the operator once for each new or reopened error signature. The first

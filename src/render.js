@@ -231,13 +231,21 @@ export function ciNote(cur, why) {
 
 // One reminder when CI passed a day ago and no person has reviewed the PR. ciPassAt: when the bot saw CI pass.
 export const NUDGE_MS = 24 * 3_600_000;
-export function reviewNudge(cur, ciPassAt, nudgedAt, now) {
+// asking: the thread has a question of the bot's that nobody answered, so the reminder repeats it.
+export function reviewNudge(cur, ciPassAt, nudgedAt, now, asking = false) {
   if (cur?.state !== 'OPEN' || cur.ci !== 'pass' || !ciPassAt || nudgedAt === ciPassAt || now - ciPassAt < NUDGE_MS) return null;
   if ((cur.reviews ?? []).some((r) => !isCopilot(r.login))) return null;
   const url = gh(cur.url), pr = url ? `<${url}|the PR>` : 'the PR';
-  return cur.draft ? { text: `CI passed a day ago, and ${pr} is still a draft. Mark it ready so that the code owners get a review request.`, buttons: [READY] }
-    : `CI passed a day ago, and nobody has reviewed ${pr} yet. Ask a reviewer to look at it.`;
+  const ask = asking ? ' My question above still waits for your answer.' : '';
+  return cur.draft ? { text: `CI passed a day ago, and ${pr} is still a draft. Mark it ready so that the code owners get a review request.${ask}`, buttons: [READY] }
+    : `CI passed a day ago, and nobody has reviewed ${pr} yet. Ask a reviewer to look at it.${ask}`;
 }
+// A round's question names the person it waits on: the reply edits the status line, and an edit notifies nobody.
+// by: who tapped the round's button, or the owner for an automatic round.
+const slackId = (u) => (/^[UW][A-Z0-9]{2,20}$/.test(u ?? '') ? u : '');
+export const roundAsk = (ev, by) => slackId(by) && (ev?.type === 'question' || (ev?.type === 'turn_end' && ev.status === 'needs-input')) ? `<@${by}> I need your answer above.` : null;
+// The idle pause while a question waits: it names the person, so the pause is not the last word.
+export const pauseAsk = (by) => `Paused: my question above still waits for your answer${slackId(by) ? `, <@${by}>` : ''}. Everything is saved. Reply here to pick it up.`;
 
 // A comment that asks rather than asks for a change: its first line ends with "?", or starts with a question word.
 // ponytail: a word list, not a classifier; "Should this be X?" counts, "Should be X." does not.
