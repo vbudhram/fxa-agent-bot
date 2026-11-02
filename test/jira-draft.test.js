@@ -25,6 +25,10 @@ test('the draft card shows the exact text in a code block, with no link or menti
   assert.ok(c.blocks.at(-1).elements.every((e) => e.value === `agent-a1|${'a'.repeat(64)}`));
   assert.match(JSON.stringify(c.blocks), /This thread is private/);
   assert.match(JSON.stringify(c.blocks), /FXA-1/);
+  const lc = JSON.stringify(draftCard({ ...d, labels: ['sync', '<!here>'] }, 'agent-a1').blocks);
+  assert.match(lc, /Labels: sync, /);
+  assert.doesNotMatch(lc, /<!here>/, 'a label cannot ping the channel');
+  assert.match(JSON.stringify(filedCard({ key: 'k', ticket: 'FXA-9', project: 'FXA', summary: 's', by: 'U1', labels: ['ui'] }).blocks), /Labels: ui/);
   assert.doesNotMatch(c.blocks[0].text.text, /\*times out\*/, 'the summary cannot add markup');
 });
 
@@ -41,8 +45,13 @@ test('the edit form keeps the limits and reads back as a draft', () => {
   assert.equal(m.blocks[1].element.initial_value.length, 200);
   assert.equal(m.blocks[2].element.max_length, 2800);
   assert.deepEqual(JSON.parse(m.private_metadata), { key: 'agent-a1', sha: d.sha });
-  assert.deepEqual(readEdit({ type: { v: { selected_option: { value: 'Bug' } } }, summary: { v: { value: 'A' } }, description: { v: { value: 'B' } } }),
-    { type: 'Bug', summary: 'A', description: 'B' });
+  assert.deepEqual(readEdit({ type: { v: { selected_option: { value: 'Bug' } } }, summary: { v: { value: 'A' } }, description: { v: { value: 'B' } }, labels: { v: { value: 'sync, frontend  x' } } }),
+    { type: 'Bug', summary: 'A', description: 'B', labels: ['sync', 'frontend', 'x'] });
+  assert.equal(readEdit({ labels: { v: { value: null } } }).labels.length, 0, 'an empty labels field is no labels');
+  const ml = editModal({ ...d, labels: ['sync', 'ui'] }, { key: 'agent-a1', sha: d.sha });
+  assert.equal(ml.blocks[3].element.initial_value, 'sync, ui');
+  assert.equal(ml.blocks[3].optional, true);
+  assert.equal(editModal(d, { key: 'agent-a1', sha: d.sha }).blocks[3].element.initial_value, undefined, 'Slack refuses an empty initial value');
 });
 
 test('the Jira buttons go as far as steering does', () => {

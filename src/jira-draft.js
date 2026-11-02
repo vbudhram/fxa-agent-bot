@@ -15,11 +15,12 @@ const dupLine = (dups, jiraUrl) => (dups?.length
   ? `Maybe the same: ${dups.map((d) => `${jiraUrl ? `<${jiraUrl}/browse/${d.key}|${d.key}>` : d.key} ${esc(d.summary).slice(0, 80)}`).join(' · ')}`
   : null);
 const PRIVATE_NOTE = (p) => `:lock: This thread is private. Everyone who can read ${p} in Jira can read the ticket.`;
+const labelLine = (l) => (l?.length ? `Labels: ${l.map(esc).join(', ')}` : null);
 
 // draftCard(d, key, { privateChannel, jiraUrl })   d is the controller's frozen draft.
 export function draftCard(d, key, { privateChannel = false, jiraUrl = '' } = {}) {
   const v = `${key}|${d.sha}`;
-  const notes = [dupLine(d.dups, jiraUrl), privateChannel ? PRIVATE_NOTE(d.project) : null].filter(Boolean);
+  const notes = [labelLine(d.labels), dupLine(d.dups, jiraUrl), privateChannel ? PRIVATE_NOTE(d.project) : null].filter(Boolean);
   return {
     text: `Jira draft for ${d.project}: ${esc(d.summary)}`,
     blocks: [
@@ -32,11 +33,11 @@ export function draftCard(d, key, { privateChannel = false, jiraUrl = '' } = {})
   };
 }
 
-// filedCard(f)   f: {key, ticket, project, summary, by, fixme, dups, privateChannel, jiraUrl, undo}. undo: false once it is too late.
+// filedCard(f)   f: {key, ticket, project, summary, labels, by, fixme, dups, privateChannel, jiraUrl, undo}. undo: false once it is too late.
 export function filedCard(f) {
   const link = f.jiraUrl ? `<${f.jiraUrl}/browse/${f.ticket}|${f.ticket}>` : f.ticket;
   const v = `${f.key}|${f.ticket}|${f.by}`;
-  const notes = [dupLine(f.dups, f.jiraUrl), f.privateChannel ? PRIVATE_NOTE(f.project) : null].filter(Boolean);
+  const notes = [labelLine(f.labels), dupLine(f.dups, f.jiraUrl), f.privateChannel ? PRIVATE_NOTE(f.project) : null].filter(Boolean);
   return {
     text: `Filed ${f.ticket}: ${esc(f.summary)}`,
     blocks: [
@@ -50,7 +51,8 @@ export function filedCard(f) {
 
 // The Edit form. meta goes back on submit: {key, sha | ticket, channel, ts}.
 export function editModal(d, meta) {
-  const input = (block_id, label, element) => ({ type: 'input', block_id, label: { type: 'plain_text', text: label }, element: { action_id: 'v', ...element } });
+  const input = (block_id, label, element, optional = false) => ({ type: 'input', block_id, optional, label: { type: 'plain_text', text: label }, element: { action_id: 'v', ...element } });
+  const labels = (d.labels ?? []).join(', ');
   const opt = (t) => ({ text: { type: 'plain_text', text: t }, value: t });
   return {
     type: 'modal', callback_id: 'jira_edit_submit', private_metadata: JSON.stringify(meta),
@@ -60,10 +62,12 @@ export function editModal(d, meta) {
       input('type', 'Type', { type: 'static_select', options: ['Task', 'Bug', 'Story'].map(opt), initial_option: opt(['Task', 'Bug', 'Story'].includes(d.type) ? d.type : 'Task') }),
       input('summary', 'Summary', { type: 'plain_text_input', max_length: 200, initial_value: String(d.summary ?? '').slice(0, 200) }),
       input('description', 'Description', { type: 'plain_text_input', multiline: true, max_length: 2800, initial_value: String(d.description ?? '').slice(0, 2800) }),
+      input('labels', meta.ticket ? 'Labels to add (comma separated)' : 'Labels (comma separated)', { type: 'plain_text_input', max_length: 300, ...(labels ? { initial_value: labels } : {}) }, true),
     ],
   };
 }
 
 // The submitted form's values as a draft.
 export const readEdit = (values) => ({ type: values.type?.v?.selected_option?.value ?? 'Task',
-  summary: values.summary?.v?.value ?? '', description: values.description?.v?.value ?? '' });
+  summary: values.summary?.v?.value ?? '', description: values.description?.v?.value ?? '',
+  labels: String(values.labels?.v?.value ?? '').split(/[,\s]+/).filter(Boolean) });

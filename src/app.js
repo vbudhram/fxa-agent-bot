@@ -2476,7 +2476,7 @@ async function fileDraft(s, d, by, fixme, priv, cardTs) {
   const who = await person(by);
   let ticket;
   try { ticket = await ctl.jiraFile(s.key, d.sha, by, who.name, who.email, fixme); } catch (e) { await say(s, `I did not file the Jira ticket: ${why(e)}`); return; }
-  const f = { key: s.key, ticket, project: d.project, summary: d.summary, by, fixme, dups: d.dups, privateChannel: priv, jiraUrl: JIRA_URL };
+  const f = { key: s.key, ticket, project: d.project, summary: d.summary, labels: d.labels, by, fixme, dups: d.dups, privateChannel: priv, jiraUrl: JIRA_URL };
   const c = filedCard(f);
   const ts = cardTs ? (await app.client.chat.update({ channel: s.channel, ts: cardTs, ...c }), cardTs)
     : (await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...c })).ts;
@@ -2544,7 +2544,7 @@ app.view('jira_edit_submit', async ({ ack, body, view, client }) => {
     const x = fresh(s.key)?.jira_filed?.[meta.ticket];
     if (!x || x.undone || (u !== x.f.by && !boss(s, u))) return;
     try { await ctl.jiraEdit(s.key, meta.ticket, edit); } catch (e) { await ephemeral(s, u, `I could not edit ${meta.ticket}: ${why(e)}`); return; }
-    const f = { ...x.f, summary: edit.summary };
+    const f = { ...x.f, summary: edit.summary, labels: [...new Set([...(x.f.labels ?? []), ...edit.labels])] };
     sessions.patch(s.key, { jira_filed: { ...fresh(s.key).jira_filed, [meta.ticket]: { ...x, f, d: { ...x.d, ...edit } } } });
     await client.chat.update({ channel: s.channel, ts: x.ts, ...filedCard(f) }).catch(() => {});
     return;
