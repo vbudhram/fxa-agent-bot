@@ -566,17 +566,16 @@ export const maskUpload = (args) => ({ ...args,
 export const tippedInThread = (all, s, user) => all.some((x) => x.channel === s.channel && x.thread_ts === s.thread_ts && (x.tipped ?? []).includes(user));
 
 // A thread message for someone else: it tags a person and not the bot.
-// How a status line reads when it closes: a failure must not say Done. A wrap-up has no
-// Slack reply (its output is the PR), so it says what it did. wrap_done: the pr or pushed
-// event that ended it; the state is already active again by then. null: a turn whose reply did
-// not take the line's place (an empty turn, No response requested), so the line goes.
+// How a status line reads when it closes: a failure must not say Done. null: the line goes,
+// because nothing it says is news: a turn whose reply did not take its place (an empty turn,
+// No response requested), or a wrap-up (wrap_done: its pr or pushed event), whose PR card or
+// "Pushed" message says what it did.
 export const endWord = (s, state) => {
   if (state === 'failed') return s.step_n ? 'Failed' : 'Setup failed';
   if (state === 'stopped') return 'Stopped';
   if (state === 'paused') return 'Paused';
   if (s.interrupted) return 'Interrupted';
-  if (s.wrap_done === 'pr') return 'Wrapped up for the PR (review, title and body)';
-  return s.wrap_done === 'pushed' ? 'Wrapped up for the push' : null;
+  return null;
 };
 // The session owner is the person who started the thread: its first message's author.
 // A thread a bot started, or one Slack did not return, falls back to whoever asked.

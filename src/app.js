@@ -2277,8 +2277,7 @@ async function pollOne(key) {
       }
       // The repos of a stack, for !pr <repo> and the buttons.
       if (ev.type === 'turn_end' && Array.isArray(ev.trees)) sessions.patch(key, { trees: ev.trees.map(({ name, slug, out, changes }) => ({ name, slug, out, changes })) });
-      // The wrap-up's status line closes later in this poll; it says what the wrap-up did.
-      if ((ev.type === 'pr' || ev.type === 'pushed') && fresh(key)?.status_ts) sessions.patch(key, { wrap_done: ev.type });
+
       // The wrap-up's result: its flag is done, even when it ended between two polls and none saw 'wrapping'.
       if (ev.type === 'pr' || ev.type === 'pushed') wrapping.delete(key);
       // A turn that ended with no message gets one automatic follow-up instead of a filler reply; a second empty turn
