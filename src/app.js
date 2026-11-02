@@ -1448,7 +1448,7 @@ const VERB = { starting: 'Setting up', wrapping: 'Wrapping up', active: 'Working
 // sentinel, not a person, so its title names nobody.
 // The person who sent the first message this turn answers, by name: a routine run's owner is a sentinel, with none.
 async function askerName(s) {
-  const asker = askers.get(ackList(s)[0]) ?? s.owner;
+  const asker = s.wrap_by ?? askers.get(ackList(s)[0]) ?? s.owner;
   return /^[UW][A-Z0-9]+$/.test(asker ?? '') ? (await whoIs(app.client, asker))?.name ?? null : null;
 }
 // The name is plain text, not a mention: a mention would notify the asker each time a turn starts.
@@ -1469,7 +1469,7 @@ const MOVE_MS = Number(process.env.STATUS_MOVE_MS) || 60_000; // a status moves 
 // The status is an edited message that everyone in the thread sees: a native stream shows its steps to one person only.
 const unsent = new Map(); // key → steps not yet shown in the status
 // status_kind: a field old records may hold ('stream' or 'line'); nothing reads it, and a clear drops it.
-const STATUS_CLEAR = { status_ts: null, status_kind: null, busy_since: null, last_act: null, last_detail: null, last_step: null, step_n: null, task_n: null, cur_kind: null, cur_count: null, cur_label: null, cur_since: null, cur_lines: null, title_at: null, rows_done: null, interrupted: null, wrap_done: null, boot_row: null, status_below: null, moved_at: null };
+const STATUS_CLEAR = { status_ts: null, status_kind: null, busy_since: null, last_act: null, last_detail: null, last_step: null, step_n: null, task_n: null, cur_kind: null, cur_count: null, cur_label: null, cur_since: null, cur_lines: null, title_at: null, rows_done: null, interrupted: null, wrap_done: null, wrap_by: null, boot_row: null, status_below: null, moved_at: null };
 // The finished turn's checklist, compact: every work row, ticked.
 
 const turnSummary = (s, word) => {
@@ -1776,7 +1776,8 @@ async function startWrap(s, client, what, user, msg, repo) {
   if (wrapping.has(s.key) || fresh(s.key)?.state === 'wrapping') return 'Already wrapping up. I will post here when it is done.';
   wrapping.add(s.key); setTimeout(() => wrapping.delete(s.key), 30_000);
   // A push opens no PR, so a reply during it gets its own note (onMessage).
-  sessions.patch(s.key, { wrap_push: what.startsWith('Push') });
+  // wrap_by: the wrap-up's status names who tapped, not the owner.
+  sessions.patch(s.key, { wrap_push: what.startsWith('Push'), wrap_by: user });
   unwrap.delete(s.key); // An earlier wrap's row must not come back on this wrap's refusal.
   const bm = fresh(s.key)?.buttons_msg, target = msg ?? (bm && { ...bm, blocks: bm.full ?? bm.blocks });
   if (target?.ts) {
@@ -1797,6 +1798,7 @@ async function startWrap(s, client, what, user, msg, repo) {
 // not "Already wrapping up", and the message says to tap again (a !restart would leave the work behind).
 async function shipFailed(client, s, e, what) {
   wrapping.delete(s.key);
+  sessions.patch(s.key, { wrap_by: null }); // the next turn's status names its own asker
   const u = unwrap.get(s.key); unwrap.delete(s.key);
   if (u) {
     await client.chat.update({ channel: s.channel, ts: u.ts, text: u.text, blocks: u.blocks }).catch(() => {});
