@@ -332,6 +332,20 @@ test('one review reminder a day after CI passed with no person reviewing', async
   assert.deepEqual(reviewNudge({ ...cur, draft: true }, 1000, null, 1000 + NUDGE_MS).buttons, [['Mark ready for review', 'pr_ready']]);
   assert.equal(reviewNudge({ ...cur, ci: 'running' }, null, null, 1000 + NUDGE_MS), null);
   assert.match(reviewNudge(cur, 1000, null, 1000 + NUDGE_MS, true), /My question above still waits for your answer\.$/);
+  assert.match(reviewNudge({ ...cur, requested: ['rev1', 'fxa-team'] }, 1000, null, 1000 + NUDGE_MS), /GitHub asked rev1 and fxa-team to review it\. Remind them, or ask another reviewer\.$/);
+});
+
+test('one ready-to-merge note: approved, CI passed, not a draft, no change request', async () => {
+  const { readyNote } = await import('../src/render.js');
+  const url = 'https://github.com/mozilla/fxa/pull/1';
+  const cur = { url, state: 'OPEN', ci: 'pass', review: 'APPROVED', head: 'abc', reviews: [{ login: 'rev1', state: 'APPROVED' }] };
+  assert.deepEqual(readyNote(cur), { text: `The PR is approved and CI passed. It is ready to merge. <${url}|Open it to merge>`, key: 'abc' });
+  assert.equal(readyNote({ ...cur, review: '' }).key, 'abc', 'no required review: a person approved');
+  assert.equal(readyNote({ ...cur, review: '', reviews: [{ login: 'coderabbitai', state: 'APPROVED' }] }), null);
+  assert.equal(readyNote({ ...cur, draft: true }), null);
+  assert.equal(readyNote({ ...cur, ci: 'running' }), null);
+  assert.equal(readyNote({ ...cur, review: 'REVIEW_REQUIRED' }), null);
+  assert.equal(readyNote({ ...cur, reviews: [...cur.reviews, { login: 'rev2', state: 'CHANGES_REQUESTED' }] }), null);
 });
 
 test('a round that ends on a question names the person, and the idle pause repeats it', async () => {

@@ -22,7 +22,7 @@ import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateA
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, fromAdmin, ADMIN, LINE_BREAK, laterMessage, slackLinks, threadFile,
   emptyTurn, EMPTY_RETRY, EMPTY_FALLBACK } from './render.js';
 import * as cards from './cards.js';
-import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound, reviewNote, roundAsk, pauseAsk } from './render.js';
+import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound, reviewNote, roundAsk, pauseAsk, readyNote } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { routineStart, routineSkip, routineEnd, routineEndLine, routineReport, routineHint, routineLabel, fixStart, fixEnd, fixEndLine, fixSkip } from './render.js';
 import { render, rateLimitLine, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, toSomeoneElse, asideBlock, REBASE_PROMPT, operatorNext, fileRefs, distinctFiles, maskSecrets, maskUpload } from './render.js';
@@ -2419,6 +2419,12 @@ async function followPrs() {
           if (cs.length && !(item = reviewNote(item.login, cur.reviews.find((r) => r.login === item.login)?.state, cs, cur.url))) continue;
         }
         if (!fresh(s.key)?.muted) await postPrNote(s, item).catch((e) => lost(s, e, 'follow'));
+      }
+      // Ready to merge is a person's step, so it is a message, once for each head.
+      const ready = readyNote(cur);
+      if (ready && ready.key !== s.ready_seen) {
+        pp({ ready_seen: ready.key });
+        if (!fresh(s.key)?.muted) await postPrNote(s, ready.text).catch((e) => lost(s, e, 'follow'));
       }
       if (!fresh(s.key)?.muted) await updatePrCard(s, cur).catch((e) => lost(s, e, 'pr card'));
       const prev = s.pr_seen;

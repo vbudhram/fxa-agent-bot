@@ -120,7 +120,7 @@ export function valueRepo(value) {
 
 // The PR fields the follower reads and writes. A stack keeps one set for each repo in .prs.
 export const PR_FIELDS = ['pr_url', 'pr_seen', 'pr_follow_since', 'pr_pushed_at', 'pr_card_ts', 'pr_card_head', 'pr_card_text',
-  'ci_seen', 'ci_pass_at', 'copilot_seen_at', 'auto_rounds', 'nudged_at', 'pr_follow_done', 'pr_ended', 'round_text', 'round_ship'];
+  'ci_seen', 'ci_pass_at', 'copilot_seen_at', 'auto_rounds', 'nudged_at', 'ready_seen', 'pr_follow_done', 'pr_ended', 'round_text', 'round_ship'];
 
 // The session as the follower sees one repo's PR: its PR fields over the session's. No repo: the session.
 export const prView = (s, repo) => (s && repo ? { ...s, ...Object.fromEntries(PR_FIELDS.map((f) => [f, s.prs?.[repo]?.[f]])), repo } : s);

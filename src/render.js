@@ -237,8 +237,20 @@ export function reviewNudge(cur, ciPassAt, nudgedAt, now, asking = false) {
   if ((cur.reviews ?? []).some((r) => !isCopilot(r.login))) return null;
   const url = gh(cur.url), pr = url ? `<${url}|the PR>` : 'the PR';
   const ask = asking ? ' My question above still waits for your answer.' : '';
+  const names = (cur.requested ?? []).slice(0, 4).map(esc);
+  const who = names.length ? `GitHub asked ${names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0]} to review it. Remind them, or ask another reviewer.` : 'Ask a reviewer to look at it.';
   return cur.draft ? { text: `CI passed a day ago, and ${pr} is still a draft. Mark it ready so that the code owners get a review request.${ask}`, buttons: [READY] }
-    : `CI passed a day ago, and nobody has reviewed ${pr} yet. Ask a reviewer to look at it.${ask}`;
+    : `CI passed a day ago, and nobody has reviewed ${pr} yet. ${who}${ask}`;
+}
+// The PR can merge: approved (or, with no required review, a person's approval), CI passed, not a draft,
+// and no person asks for changes. key: the head it is about, so one note for each head.
+export function readyNote(cur) {
+  if (cur?.state !== 'OPEN' || cur.draft || cur.ci !== 'pass') return null;
+  const people = (cur.reviews ?? []).filter((r) => !isCopilot(r.login));
+  if (people.some((r) => r.state === 'CHANGES_REQUESTED')) return null;
+  if (cur.review !== 'APPROVED' && (cur.review || !people.some((r) => r.state === 'APPROVED'))) return null;
+  const url = gh(cur.url);
+  return { text: `The PR is approved and CI passed. It is ready to merge.${url ? ` <${url}|Open it to merge>` : ''}`, key: cur.head || 'pr' };
 }
 // A round's question names the person it waits on: the reply edits the status line, and an edit notifies nobody.
 // by: who tapped the round's button, or the owner for an automatic round.
