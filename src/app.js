@@ -22,7 +22,7 @@ import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateA
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, fromAdmin, ADMIN, LINE_BREAK, laterMessage, slackLinks, threadFile,
   emptyTurn, EMPTY_RETRY, EMPTY_FALLBACK } from './render.js';
 import * as cards from './cards.js';
-import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound } from './render.js';
+import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound, reviewNote } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { routineStart, routineSkip, routineEnd, routineEndLine, routineReport, routineHint, routineLabel, fixStart, fixEnd, fixEndLine, fixSkip } from './render.js';
 import { render, rateLimitLine, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, toSomeoneElse, asideBlock, REBASE_PROMPT, operatorNext, fileRefs, distinctFiles, maskSecrets, maskUpload } from './render.js';
@@ -2406,7 +2406,12 @@ async function followPrs() {
       const endByStop = !s.repo && ['active', 'pr_open'].includes(s.state) && sessions.get(s.channel, s.thread_ts)?.key === s.key;
       // A new message only where a person must act: a button (fix, rebase, mark ready) or the
       // day-old review reminder. The rest (CI, approvals, merge) is edited into the PR's card.
-      for (const item of [...prChanges(s.pr_seen, cur, { ciByRound, endByStop, jiraOffer: process.env.JIRA_OFFER === '1' }).filter((x) => typeof x !== 'string'), ...(nudge ? [nudge] : [])]) {
+      for (let item of [...prChanges(s.pr_seen, cur, { ciByRound, endByStop, jiraOffer: process.env.JIRA_OFFER === '1' }).filter((x) => typeof x !== 'string'), ...(nudge ? [nudge] : [])]) {
+        // A person's review: its comments in the note. None read (gh failed): the short note.
+        if (item.login) {
+          const cs = await ctl.reviewComments(s.key, item.login, s.repo);
+          if (cs.length && !(item = reviewNote(item.login, cur.reviews.find((r) => r.login === item.login)?.state, cs, cur.url))) continue;
+        }
         if (!fresh(s.key)?.muted) await postPrNote(s, item).catch((e) => lost(s, e, 'follow'));
       }
       if (!fresh(s.key)?.muted) await updatePrCard(s, cur).catch((e) => lost(s, e, 'pr card'));
@@ -2611,6 +2616,15 @@ ownerAction('fix_review', async (s, client, action, body) => {
   if (!comments.length) { await say(s, `I found no comments from ${login} on the current code.`); return; }
   const v = prView(fresh(s.key), repo);
   await startRound(v, `${repo ? `This is about ${repo}, in /workspace/${repo.split('/')[1].toLowerCase()}.\n\n` : ''}${reviewRound(login, comments, randomBytes(6).toString('hex'))}`, shipRound(v));
+});
+// Draft answers: a review of only questions. The agent answers in the thread, changes no file, and ships nothing.
+ownerAction('answer_review', async (s, client, action, body) => {
+  const login = action.value.split('|')[1] ?? '', repo = valueRepo(action.value);
+  if (prBusy(s, body, repo)) return;
+  await tapped(client, s, body, 'Drafting the answers');
+  const comments = (await ctl.reviewComments(s.key, login, repo)).filter((c) => !c.reply && !c.answered);
+  if (!comments.length) { await say(s, `I found no open questions from ${login} on the current code.`); return; }
+  await startRound(prView(fresh(s.key), repo), `${repo ? `This is about ${repo}, in /workspace/${repo.split('/')[1].toLowerCase()}.\n\n` : ''}${reviewRound(login, comments, randomBytes(6).toString('hex'), true)}`, false);
 });
 ownerAction('rebase_pr', async (s, client, action, body) => {
   const repo = valueRepo(action.value);

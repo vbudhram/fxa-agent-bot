@@ -341,6 +341,26 @@ test('a person\'s review is fenced data for the agent', async () => {
   assert.equal(r.match(/<<<\/REVIEW-n1>>>/g).length, 1);
 });
 
+test('a person\'s review note shows the comments, and questions get Draft answers, not Fix these', async () => {
+  const { reviewNote, reviewRound, isQuestion } = await import('../src/render.js');
+  const url = 'https://github.com/mozilla/fxa/pull/1';
+  const fix = reviewNote('rev1', 'COMMENTED', [{ id: 4, path: 'd.ts', line: 1, body: 'Rename `x` to y.\nMore.' }, { id: 5, path: 'e.ts', line: 2, body: 'Why this?' }], url);
+  assert.equal(fix.text, `rev1 left review comments on the PR. <${url}|The review> Tap to have me fix them.\n• \`d.ts:1\` Rename 'x' to y.\n• \`e.ts:2\` Why this?`);
+  assert.deepEqual(fix.buttons, [['Fix these', 'fix_review']]);
+  const ask = reviewNote('nshirley', 'COMMENTED', [{ id: 6, path: 'adr.md', line: 63, body: 'Is it just stage that had the multiple client_ids?' }], url);
+  assert.match(ask.text, /^nshirley asked a question on the PR\..*I change no code\.\n• `adr\.md:63` Is it just stage/);
+  assert.deepEqual(ask.buttons, [['Draft answers', 'answer_review']]);
+  // A reply in a GitHub thread, or a comment someone already answered: no note.
+  assert.equal(reviewNote('LZoog', 'COMMENTED', [{ id: 7, path: 'adr.md', line: 63, body: 'Yeah, one in prod.', reply: true }], url), null);
+  assert.equal(reviewNote('rev1', 'COMMENTED', [{ id: 8, path: 'a.md', line: 1, body: 'Why?', answered: true }], url), null);
+  assert.equal(isQuestion('Should be const.'), false);
+  assert.equal(isQuestion('How does this handle null'), true);
+  const a = reviewRound('rev1', [{ id: 6, path: 'adr.md', line: 63, body: 'Why?' }], 'n2', true);
+  assert.match(a, /Do not change any file/);
+  assert.doesNotMatch(a, /fxa-review-outcomes/);
+  assert.equal(a.match(/<<<\/REVIEW-n2>>>/g).length, 1);
+});
+
 test('the top-level text of a reply cannot ping a channel', () => {
   const r = render('agent-ab12', { type: 'question', text: '<!channel> please look', options: ['A', 'B'] });
   assert.equal(r.text.includes('<!channel>'), false);
