@@ -1675,8 +1675,10 @@ async function updateStatusNow(s, state, activity) {
   }
   steps.delete(s.key);
   if (s.status_ts) {
-    const word = endWord(s, state), text = turnSummary(s, word);
-    await edit({ text, blocks: [{ type: 'context', elements: [{ type: 'mrkdwn', text }] }] });
+    const word = endWord(s, state), text = turnSummary(s, word ?? 'Done');
+    const close = () => edit({ text, blocks: [{ type: 'context', elements: [{ type: 'mrkdwn', text }] }] });
+    // A bare "Worked for 10s" tells nobody anything: the line goes. A failed delete still closes the live line.
+    await (word ? close() : app.client.chat.delete({ channel: s.channel, ts: s.status_ts }).catch(close));
   }
   // The rows go too, so the next turn's box starts empty.
   return { ...STATUS_CLEAR, status_text: null, status_box: null };

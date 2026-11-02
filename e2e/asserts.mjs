@@ -60,8 +60,8 @@ export function globalChecks({ view, botLog, stepOf }) {
   const fail = (id, list) => { out[id] = list.length ? list.slice(0, 5) : null; };
   fail('reacted', person.filter((m) => m.reactions.has('eyes') || m.reactions.has('hourglass_flowing_sand')).map((m) => `#${m.seq} still has ${[...m.reactions].join(',')}`));
   fail('no_control_lines', bot.filter((m) => /^(status:|OPTION:|QUESTION:)/m.test(said(m))).map((m) => `#${m.seq}`));
-  // A post that says only "Done · 12s" tells nobody anything (seen in real threads).
-  fail('no_empty_post', bot.filter((m) => /^\s*(Done ·|Worked for) [\dm h]+s?\s*$/.test(said(m).trim())).map((m) => `#${m.seq}`));
+  // A post that says only "Done · 12s", "Worked for 10s · 2 steps" or "Wrapped up for the PR · ..." tells nobody anything (seen in real threads).
+  fail('no_empty_post', bot.filter((m) => /^\s*((Done ·|Worked for) [\dm h]+s?( · \d+ steps?)?|Wrapped up for the (PR|push)\b.*)\s*$/.test(String(m.text ?? '').trim())).map((m) => `#${m.seq}: ${m.text}`));
   fail('no_pings', bot.filter((m) => /<!(here|channel|everyone)>|<!subteam\^/.test(said(m))).map((m) => `#${m.seq}`));
   const twice = (list) => Object.values(Object.groupBy(list, (m) => `${stepOf(m.seq)}|${m.to ?? ''}|${said(m).trim()}`)).filter((g) => g.length > 1).map((g) => `#${g.map((m) => m.seq).join(', #')}: ${said(g[0]).slice(0, 80)}`);
   fail('no_double_post', twice(bot.filter((m) => !m.to)));

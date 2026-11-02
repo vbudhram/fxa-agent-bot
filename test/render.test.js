@@ -451,7 +451,7 @@ test('a closed status line says what ended it; a wrap-up says it wrapped up for 
   assert.equal(endWord({ step_n: 3 }, 'failed'), 'Failed');
   assert.equal(endWord({}, 'failed'), 'Setup failed');
   assert.equal(endWord({ interrupted: true }, 'active'), 'Interrupted');
-  assert.equal(endWord({}, 'active'), 'Done');
+  assert.equal(endWord({}, 'active'), null); // no reply took the line's place: it goes
   // The poll that brings the PR also sees the state back at active.
   assert.equal(endWord({ wrap_done: 'pr' }, 'active'), 'Wrapped up for the PR (review, title and body)');
   assert.equal(endWord({ wrap_done: 'pushed' }, 'active'), 'Wrapped up for the push');
