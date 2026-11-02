@@ -25,6 +25,8 @@ export function put(s) {
   // The runner gets the thread's earlier media back (ctl boot): a new session must not post it again.
   const prev = sessions[threadId(s.channel, s.thread_ts)];
   if (prev?.media_sent && prev.key !== s.key && !s.media_sent) s = { ...s, media_sent: prev.media_sent };
+  // The thread's Jira tickets and draft card stay with it across looks and sessions.
+  if (prev && prev.key !== s.key) for (const f of ['jira_key', 'jira_filed', 'jira_card']) if (prev[f] && !s[f]) s = { ...s, [f]: prev[f] };
   sessions[threadId(s.channel, s.thread_ts)] = s;
   save();
   return s;

@@ -137,8 +137,10 @@ function runIn(args, input, timeout = 60_000) {
     c.stdin.end(input);
   });
 }
-export const jiraDraft = async (key, edit) => JSON.parse(edit ? await runIn(['session', 'jira-draft', key, '--stdin'], JSON.stringify(edit))
-  : await run(['session', 'jira-draft', key], { timeout: 90_000 }));
+// as: the thread's Jira key, when an earlier look in the thread filed under another key.
+export const jiraDraft = async (key, edit, as) => { const a = as && as !== key ? ['--as', as] : [];
+  return JSON.parse(edit ? await runIn(['session', 'jira-draft', key, '--stdin', ...a], JSON.stringify(edit))
+    : await run(['session', 'jira-draft', key, ...a], { timeout: 90_000 })); };
 export const jiraFile = async (key, sha, user, name, email, fixme) => (await run(['session', 'jira-file', key, sha, user, name,
   ...(email ? [email] : []), ...(fixme ? ['--fixme'] : [])], { timeout: 90_000 })).trim();
 export const jiraUndo = (key, ticket, name) => run(['session', 'jira-undo', key, ticket, name], { timeout: 90_000 });

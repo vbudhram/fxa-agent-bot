@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { asksForJira, draftCard, filedCard, editModal, readEdit } from '../src/jira-draft.js';
+import { asksForJira, JIRA_YES, draftCard, filedCard, changedCard, editModal, readEdit } from '../src/jira-draft.js';
 import { mayTap } from '../src/access.js';
 
 const ids = (c) => c.blocks.filter((b) => b.type === 'actions').flatMap((b) => b.elements.map((e) => e.action_id));
@@ -10,8 +10,30 @@ const d = { project: 'FXA', type: 'Bug', summary: 'Sign-in *times out*', descrip
 test('a clear request in words counts; talk about tickets does not', () => {
   for (const t of ['file a ticket for this', 'Can you create a Jira for the timeout?', 'please open an issue', 'make a jira ticket', 'log a bug report'])
     assert.ok(asksForJira(t), t);
-  for (const t of ['we should track this', 'is there a ticket?', 'the ticket says otherwise', 'fix the issue', '', undefined])
+  for (const t of ['we should track this', 'is there a ticket?', 'the ticket says otherwise', 'fix the issue', 'go ahead', 'add tests for the summary component', 'make sure the bug is fixed', 'add a fix for the bug', '', undefined])
     assert.ok(!asksForJira(t), String(t));
+  for (const t of ['File a bug for it', 'Now file two more tickets: one for X', 'file the second one too', 'open a story for the toggle', 'yes, file it', 'file that', 'add the label rate-limit to that ticket', 'change the summary of that ticket to X', 'remove the sync label from FXA-12', 'rename the ticket'])
+    assert.ok(asksForJira(t), t);
+});
+
+test('only a short, whole reply of agreement files the draft card', () => {
+  for (const t of ['yes', 'Go ahead.', 'ok thanks', 'sounds good!', 'do it please', 'LGTM']) assert.ok(JIRA_YES.test(t), t);
+  for (const t of ['yes but change the title', 'ok, what about the other bug?', 'go ahead and fix the code', 'not yet']) assert.ok(!JIRA_YES.test(t), t);
+});
+
+test('a change waits on a card with Apply and Discard, and shows only what changes', () => {
+  const ch = { op: 'change', project: 'FXA', key: 'FXA-9', labels: ['ui'], remove_labels: ['sync'], summary: 'New *title*', sha: 'b'.repeat(64), dups: [] };
+  const c = draftCard(ch, 'agent-a1', { jiraUrl: 'https://jira.example.com' });
+  assert.deepEqual(ids(c), ['jira_create', 'jira_discard']);
+  const text = JSON.stringify(c.blocks);
+  assert.match(text, /FXA-9/);
+  assert.match(text, /Add labels: ui/);
+  assert.match(text, /Remove labels: sync/);
+  assert.doesNotMatch(text, /\*title\*/, 'the summary cannot add markup');
+  assert.doesNotMatch(text, /Type:|description/i, 'no line for what does not change');
+  const done = changedCard(ch, 'U1', '');
+  assert.deepEqual(ids(done), []);
+  assert.match(JSON.stringify(done.blocks), /Changed FXA-9 by <@U1>/);
 });
 
 test('the draft card shows the exact text in a code block, with no link or mention, and its buttons carry the sha', () => {
