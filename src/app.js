@@ -1338,8 +1338,11 @@ async function sweepOnce() {
     sessions.patch(key, { state: 'paused' });
     await desktopClosed(key, 'paused');
     // One small grey line, as the design has it: the status of a session at rest, not a chat message.
-    const text = s.buttons_msg?.question ? pauseAsk(s.owner) : 'Paused: nobody replied for a while. Everything is saved. Reply here to pick it up.';
-    if (!s.muted) await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text, blocks: [{ type: 'context', elements: [{ type: 'mrkdwn', text: `⏸ ${text}` }] }] }).catch(() => {});
+    // A pause posts only while a question waits on a person; else the status line says paused, and a reply resumes.
+    if (s.buttons_msg?.question && !s.muted) {
+      const text = pauseAsk(s.owner);
+      await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text, blocks: [{ type: 'context', elements: [{ type: 'mrkdwn', text: `⏸ ${text}` }] }] }).catch(() => {});
+    }
   }
 }
 setInterval(() => { idleSweep(); }, Number(process.env.IDLE_SWEEP_MS) || 60_000);
@@ -2440,7 +2443,7 @@ setInterval(followPrs, FOLLOW_EVERY_MS);
 // The PR's card: its link message with the state line under it, edited when the line
 // changes. A session with no card (older, or one continued from another) gets one, once.
 async function updatePrCard(s, cur) {
-  const c = cards.prFromStatus(cur, { key: s.key, repo: s.repo });
+  const c = cards.prFromStatus(cur, { key: s.key, repo: s.repo, rounds: s.auto_rounds, roundsMax: reviewRounds(s.profile) });
   // The change key is the card itself: the old one-line text left out Jira and CI none or running.
   const line = c && JSON.stringify(c.blocks);
   if (!line || line === prView(fresh(s.key), s.repo)?.pr_card_text) return;

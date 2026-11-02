@@ -254,7 +254,7 @@ export function readyNote(cur) {
 }
 // A round's question names the person it waits on: the reply edits the status line, and an edit notifies nobody.
 // by: who tapped the round's button, or the owner for an automatic round.
-const slackId = (u) => (/^[UW][A-Z0-9]{2,20}$/.test(u ?? '') ? u : '');
+const slackId = (u) => (/^[UW][A-Z0-9]{1,20}$/.test(u ?? '') ? u : '');
 export const roundAsk = (ev, by) => slackId(by) && (ev?.type === 'question' || (ev?.type === 'turn_end' && ev.status === 'needs-input')) ? `<@${by}> I need your answer above.` : null;
 // The idle pause while a question waits: it names the person, so the pause is not the last word.
 export const pauseAsk = (by) => `Paused: my question above still waits for your answer${slackId(by) ? `, <@${by}>` : ''}. Everything is saved. Reply here to pick it up.`;

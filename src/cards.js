@@ -57,6 +57,8 @@ function _pr(d) {
     : d.ci === 'pass' ? `✓ CI passed${d.checks ? ` · ${d.checks} checks` : ''}` : d.ci === 'pending' ? `CI running${d.running ? ` · ${d.running} checks left` : ''}` : 'No CI result yet';
   const rev = changers.length ? `Changes requested by ${changers.slice(0, 3).join(', ')}` : approvers.length ? `Approved by ${approvers.slice(0, 3).join(', ')}` : 'No review yet';
   const jiraLine = d.jira ? `Jira ${link(jiraUrl(d.jira), d.jira)}` : 'No Jira ticket';
+  // The automatic fix rounds so far, against the team's cap, once one ran: a tap is needed after the cap.
+  const rounds = num(d.rounds) > 0 && `Automatic rounds: ${num(d.rounds)} of ${num(d.rounds_max)}`;
   // State buttons in order: conflict, review changes, draft with green CI, no Jira.
   const live = state === 'open' || state === 'draft';
   const next = live ? [conflict && btn('Rebase onto main', 'rebase_pr', d.key), changers.length && btn('Fix review', 'fix_review', d.key),
@@ -67,9 +69,9 @@ function _pr(d) {
   const title = `#${n} ${d.title ?? ''}`;
   return {
     text: plain(`PR #${n} is ${state}. ${ciLine.replace(/^:x: |^✓ /, '')}. ${rev}.`),
-    blocks: [({ type: 'card', block_id: `pr_${n}_v${d.version ?? 1}`, icon: logo('github', 'GitHub'), title: pt(title), subtitle: mk(subtitle), body: mk(ciLine), subtext: mk(dot(rev, jiraLine)),
+    blocks: [({ type: 'card', block_id: `pr_${n}_v${d.version ?? 1}`, icon: logo('github', 'GitHub'), title: pt(title), subtitle: mk(subtitle), body: mk(ciLine), subtext: mk(dot(rev, jiraLine, rounds)),
       actions: btns(next[0], url && btn('Open', 'wo_open', d.key, { url })) })],
-    fallback: [sec(`*${link(url, title)}*\n${subtitle}`, url ? btn('Open', 'wo_open', d.key, { url }) : undefined), ctx(dot(ciLine, rev, jiraLine)), ...actions(btns(next[0]))],
+    fallback: [sec(`*${link(url, title)}*\n${subtitle}`, url ? btn('Open', 'wo_open', d.key, { url }) : undefined), ctx(dot(ciLine, rev, jiraLine, rounds)), ...actions(btns(next[0]))],
   };
 }
 
@@ -279,13 +281,13 @@ export const { pr, turn, tools, jira, sentry, ci, review, tests, deploy, grafana
 
 // The thread's PR card, from the controller's pr-status (session_pr_status) for one session.
 // Open is its only button: the PR notes keep their own buttons, which carry the reviewer and repo.
-export function prFromStatus(cur, { key, repo } = {}) {
+export function prFromStatus(cur, { key, repo, rounds, roundsMax } = {}) {
   if (!cur?.url) return null;
   const people = (st) => (cur.reviews ?? []).filter((r) => r.state === st && !isCopilot(r.login)).map((r) => r.login);
   const c = pr({ key, repo, url: cur.url, number: Number(String(cur.url).match(/\/pull\/(\d+)$/)?.[1]) || 0,
     state: cur.state === 'MERGED' ? 'merged' : cur.state === 'CLOSED' ? 'closed' : 'open', draft: cur.draft,
     ci: cur.ci === 'running' ? 'pending' : cur.ci, failing: cur.failing, mergeable: cur.mergeable, jira: cur.jira,
-    approvers: people('APPROVED'), changers: people('CHANGES_REQUESTED') });
+    approvers: people('APPROVED'), changers: people('CHANGES_REQUESTED'), rounds, rounds_max: roundsMax });
   const open = (b) => (b?.type === 'button' ? b.action_id === 'wo_open' : true);
   const strip = (bl) => bl.map((b) => (b.type === 'card' ? { ...b, actions: (b.actions ?? []).filter(open) }
     : b.type === 'actions' ? { ...b, elements: b.elements.filter(open) } : b)).filter((b) => b.type !== 'actions' || b.elements.length);
