@@ -6,7 +6,7 @@ export default {
   steps: [
     { A: '@bot fix the blur on the verify code input' },
     { advance: 'setup' }, { advance: 'turn', wait: 'turn_end' },
-    { advance: 40, expect: { noText: /Paused/ } },
+    { advance: 40, pause: 3, expect: { noText: /Paused/ } },
     { A: 'also add a test for it', expect: { text: /^Picking up where we left off for A · / } },
     { advance: 'setup' }, { advance: 'turn', wait: 'turn_end', expect: { reaction: { on: 'last:A', name: 'white_check_mark', not: 'eyes' } } },
   ],

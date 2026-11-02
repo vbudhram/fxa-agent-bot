@@ -2630,8 +2630,8 @@ ownerAction('fix_review', async (s, client, action, body) => {
   const login = action.value.split('|')[1] ?? '', repo = valueRepo(action.value);
   if (prBusy(s, body, repo)) return;
   await tapped(client, s, body, 'Fixing the review');
-  const comments = await ctl.reviewComments(s.key, login, repo);
-  if (!comments.length) { await say(s, `I found no comments from ${login} on the current code.`); return; }
+  const comments = (await ctl.reviewComments(s.key, login, repo)).filter((c) => !c.reply && !c.answered);
+  if (!comments.length) { await say(s, `I found no open comments from ${login} on the current code.`); return; }
   const v = prView(fresh(s.key), repo);
   await startRound(v, `${repo ? `This is about ${repo}, in /workspace/${repo.split('/')[1].toLowerCase()}.\n\n` : ''}${reviewRound(login, comments, randomBytes(6).toString('hex'))}`, shipRound(v), body.user.id);
 });
@@ -2701,13 +2701,13 @@ async function autoRound(s, prev, cur) {
 // by: who tapped the round's button; the owner for an automatic round. A question at the round's end names them.
 async function startRound(s, text, ship = true, by = null) {
   const cur = fresh(s.key), wrap = { then_wrap: 'pr_auto', then_wrap_at: Date.now(), then_wrap_repo: s.repo ?? null };
-  sessions.patch(cur.key, { round_by: by ?? cur.owner });
   if (['paused', 'stopped', 'failed', 'pr_open'].includes(cur.state)) {
     if (sessions.get(cur.channel, cur.thread_ts)?.key !== cur.key || cur.stop_failed) return;
+    sessions.patch(cur.key, { round_by: by ?? cur.owner });
     await resumePaused(cur, text, app.client, ship ? wrap : {});
     return;
   }
-  if (ship) sessions.patch(cur.key, wrap);
+  sessions.patch(cur.key, { round_by: by ?? cur.owner, ...(ship ? wrap : {}) });
   await steerAndAck(cur, text, app.client, null, null);
 }
 ownerAction('auto_round', async (s, client, action, body) => {

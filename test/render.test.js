@@ -343,6 +343,7 @@ test('one ready-to-merge note: approved, CI passed, not a draft, no change reque
   assert.equal(readyNote({ ...cur, review: '' }).key, 'abc', 'no required review: a person approved');
   assert.equal(readyNote({ ...cur, review: '', reviews: [{ login: 'coderabbitai', state: 'APPROVED' }] }), null);
   assert.equal(readyNote({ ...cur, draft: true }), null);
+  assert.equal(readyNote({ ...cur, mergeable: 'CONFLICTING' }), null, 'a PR with merge conflicts is not ready to merge');
   assert.equal(readyNote({ ...cur, ci: 'running' }), null);
   assert.equal(readyNote({ ...cur, review: 'REVIEW_REQUIRED' }), null);
   assert.equal(readyNote({ ...cur, reviews: [...cur.reviews, { login: 'rev2', state: 'CHANGES_REQUESTED' }] }), null);
@@ -377,6 +378,8 @@ test('a person\'s review note shows the comments, and questions get Draft answer
   assert.deepEqual(ask.buttons, [['Draft answers', 'answer_review']]);
   // A reply in a GitHub thread, or a comment someone already answered: no note.
   assert.equal(reviewNote('LZoog', 'COMMENTED', [{ id: 7, path: 'adr.md', line: 63, body: 'Yeah, one in prod.', reply: true }], url), null);
+  assert.deepEqual(reviewNote('rev2', 'CHANGES_REQUESTED', [{ id: 8, path: 'a.js', line: 3, body: 'Should this use the helper instead?' }], url).buttons,
+    [['Fix these', 'fix_review']], 'a change request worded as a question still offers Fix these');
   assert.equal(reviewNote('rev1', 'COMMENTED', [{ id: 8, path: 'a.md', line: 1, body: 'Why?', answered: true }], url), null);
   assert.equal(isQuestion('Should be const.'), false);
   assert.equal(isQuestion('How does this handle null'), true);

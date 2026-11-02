@@ -245,7 +245,7 @@ export function reviewNudge(cur, ciPassAt, nudgedAt, now, asking = false) {
 // The PR can merge: approved (or, with no required review, a person's approval), CI passed, not a draft,
 // and no person asks for changes. key: the head it is about, so one note for each head.
 export function readyNote(cur) {
-  if (cur?.state !== 'OPEN' || cur.draft || cur.ci !== 'pass') return null;
+  if (cur?.state !== 'OPEN' || cur.draft || cur.ci !== 'pass' || cur.mergeable === 'CONFLICTING') return null;
   const people = (cur.reviews ?? []).filter((r) => !isCopilot(r.login));
   if (people.some((r) => r.state === 'CHANGES_REQUESTED')) return null;
   if (cur.review !== 'APPROVED' && (cur.review || !people.some((r) => r.state === 'APPROVED'))) return null;
@@ -269,7 +269,8 @@ export const isQuestion = (body) => /\?$/.test(firstLine(body)) || /^(why|how|wh
 export function reviewNote(login, state, comments, url) {
   const open = comments.filter((c) => !c.reply && !c.answered);
   if (!open.length) return null;
-  const asks = open.filter((c) => !isQuestion(c.body)), who = esc(login), link = gh(url) ? ` <${gh(url)}|The review>` : '';
+  // A change request asks for changes, even when it is worded as questions.
+  const asks = state === 'CHANGES_REQUESTED' ? open : open.filter((c) => !isQuestion(c.body)), who = esc(login), link = gh(url) ? ` <${gh(url)}|The review>` : '';
   const head = asks.length ? `${who} ${state === 'CHANGES_REQUESTED' ? 'asked for changes on' : 'left review comments on'} the PR.${link} Tap to have me fix them.`
     : `${who} asked ${open.length === 1 ? 'a question' : `${open.length} questions`} on the PR.${link} Tap to have me draft the answers. I change no code.`;
   const lines = open.slice(0, 5).map((c) => `• ${c.path ? `\`${esc(c.path).replace(/`/g, '')}:${c.line}\` ` : ''}${esc(firstLine(c.body)).replace(/`/g, "'").slice(0, 150)}`);
