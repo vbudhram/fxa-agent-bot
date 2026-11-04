@@ -2697,6 +2697,7 @@ async function autoRound(s, prev, cur) {
   // Only once every check is done, so one CI run starts one round.
   const ciKey = cur.ci === 'fail' && !cur.running && cur.links?.length ? [...cur.links].sort().join(' ') : '';
   let job = null, seen;
+  const pp = (fields) => sessions.patch(s.key, prPatch(fresh(s.key), s.repo, fields));
   if (cp?.at && cp.at !== s.copilot_seen_at) {
     seen = { copilot_seen_at: cp.at };
     // A review from before the last push is about code that is gone.
@@ -2704,9 +2705,11 @@ async function autoRound(s, prev, cur) {
     if (comments.length) job = { note: (why) => copilotNote(comments, why), text: copilotRound(comments, randomBytes(6).toString('hex')) };
   } else if (ciKey && ciKey !== s.ci_seen) {
     seen = { ci_seen: ciKey };
+    // A failure outside the change (a 5xx, a lost runner) gets one rerun first, not a round; it counts no round.
+    const rerun = await ctl.ciRerun(s.key, s.repo);
+    if (rerun) { pp(seen); await postMsg(s.key, { text: `CI failed outside the change, so I reran the failed jobs once: \`${rerun.replace(/[`<>&*_~]/g, '').slice(0, 400)}\`` }); return; }
     job = { note: (why) => ciNote(cur, why), text: ciRound(cur, randomBytes(6).toString('hex')) };
   }
-  const pp = (fields) => sessions.patch(s.key, prPatch(fresh(s.key), s.repo, fields));
   if (!job) { if (seen) pp(seen); return; }
   // Ask, and count nothing, when an automatic round could mix with work the owner has in hand.
   const max = reviewRounds(s.profile);

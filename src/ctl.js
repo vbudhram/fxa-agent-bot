@@ -124,6 +124,8 @@ export const history = async (key) => { try { return JSON.parse((await run(['ses
 export const errorsList = async () => { try { return JSON.parse((await run(['errors', '--json'], { timeout: 60_000 })).trim() || '[]'); } catch { return null; } };
 export const attach = (key, paths) => run(['session', 'attach', key, ...paths], { timeout: 5 * 60_000 });
 export const errorsPush = () => run(['errors', 'push', '--now'], { timeout: 120_000 });
+// One rerun of the PR's CI that failed outside the change: the reason when it reran, else ''.
+export const ciRerun = async (key, repo) => { try { return (await run(['session', 'ci-rerun', key, ...(repo ? ['--repo', repo] : [])], { timeout: 120_000 })).trim(); } catch { return ''; } };
 export const copilotComments = async (key, repo) => { try { return JSON.parse((await run(['session', 'copilot-comments', key, ...(repo ? ['--repo', repo] : [])], { timeout: 60_000 })).trim() || '[]'); } catch { return []; } };
 export const reviewComments = async (key, login, repo) => { try { return JSON.parse((await run(['session', 'review-comments', key, login, ...(repo ? ['--repo', repo] : [])], { timeout: 60_000 })).trim() || '[]'); } catch { return []; } };
 export const createJira = async (key, repo) => (await run(['session', 'create-jira', key, ...(repo ? ['--repo', repo] : [])], { timeout: 60_000 })).trim();
