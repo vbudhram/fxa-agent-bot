@@ -558,6 +558,15 @@ test('teamCard for a team stack: its label, and a repo the App cannot push to sh
   assert.match(t, /✏️ `mozilla\/PyFxA` works here; ships as a diff in this thread \(no App\)/);
 });
 
+test('teamCard with the session\'s repos lists only those work repos, and the deps', () => {
+  const info = { profile: 'fxa', label: 'FxA', read_only: false, repos: [{ slug: 'mozilla/fxa', role: 'work', write: true },
+    { slug: 'mozilla/ecosystem-platform', role: 'work', write: true }, { slug: 'mozilla/blurts', role: 'work', write: true }, { slug: 'mozilla/dep', role: 'dep' }] };
+  const lines = (c) => c.blocks[1].elements.map((e) => e.text);
+  assert.deepEqual(lines(teamCard(info, ['mozilla/fxa', 'mozilla/Ecosystem-Platform'])), ['✏️ `mozilla/fxa` works here; opens a draft PR',
+    '✏️ `mozilla/ecosystem-platform` works here; opens a draft PR', '👁 `mozilla/dep` runs locally beside it; read-only']);
+  assert.equal(lines(teamCard(info)).length, 4);
+});
+
 test("the team card names the team's connected tools, if its profile sets them", () => {
   const ctx = (c) => c.blocks[1].elements.map((e) => e.text).filter((t) => t.startsWith('🔌'));
   assert.deepEqual(ctx(teamCard({ profile: 'pyfxa-team', label: 'PyFxA team', repos: [], mcp: ['github', 'jira'] })), ['🔌 Reads GitHub, Jira']);

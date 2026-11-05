@@ -111,7 +111,8 @@ export async function media(key) {
 }
 export const cleanup = (dir) => rm(dir, { recursive: true, force: true });
 // Starts the wrap-up in the background; events reports the PR or the failure.
-export const finish = (key, noPr = false, repo) => run(['finish', '--session', key, ...(noPr ? ['--no-pr'] : []), ...(repo ? ['--repo', repo] : [])], { timeout: 60_000 });
+// repo: a stack's repo, or a list of them that the controller ships one after another.
+export const finish = (key, noPr = false, repo) => run(['finish', '--session', key, ...(noPr ? ['--no-pr'] : []), ...[repo ?? []].flat().flatMap((r) => ['--repo', r])], { timeout: 60_000 });
 export const stop = (key) => run(['stop', key]);
 export const cost = async (key) => { try { return JSON.parse((await run(['session', 'cost', key], { timeout: 60_000 })).trim() || 'null'); } catch { return null; } };
 export const jiraCard = async (key) => { try { return JSON.parse((await run(['jira-card', key], { timeout: 30_000 })).trim() || 'null'); } catch { return null; } };

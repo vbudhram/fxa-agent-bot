@@ -1,3 +1,5 @@
+import { shipRepos } from './stack.js';
+
 // CHANNEL_GATES=CPUBLIC:CPRIVATE: in CPUBLIC, only members of CPRIVATE may use the bot.
 export const parseGates = (v) => new Map((v || '').split(',').map((p) => p.trim().split(':')).filter((p) => p.length === 2 && p[0] && p[1]));
 
@@ -9,20 +11,23 @@ export const gateAllows = (gates, members, channel, user) => !gates.has(channel)
 export const maySteer = (owner, user, allowedHere, steerAnyone, team, admin = false) => allowedHere && (user === owner || admin || (steerAnyone && team));
 // The PR buttons go as far as steering does; the desktop, the diff and Stop stay the owner's and the admins'.
 // A Jira draft goes as far too: anyone who may steer can ask for a ticket in words, which files it at once.
-export const SHIP_ACTIONS = ['open_pr', 'push_branch', 'create_jira', 'pr_ready', 'fix_review', 'answer_review', 'rebase_pr', 'auto_round',
+export const SHIP_ACTIONS = ['open_pr', 'open_prs', 'push_branch', 'create_jira', 'pr_ready', 'fix_review', 'answer_review', 'rebase_pr', 'auto_round',
   'jira_create', 'jira_create_fixme', 'jira_edit', 'jira_discard', 'jira_queue', 'jira_undo', 'jira_edit_filed'];
 // Open PR and Push also need the team's PR list (prOk: mayOpenPr).
-export const PR_ACTIONS = ['open_pr', 'push_branch'];
+export const PR_ACTIONS = ['open_pr', 'open_prs', 'push_branch'];
 export const mayTap = (action, owner, user, allowedHere, steerAnyone, team, admin = false, prOk = true) =>
   PR_ACTIONS.includes(action) && !prOk ? false
     : SHIP_ACTIONS.includes(action) ? maySteer(owner, user, allowedHere, steerAnyone, team, admin) : allowedHere && (user === owner || admin);
 // The agent's 'ship: pr' line on a ready turn: the person asked for the PR. prOk: whether that person
-// is on the team's PR list. A stack of more than one repo needs !pr <repo>. Null: nothing to ship.
+// is on the team's PR list. A stack of more than one repo ships each changed repo that ships as a PR
+// (repo: a slug, or a list of them). Null: nothing to ship.
 export function askedShip(ev, s, prOk) {
   if (ev?.type !== 'turn_end' || !ev.ship || ev.status !== 'ready' || s?.state !== 'active') return null;
   if (!prOk) return { refuse: 'access' };
   const trees = s.trees ?? [];
-  return trees.length > 1 ? { refuse: 'repo' } : { repo: trees[0]?.slug };
+  if (trees.length <= 1) return { repo: trees[0]?.slug };
+  const repos = shipRepos(trees);
+  return repos.length ? { repo: repos.length === 1 ? repos[0] : repos } : { refuse: 'none' };
 }
 
 // Reads each source channel's members. A failed read keeps the last list.

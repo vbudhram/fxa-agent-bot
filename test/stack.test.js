@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseStack, teamAlias, stackHelp, STACK_ADD, stackRepos, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, treeRows, valueRepo, prView, prPatch, followTargets, carryPrs } from '../src/stack.js';
+import { parseStack, teamAlias, stackHelp, STACK_ADD, stackRepos, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, treeRows, valueRepo, prView, prPatch, followTargets, carryPrs,
+  shipRepos, afterShip, shipAsk, treeFor, namedRepos } from '../src/stack.js';
 
 test('parseStack: pick, a team, a checkout, a bad link', () => {
   assert.deepEqual(parseStack('!stack'), { sub: 'pick' });
@@ -67,6 +68,73 @@ test('treeRows: one row for each changed repo; PR buttons only where it ships a 
   ]);
   assert.deepEqual(treeRows('k', [{ name: 'fxa', slug: 'mozilla/fxa', out: 'pr', changes: 1, pr: 'u' }])[0].elements.map((b) => b.text.text), ['Diff · fxa', 'Update PR · fxa']);
   assert.equal(treeRows('k', [{ name: 'fxa', slug: 'mozilla/fxa', out: 'pr', changes: 1 }], { readOnly: true })[0].elements.length, 1);
+});
+
+test('treeRows: 2 or more PRs get one Open N PRs, one Diff, and each repo\'s buttons in a More menu', () => {
+  const trees = [
+    { name: 'fxa', slug: 'mozilla/fxa', out: 'pr', changes: 2 },
+    { name: 'ecosystem-platform', slug: 'mozilla/ecosystem-platform', out: 'pr', changes: 1 },
+    { name: 'pyfxa', slug: 'mozilla/PyFxA', out: 'diff', changes: 1 },
+  ];
+  const rows = treeRows('agent-1', trees);
+  assert.equal(rows.length, 1);
+  const [open, diff, more] = rows[0].elements;
+  assert.deepEqual([open.text.text, open.action_id, open.value, open.style], ['Open 2 PRs', 'open_prs', 'agent-1', 'primary']);
+  assert.deepEqual([diff.text.text, diff.action_id, diff.value], ['Diff', 'diff', 'agent-1']);
+  assert.equal(more.type, 'static_select');
+  assert.deepEqual(more.options.map((o) => `${o.text.text}=${o.value}`), [
+    'Diff · fxa=diff agent-1|mozilla/fxa', 'Open PR · fxa=open_pr agent-1|mozilla/fxa', 'Push · fxa=push_branch agent-1|mozilla/fxa',
+    'Diff · ecosystem-platform=diff agent-1|mozilla/ecosystem-platform', 'Open PR · ecosystem-platform=open_pr agent-1|mozilla/ecosystem-platform',
+    'Push · ecosystem-platform=push_branch agent-1|mozilla/ecosystem-platform', 'Diff · pyfxa=diff agent-1|mozilla/PyFxA']);
+  // The menu's values keep the "<key>|<slug>" of the old buttons after the action.
+  assert.equal(valueRepo(more.options[1].value.split(' ')[1]), 'mozilla/fxa');
+  assert.equal(treeRows('k', trees.map((t) => ({ ...t, pr: 'u' })))[0].elements[0].text.text, 'Update 2 PRs');
+  // One PR to ship (the other is a diff, or read-only): the rows of today.
+  assert.equal(treeRows('k', [trees[0], trees[2]]).length, 2);
+  assert.equal(treeRows('k', trees, { readOnly: true }).length, 3);
+  assert.deepEqual(shipRepos(trees), ['mozilla/fxa', 'mozilla/ecosystem-platform']);
+});
+
+test('afterShip: one repo loses its own ship controls and Open N PRs; a ship of all takes every button', () => {
+  const row = treeRows('agent-1', [{ name: 'fxa', slug: 'mozilla/fxa', out: 'pr', changes: 2 }, { name: 'docs', slug: 'mozilla/docs', out: 'pr', changes: 1 }]);
+  const blocks = [{ type: 'markdown', text: 'Done.' }, ...row];
+  const one = afterShip(blocks, 'mozilla/fxa');
+  assert.deepEqual(one[1].elements.map((e) => e.action_id), ['diff', 'tree_more']);
+  assert.deepEqual(one[1].elements[1].options.map((o) => o.value), ['diff agent-1|mozilla/fxa', 'diff agent-1|mozilla/docs', 'open_pr agent-1|mozilla/docs', 'push_branch agent-1|mozilla/docs']);
+  assert.deepEqual(afterShip(blocks, ['mozilla/fxa', 'mozilla/docs']), [blocks[0]]);
+  assert.deepEqual(afterShip(blocks, undefined), [blocks[0]]);
+  // The old per-repo rows: only that repo's Open PR and Push go.
+  const old = treeRows('k', [{ name: 'fxa', slug: 'mozilla/fxa', out: 'pr', changes: 2 }, { name: 'py', slug: 'mozilla/py', out: 'diff', changes: 1 }]);
+  assert.deepEqual(afterShip(old, 'mozilla/fxa').map((r) => r.elements.map((e) => e.action_id)), [['diff'], ['diff']]);
+});
+
+test('shipAsk: a short ship phrase is the Open PR tap; a longer message that only has the words is not', () => {
+  for (const t of ['open pr', 'Open PR', 'open the PRs', 'open both PRs', 'open prs please', 'ship it', 'Ship it!', 'yes, open the PR', 'go ahead and open the PRs', 'OPEN PULL REQUESTS'])
+    assert.deepEqual(shipAsk(t), { repo: null }, t);
+  assert.deepEqual(shipAsk('open PR for docs'), { repo: 'docs' });
+  assert.deepEqual(shipAsk('Open the PR for ecosystem-platform, please'), { repo: 'ecosystem-platform' });
+  for (const t of ["don't open a PR yet", 'why did you open pr 3?', 'open pr 3', 'open the pr and fix the test', 'what about the PR?', 'did you open a PR?', 'open', '', `open pr ${'x'.repeat(60)}`])
+    assert.equal(shipAsk(t), null, t);
+});
+
+test('treeFor: a tree by name, slug or alias, any case', () => {
+  const trees = [{ name: 'fxa', slug: 'mozilla/fxa' }, { name: 'ecosystem-platform', slug: 'mozilla/ecosystem-platform' }];
+  const aliases = { 'mozilla/ecosystem-platform': ['docs'] };
+  assert.equal(treeFor(trees, 'FXA'), 'mozilla/fxa');
+  assert.equal(treeFor(trees, 'mozilla/Ecosystem-Platform'), 'mozilla/ecosystem-platform');
+  assert.equal(treeFor(trees, 'Docs', aliases), 'mozilla/ecosystem-platform');
+  assert.equal(treeFor(trees, 'docs'), null);
+});
+
+test('namedRepos: a plain tag adds each work repo the task names to the defaults', () => {
+  const team = { profile: 'fxa', defaults: [], repos: [{ slug: 'mozilla/fxa', role: 'work' }, { slug: 'mozilla/ecosystem-platform', role: 'work', aliases: ['docs', 'documentation'] }, { slug: 'mozilla/other', role: 'dep' }] };
+  assert.deepEqual(namedRepos(team, 'Fix the text in fxa-auth-server, then update ecosystem-platform'), ['mozilla/fxa', 'mozilla/ecosystem-platform']);
+  assert.deepEqual(namedRepos(team, 'see mozilla/Ecosystem-Platform'), ['mozilla/fxa', 'mozilla/ecosystem-platform']);
+  assert.deepEqual(namedRepos(team, 'and update the Docs.'), ['mozilla/fxa', 'mozilla/ecosystem-platform']);
+  // A whole word only: fxa-auth-server is not the fxa repo, docstring is not docs, and a dep never joins.
+  assert.equal(namedRepos(team, 'fix fxa-auth-server and its docstring, and mozilla/other'), null);
+  assert.equal(namedRepos({ ...team, defaults: ['mozilla/fxa', 'mozilla/ecosystem-platform'] }, 'update the docs'), null);
+  assert.equal(namedRepos({ repos: [{ slug: 'mozilla/fxa', role: 'work' }] }, 'fxa docs'), null);
 });
 
 test('valueRepo: the repo after the key, or after the login', () => {

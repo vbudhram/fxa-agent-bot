@@ -102,13 +102,75 @@ export function stackRepoCard(team, picked) {
 
 // The turn-end rows for a stack: one row for each repo with changes. A button's value is
 // "<key>|<slug>". No PR buttons on a read-only profile or a repo that ships as a diff.
+// With 2 or more PRs to ship: one Open N PRs, one Diff for all, and each repo's own buttons in a
+// More menu (an overflow holds only 5). An option's value is "<action_id> <key>|<slug>".
 export function treeRows(key, trees, { readOnly = false } = {}) {
-  return (trees ?? []).filter((t) => t.changes > 0 && SLUG.test(t.slug ?? '')).map((t) => {
+  const pt = (text) => ({ type: 'plain_text', text });
+  const changed = (trees ?? []).filter((t) => t.changes > 0 && SLUG.test(t.slug ?? ''));
+  const own = (t) => {
     const name = String(t.name || t.slug.split('/')[1]).slice(0, 30);
     const ship = readOnly || t.out !== 'pr' ? [] : t.pr ? [[`Update PR · ${name}`, 'open_pr']] : [[`Open PR · ${name}`, 'open_pr'], [`Push · ${name}`, 'push_branch']];
-    return { type: 'actions', elements: [[`Diff · ${name}`, 'diff'], ...ship].map(([label, action]) => ({
-      type: 'button', text: { type: 'plain_text', text: label }, action_id: action, value: `${key}|${t.slug}` })) };
-  });
+    return [[`Diff · ${name}`, 'diff'], ...ship];
+  };
+  const prs = changed.filter((t) => own(t).length > 1);
+  if (prs.length < 2) return changed.map((t) => ({ type: 'actions', elements: own(t).map(([label, action]) => ({
+    type: 'button', text: pt(label), action_id: action, value: `${key}|${t.slug}` })) }));
+  return [{ type: 'actions', elements: [
+    { type: 'button', style: 'primary', text: pt(`${prs.every((t) => t.pr) ? 'Update' : 'Open'} ${prs.length} PRs`), action_id: 'open_prs', value: key },
+    { type: 'button', text: pt('Diff'), action_id: 'diff', value: key },
+    { type: 'static_select', action_id: 'tree_more', placeholder: pt('More'),
+      options: changed.flatMap((t) => own(t).map(([label, action]) => ({ text: pt(label.slice(0, 75)), value: `${action} ${key}|${t.slug}` }))).slice(0, 100) },
+  ] }];
+}
+
+// The repos a stack ships as PRs now: each with changes that the App can push to.
+export const shipRepos = (trees) => (trees ?? []).filter((t) => t.changes > 0 && t.out === 'pr' && SLUG.test(t.slug ?? '')).map((t) => t.slug);
+
+// A button row once a ship starts. One repo of a stack (a slug) loses its own Open PR and Push, in
+// the buttons and the More menu, and Open N PRs goes; any other ship (no repo, or several) takes every button.
+export function afterShip(blocks, repo) {
+  const mine = (action, value) => ['open_pr', 'push_branch'].includes(action) && valueRepo(value) === repo;
+  const keep = (e) => {
+    if (typeof repo !== 'string' || e.action_id === 'open_prs') return null;
+    if (e.action_id !== 'tree_more') return mine(e.action_id, e.value) ? null : e;
+    const options = (e.options ?? []).filter((o) => !mine(...String(o.value).split(' ')));
+    return options.length ? { ...e, options } : null;
+  };
+  return (blocks ?? []).map((x) => (x.type === 'actions' ? { ...x, elements: (x.elements ?? []).map(keep).filter(Boolean) } : x))
+    .filter((x) => x.type !== 'actions' || x.elements.length);
+}
+
+// A short reply that only asks to ship: "open PR", "open both PRs", "ship it", "open PR for docs".
+// {repo: the repo word, or null for every repo}, or null when the text says anything more.
+const SHIP_LEAD = /^(?:(?:ok|okay|yes|yep|great|cool|thanks|thank you|please|pls|now|go ahead and|go ahead,?|can you|could you|would you|let'?s)\s+)+/;
+const SHIP_TAIL = /(?:\s+(?:please|pls|now|thanks|thank you|then))+$/;
+const SHIP_ASK = /^(?:(?:open|ship|create|raise|make|send)(?:\s+(?:the|a|both|all|all the|2|two|those|these|my|our))?\s+(?:prs?|pull requests?)|ship\s+(?:it|them|both))(?:\s+(?:for|in|on)\s+(?:the\s+)?([\w./-]+)(?:\s+repo)?)?$/;
+export function shipAsk(text) {
+  const t = String(text ?? '').toLowerCase().replace(/[.!?,;:]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!t || t.length > 60) return null;
+  const m = t.replace(SHIP_LEAD, '').replace(SHIP_TAIL, '').match(SHIP_ASK);
+  return m ? { repo: m[1] ?? null } : null;
+}
+
+// The tree a word names: its name, slug, or one of the team's aliases for it (any case). null for none.
+export function treeFor(trees, word, aliases = {}) {
+  const w = String(word ?? '').toLowerCase();
+  if (!w) return null;
+  return (trees ?? []).find((t) => [t.name, t.slug, ...(aliases[t.slug] ?? [])].some((x) => String(x ?? '').toLowerCase() === w))?.slug ?? null;
+}
+
+// A plain @mention in a team with several work repos: its default repos, plus each work repo that
+// the task names by slug, short name or alias (a whole word, any case). null when it names none more.
+export function namedRepos(team, text) {
+  const work = (team?.repos ?? []).filter((r) => r.role === 'work' && SLUG.test(r.slug));
+  if (work.length < 2) return null;
+  const base = stackRepos(team).repos;
+  const t = String(text ?? '').toLowerCase();
+  const esc = (w) => w.toLowerCase().replace(/[.*+?^$()|[\]\\{}]/g, '\\$&');
+  const said = (w) => new RegExp(`(^|[^\\w/-])${esc(w)}($|[^\\w/-])`).test(t);
+  const add = work.filter((r) => !base.some((b) => b.toLowerCase() === r.slug.toLowerCase())
+    && [r.slug, r.slug.split('/')[1], ...(r.aliases ?? [])].some(said)).map((r) => r.slug);
+  return add.length ? [...base, ...add] : null;
 }
 
 // A button value's repo: "<key>|<slug>" or "<key>|<login>|<slug>"; null for none.

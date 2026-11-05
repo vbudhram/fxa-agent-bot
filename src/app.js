@@ -16,7 +16,8 @@ import { resolveProfile, mayStart, isAdmin, mayOpenPr } from './profile.js';
 import { teamChannels, reviewRounds } from './teams.js';
 import { ROUTINES_ENV, TICK_MS, NO_CHANNEL, channelRefusal, inFlightGuard, muted, mutedReply, pollChannels, pollUsers } from './routines.js';
 import { ingest } from './db.js';
-import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs } from './stack.js';
+import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs,
+  shipRepos, afterShip, shipAsk, treeFor, namedRepos } from './stack.js';
 import { asksForJira, JIRA_YES, draftCard, filedCard, changedCard, editModal, readEdit } from './jira-draft.js';
 import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateAllows, loadMembers, maySteer, mayTap, SHIP_ACTIONS, PR_ACTIONS, askedShip } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, fromAdmin, ADMIN, LINE_BREAK, laterMessage, slackLinks, threadFile,
@@ -277,12 +278,23 @@ async function onMention({ event, body, client }) {
   const { ts } = START_DELAY_S ? await client.chat.postMessage({ channel: event.channel, thread_ts,
     text: resume_from ? 'Picking up where we left off.' : 'Starting.',
     blocks: startCard(key, prompt, START_DELAY_S, Boolean(resume_from), runtime, CODEX) }).catch((e) => { pending.delete(key); throw e; }) : {};
+  // The team, read once: its card, its repo aliases, and for a plain tag the repos the task names (namedRepos).
+  // FxA's read runs beside the thread read below, so a tag there waits no longer.
+  const team = prof.profile || 'fxa', picked = choice?.user === event.user, task = prompt;
+  const infoP = resume_from ? null : ctl.profileInfo(team).catch((e) => { console.error('profile_show', team, e.message); return null; });
+  // A team card, and the repos the session starts with: the pick's, else the defaults plus the named ones.
+  const withTeam = async (info, card) => {
+    const repos = info && !picked ? namedRepos(info, task) : null;
+    const aliases = Object.fromEntries((info?.repos ?? []).filter((r) => r.aliases?.length).map((r) => [r.slug, r.aliases]));
+    // The card names a private team's repos, so it waits for the channel check in begin() there.
+    if (info && (card || repos) && (info.private === false || await codeAllowed({ private: true, channel: event.channel }, client)))
+      await client.chat.postMessage({ channel: event.channel, thread_ts, ...teamCard(info, repos ?? (picked ? choice.repos : null)) }).catch(() => {});
+    if (pending.has(key)) pending.set(key, { ...pending.get(key), ...(repos ? { repos } : {}), ...(Object.keys(aliases).length ? { aliases } : {}) });
+  };
   // Another team's session: say which repos it can touch, and how, before it starts.
   if (prof.profile && prof.profile !== 'fxa' && !resume_from) {
-    const info = await ctl.profileInfo(prof.profile).catch((e) => { console.error('profile_show', prof.profile, e.message); return null; });
-    // The card names a private team's repos, so it waits for the channel check in begin() there.
-    if (info && (info.private === false || await codeAllowed({ private: true, channel: event.channel }, client)))
-      await client.chat.postMessage({ channel: event.channel, thread_ts, ...teamCard(info) }).catch(() => {});
+    const info = await infoP;
+    await withTeam(info, true);
     // Fail closed: with no answer, the session shows no PR buttons; the controller refuses a read-only push anyway.
     // private (a private repo): fail closed too, so its code stays out of public channels.
     if (pending.has(key)) pending.set(key, { ...pending.get(key), read_only: info ? info.read_only : true, private: info ? info.private !== false : true });
@@ -290,6 +302,8 @@ async function onMention({ event, body, client }) {
   // user: whose lines are labelled "owner", the session's owner, not whoever tagged.
   const earlier = [], full = {};
   if (event.thread_ts) prompt += await threadContext(client, { ...event, user: pending.get(key)?.owner ?? event.user }, { withBot: cur?.state === 'answered', files: earlier, full });
+  if (!pending.has(key)) return;
+  if (infoP && !(prof.profile && prof.profile !== 'fxa')) { const info = await infoP; if (pending.has(key)) await withTeam(info, false); }
   if (!pending.has(key)) return;
   // Files posted earlier in the thread ship with the boot too, beside the tag's own; so does the whole thread.
   if (earlier.length) pending.set(key, { ...pending.get(key), held_files: [...earlier, ...pending.get(key).held_files] });
@@ -333,6 +347,7 @@ async function begin(key, client) {
   if (from?.prs) pr.prs = carryPrs(from.prs, Boolean(rest.moved_from));
   if (rest.moved_from) Object.assign(pr, { pr_card_ts: null, pr_card_head: null, pr_card_text: null });
   if (from?.trees) pr.trees = from.trees;
+  if (from?.aliases && !rest.aliases) pr.aliases = from.aliases;
   // The thread's newest buttons move with it, so the new session's first row retires them. Not on a move: those are in the old thread.
   const prior = from ?? sessions.get(rest.channel, rest.thread_ts);
   if (prior?.buttons_msg && !rest.moved_from) pr.buttons_msg = prior.buttons_msg;
@@ -807,6 +822,12 @@ async function onMessage({ message, client, replay = false }) {
     await fileDraft(s, card.d, message.user, false, card.priv, card.ts);
     return;
   }
+  // "open PR" (or "ship it", "open PR for docs") from someone who may tap Open PR is that tap: !pr, no agent turn.
+  const ask = !message.files?.length && ['active', 'paused', 'stopped', 'failed'].includes(s.state) && shipAsk(text);
+  if (ask && mayTap('open_pr', s.owner, message.user, allowed(message.channel, message.user), STEER_ANYONE, onTeam(s, message.user), adminOf(s, message.user), prOk(s, message.user))) {
+    await bang(s, `!pr${ask.repo ? ` ${ask.repo}` : ''}`, { user: message.user, channel: message.channel, thread_ts: message.thread_ts, ts: message.ts }, client);
+    return;
+  }
   // A reply continues a session that has ended, as a tag does: paused, stopped,
   // failed, or with its PR still open (the reply is often about the review).
   const prDone = ['MERGED', 'CLOSED'].includes(s.pr_seen?.state);
@@ -1097,15 +1118,16 @@ async function checkout(s, p, text, m, client, note, teams) {
   await begin(key, client);
 }
 
-// treeArg: the repo a stack command names ("!pr pyfxa", "!pr mozilla/PyFxA"). undefined for a
-// session with one repo; false for a stack with none named or none that matches.
+// treeArg: the repo a stack command names ("!pr pyfxa", "!pr mozilla/PyFxA", "!pr docs" for an alias).
+// undefined for a session with one repo; null for a stack with none named; false for none that matches.
 function treeArg(s, text) {
   const trees = fresh(s.key)?.trees;
   if (!trees?.length) return undefined;
-  const a = (text.trim().split(/\s+/)[1] ?? '').toLowerCase();
-  const t = trees.find((x) => x.name?.toLowerCase() === a || x.slug?.toLowerCase() === a);
-  return t ? t.slug : false;
+  const a = text.trim().split(/\s+/)[1] ?? '';
+  return a ? treeFor(trees, a, fresh(s.key).aliases) ?? false : null;
 }
+// What a ship of these repos is called: several are "Open 2 PRs".
+const shipWhat = (s, repo) => (Array.isArray(repo) ? `Open ${repo.length} PRs` : prView(s, repo)?.pr_url ? 'Update PR' : 'Open PR');
 
 // Bang commands, as in Claude Tag: @fxa-agent !status, !help, and so on. The
 // ones that change the session are for its owner.
@@ -1149,12 +1171,17 @@ async function bang(s, text, m, client) {
     await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: c.text, blocks: [...c.blocks.slice(0, -1), ...extra, c.blocks.at(-1)] });
   } else if (cmd === 'pr' || cmd === 'push') {
     if (steerOnly() || prOnly()) return;
-    // A team stack ships one repo: !pr <name> or !pr <owner/repo>.
-    const repo = treeArg(s, text);
-    if (repo === false) { await note(`Name the repo: \`!${cmd} <repo>\`, one of ${(fresh(s.key).trees ?? []).map((t) => `\`${t.name}\``).join(', ')}.`); return; }
+    // A team stack: !pr <name> or !pr <owner/repo> ships that repo; !pr alone ships each changed repo with a PR.
+    let repo = treeArg(s, text);
+    if (repo === false || (repo === null && cmd === 'push')) { await note(`Name the repo: \`!${cmd} <repo>\`, one of ${(fresh(s.key).trees ?? []).map((t) => `\`${t.name}\``).join(', ')}.`); return; }
+    if (repo === null) {
+      const all = shipRepos(fresh(s.key).trees);
+      if (!all.length) { await note('No repo that ships as a PR has changes, so there is nothing to open. Use `!diff`.'); return; }
+      repo = all.length === 1 ? all[0] : all;
+    }
     if (ENDED.includes(fresh(s.key).state)) { await resumeToShip(fresh(s.key), client, cmd === 'push' ? 'push' : 'pr', repo); return; }
     if (!readyToShip()) return;
-    const what = cmd === 'push' ? 'Push branch' : prView(fresh(s.key), repo).pr_url ? 'Update PR' : 'Open PR';
+    const what = cmd === 'push' ? 'Push branch' : shipWhat(fresh(s.key), repo);
     const busy = await startWrap(s, client, what, m.user, undefined, repo);
     if (busy) { await note(busy); return; }
     await (cmd === 'push' ? pushBranch(s, client, repo) : openPr(s, client, repo)).catch((e) => shipFailed(client, s, e, what));
@@ -1690,8 +1717,15 @@ async function updateStatusNow(s, state, activity) {
   return { ...STATUS_CLEAR, status_text: null, status_box: null };
 }
 
-const ownerAction = (id, fn) => app.action(id, async ({ ack, body, action, client }) => {
+const tapFns = new Map();
+const ownerAction = (id, fn) => { tapFns.set(id, fn); app.action(id, async ({ ack, body, action, client }) => { await ack(); await ownerTap(id, fn, body, action, client); }); };
+// A stack's More menu: the option's value is "<action_id> <key>|<slug>", the same tap as that button.
+app.action('tree_more', async ({ ack, body, action, client }) => {
   await ack();
+  const [id, value = ''] = String(action.selected_option?.value ?? '').split(' ');
+  if (['diff', 'open_pr', 'push_branch'].includes(id)) await ownerTap(id, tapFns.get(id), body, { value }, client);
+});
+async function ownerTap(id, fn, body, action, client) {
   // A value can carry more after the key: "<key>|<login>".
   const s = sessions.all().find((x) => x.key === action.value.split('|')[0]);
   if (!s) return;
@@ -1704,7 +1738,7 @@ const ownerAction = (id, fn) => app.action(id, async ({ ack, body, action, clien
     return;
   }
   await fn(s, client, action, body).catch((e) => fail(client, s, e));
-});
+}
 
 // 8: a one-line summary a phone can read, with the diff as a highlighted snippet.
 const working = (s, body, text) => app.client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: body.user.id, text }).catch(() => {});
@@ -1788,9 +1822,7 @@ async function startWrap(s, client, what, user, msg, repo) {
   const bm = fresh(s.key)?.buttons_msg, target = msg ?? (bm && { ...bm, blocks: bm.full ?? bm.blocks });
   if (target?.ts) {
     unwrap.set(s.key, { ts: target.ts, text: target.text, blocks: target.blocks, bm: fresh(s.key)?.buttons_msg ?? null });
-    const keep = (e) => repo && !(['open_pr', 'push_branch'].includes(e.action_id) && valueRepo(e.value) === repo);
-    let blocks = (target.blocks ?? []).map((x) => (x.type === 'actions' ? { ...x, elements: (x.elements ?? []).filter(keep) } : x))
-      .filter((x) => x.type !== 'actions' || x.elements.length);
+    let blocks = afterShip(target.blocks, repo);
     // The answer hint points at buttons: with none left, it goes too.
     if (!blocks.some((x) => x.type === 'actions')) blocks = blocks.filter((x) => x.block_id !== 'answer_hint');
     await client.chat.update({ channel: s.channel, ts: target.ts, text: target.text,
@@ -1827,6 +1859,15 @@ ownerAction('open_pr', async (s, client, action, body) => {
   if (!(await wrapTap(s, client, body, `${prView(fresh(s.key), repo)?.pr_url ? 'Update PR' : 'Open PR'}${repo ? ` · ${repo}` : ''}`, repo))) return;
   await (ENDED.includes(fresh(s.key)?.state) ? resumeToShip(fresh(s.key), client, 'pr', repo) : openPr(s, client, repo))
     .catch((e) => shipFailed(client, s, e, prView(fresh(s.key), repo)?.pr_url ? 'Update PR' : 'Open PR'));
+});
+// Open N PRs on a stack: each changed repo that ships as a PR, one after another (one controller job).
+ownerAction('open_prs', async (s, client, action, body) => {
+  const all = shipRepos(fresh(s.key)?.trees);
+  if (!all.length) { working(s, body, 'No repo that ships as a PR has changes now.'); return; }
+  const repo = all.length === 1 ? all[0] : all;
+  if (!(await wrapTap(s, client, body, shipWhat(fresh(s.key), repo), repo))) return;
+  await (ENDED.includes(fresh(s.key)?.state) ? resumeToShip(fresh(s.key), client, 'pr', repo) : openPr(s, client, repo))
+    .catch((e) => shipFailed(client, s, e, shipWhat(fresh(s.key), repo)));
 });
 ownerAction('push_branch', async (s, client, action, body) => {
   const repo = valueRepo(action.value);
@@ -1867,7 +1908,7 @@ async function shipAfterResume(key, what, ev) {
     return;
   }
   const repo = s.then_wrap_repo ?? undefined;
-  if (await startWrap(s, app.client, what === 'push' ? 'Push branch' : prView(s, repo).pr_url ? 'Update PR' : 'Open PR', s.owner, undefined, repo)) return;
+  if (await startWrap(s, app.client, what === 'push' ? 'Push branch' : shipWhat(s, repo), s.owner, undefined, repo)) return;
   await (what === 'push' ? pushBranch(s, app.client, repo) : openPr(s, app.client, repo))
     .catch((e) => shipFailed(app.client, s, e, what === 'push' ? 'Push branch' : 'Open PR'));
 }
@@ -1876,10 +1917,10 @@ async function shipOnAsk(key, a) {
   const s = fresh(key);
   if (!s) return;
   if (a.refuse) {
-    await postMsg(key, { text: a.refuse === 'access' ? PR_REFUSAL : `Name the repo: \`!pr <repo>\`, one of ${(s.trees ?? []).map((t) => `\`${t.name}\``).join(', ')}.` });
+    await postMsg(key, { text: a.refuse === 'access' ? PR_REFUSAL : 'No repo that ships as a PR has changes, so I opened nothing. Use `!diff`.' });
     return;
   }
-  const what = prView(s, a.repo).pr_url ? 'Update PR' : 'Open PR';
+  const what = shipWhat(s, a.repo);
   const busy = await startWrap(s, app.client, what, s.asked_by ?? s.owner, undefined, a.repo);
   if (busy) { await postMsg(key, { text: busy }); return; }
   await openPr(s, app.client, a.repo).catch((e) => shipFailed(app.client, s, e, what));

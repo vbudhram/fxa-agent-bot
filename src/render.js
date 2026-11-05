@@ -72,7 +72,9 @@ export function startCard(key, prompt, seconds, resuming = false, runtime = 'cla
 // A team stack (more than one work repo): every repo can be changed, and one the App cannot
 // push to ships as a diff in the thread instead of a PR.
 const TOOL = { argocd: 'Argo CD', bugzilla: 'Bugzilla', figma: 'Figma', github: 'GitHub', grafana: 'Grafana', jira: 'Jira', sentry: 'Sentry', slack: 'Slack' };
-export function teamCard({ profile, label, read_only, repos = [], mcp = null }) {
+// picked: the session's repos (a pick, or the ones a plain tag named); the card lists only those work repos.
+export function teamCard({ profile, label, read_only, repos: all = [], mcp = null }, picked = null) {
+  const repos = picked ? all.filter((r) => r.role !== 'work' || picked.some((p) => p.toLowerCase() === r.slug.toLowerCase())) : all;
   const stack = repos.filter((r) => r.role === 'work').length > 1;
   const name = `${label && label !== profile ? label : `${profile.charAt(0).toUpperCase()}${profile.slice(1)}`} session${read_only ? ' (read-only)' : ''}`;
   const line = (r) => r.role === 'dep' ? `👁 \`${r.slug}\` runs locally beside it; read-only`

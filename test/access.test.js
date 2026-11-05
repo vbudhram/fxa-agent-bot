@@ -100,7 +100,11 @@ test('a turn that ends with ship: pr opens the PR for a person on the PR list, a
   assert.deepEqual(askedShip(ev, s, true), { repo: undefined });
   assert.deepEqual(askedShip(ev, { ...s, trees: [{ slug: 'o/a' }] }, true), { repo: 'o/a' });
   assert.deepEqual(askedShip(ev, s, false), { refuse: 'access' });
-  assert.deepEqual(askedShip(ev, { ...s, trees: [{ slug: 'o/a' }, { slug: 'o/b' }] }, true), { refuse: 'repo' });
+  // A stack of several repos ships every changed repo that ships as a PR; none changed: nothing to open.
+  assert.deepEqual(askedShip(ev, { ...s, trees: [{ slug: 'o/a' }, { slug: 'o/b' }] }, true), { refuse: 'none' });
+  const trees = [{ slug: 'o/a', out: 'pr', changes: 2 }, { slug: 'o/b', out: 'pr', changes: 1 }, { slug: 'o/c', out: 'diff', changes: 1 }, { slug: 'o/d', out: 'pr', changes: 0 }];
+  assert.deepEqual(askedShip(ev, { ...s, trees }, true), { repo: ['o/a', 'o/b'] });
+  assert.deepEqual(askedShip(ev, { ...s, trees: trees.slice(1) }, true), { repo: 'o/b' });
   assert.equal(askedShip({ ...ev, ship: undefined }, s, true), null);
   assert.equal(askedShip({ ...ev, status: 'needs-input' }, s, true), null);
   assert.equal(askedShip({ type: 'question', ship: true }, s, true), null);
