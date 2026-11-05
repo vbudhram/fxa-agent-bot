@@ -126,6 +126,11 @@ test('a ready turn offers Diff and PR only when files changed', () => {
   assert.deepEqual(ids(render('agent-x', { type: 'turn_end', status: 'ready', text: 'Done.', changes: 3, desktop: true })), ['diff', 'open_pr', 'push_branch', 'desktop']);
   // Unknown count (the runner did not answer): keep the buttons.
   assert.deepEqual(ids(render('agent-x', { type: 'turn_end', status: 'ready', text: 'Done.' })), ['diff', 'open_pr', 'push_branch']);
+  // A finished change the runner could not check: the buttons, and a warning above them.
+  const u = render('agent-x', { type: 'turn_end', status: 'ready', untested: true, text: 'Done.', changes: 1 });
+  assert.deepEqual(ids(u), ['diff', 'open_pr', 'push_branch']);
+  assert.match(JSON.stringify(u.blocks), /Not tested here/);
+  assert.doesNotMatch(JSON.stringify(render('agent-x', { type: 'turn_end', status: 'ready', text: 'Done.', changes: 1 }).blocks), /Not tested here/);
 });
 
 test('a test plan renders as one short line per item', async () => {

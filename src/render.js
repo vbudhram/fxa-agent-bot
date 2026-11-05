@@ -372,7 +372,9 @@ export function render(key, ev) {
         // A read-only profile ships nothing: Diff only.
         ...(ev.status === 'ready' && ev.changes !== 0 && !Array.isArray(ev.trees) ? [['Diff', 'diff'], ...(ev.read_only ? [] : ev.pr ? [['Update PR', 'open_pr']] : [['Open PR', 'open_pr'], ['Push branch', 'push_branch']])] : []),
         ...(ev.status === 'ready' && ev.changes !== 0 && ev.desktop ? [['Try it in Firefox', 'desktop']] : [])];
-      return { text: plain(full), blocks: [md(head), ...(row.length ? [buttons(key, ...row)] : []), ...trees], ...(more ? { more } : {}) };
+      // untested: the host found a finished change that the runner could not check.
+      const warn = ev.status === 'ready' && ev.untested ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: ':warning: Not tested here. Check it before you merge.' }] }] : [];
+      return { text: plain(full), blocks: [md(head), ...warn, ...(row.length ? [buttons(key, ...row)] : []), ...trees], ...(more ? { more } : {}) };
     }
     case 'pr': {
       const head = !gh(ev.url) ? 'The PR is up; its link did not look like a GitHub PR, so check the repo.'
