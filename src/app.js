@@ -109,15 +109,17 @@ const allowed = (channel, user) => inChannels(channel) && (USERS.includes('*') |
 // alone let a person allowed in the channel but not on a gated team drive that team's repos and secrets.
 // A routine run has no person on it: nobody steers, answers, interrupts or resumes it (D24).
 // A team admin takes over any control in the team's threads, as the owner can.
-const adminOf = (s, user) => !!s && !s.routine && isAdmin(sessionTeam(s, fresh), user);
+// routine_pr: a review round on a routine's PR, which keeps the routine thread's rules (D24).
+const ofRoutine = (s) => Boolean(s?.routine || s?.routine_pr);
+const adminOf = (s, user) => !!s && !ofRoutine(s) && isAdmin(sessionTeam(s, fresh), user);
 const boss = (s, user) => user === s?.owner || adminOf(s, user);
 // The agent's copy of a person's words: the owner's as is, an admin's as an owner's but named, anyone else's labelled as context.
 const voice = (s, user, t) => (user === s?.owner ? t : adminOf(s, user) ? fromAdmin(t) : fromOther(t));
 const speaker = (s, user) => (user === s?.owner ? 'the person who started this session' : adminOf(s, user) ? ADMIN : 'someone else in the thread, not the person who started this session');
 const prOk = (s, user) => mayOpenPr(sessionTeam(s, fresh), user);
-const onTeam = (s, user) => !s?.routine && (boss(s, user) || mayStart(sessionTeam(s, fresh), user));
+const onTeam = (s, user) => !ofRoutine(s) && (boss(s, user) || mayStart(sessionTeam(s, fresh), user));
 // A routine posts in the channel its admin set (checked at its start), which need not be an allowed one.
-const here = (s) => Boolean(s.routine) || reachable(s, [...CHANNELS, ...teamChannels()]);
+const here = (s) => ofRoutine(s) || reachable(s, [...CHANNELS, ...teamChannels()]);
 
 // A pause to switch runtime or cancel. With Codex off there is nothing to switch, so start at once.
 const START_DELAY_S = process.env.CODEX_ENABLED === '1' ? 10 : 0;
@@ -189,7 +191,7 @@ async function onMention({ event, body, client }) {
   noteAsker(event.ts, event.user);
   // A routine's thread: a tag gets a hint for that person only, and never steers or starts anything (D24).
   // The hint follows what the thread shows (rt.hint, set at the run's end); a run still at work gets 'run'.
-  const rt = event.thread_ts && sessions.get(event.channel, event.thread_ts)?.routine;
+  const ts_ = event.thread_ts && sessions.get(event.channel, event.thread_ts), rt = ts_ && (ts_.routine ?? ts_.routine_pr);
   if (rt) { await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts: event.thread_ts, text: routineHint(rt.fix ? 'fix' : rt.hint ?? (rt.ended === 'report' ? 'report' : rt.ended === 'ok' ? 'pr' : 'run'), rt.fix) }).catch(() => {}); return; }
   if (!allowed(event.channel, event.user)) {
     // A channel the bot does not watch: one short reply per thread to a person it would serve, and a log line,
@@ -353,6 +355,8 @@ async function begin(key, client) {
   if (prior?.buttons_msg && !rest.moved_from) pr.buttons_msg = prior.buttons_msg;
   // The team the resumed session ran as: the new record replaces the old one in this thread, and launch checks it.
   if (from) pr.resumed_profile = from.profile ?? from.resumed_profile;
+  // A round on a routine's PR: the thread stays a routine thread, and its tags get the PR hint.
+  if (ofRoutine(from)) pr.routine_pr = { hint: 'pr' };
   // private (a private repo) on every way a session starts: a resume keeps it, else the team says, and no answer is private.
   if (rest.private === undefined) {
     // A moved PR whose old session left the map: its team comes from find-pr (rest.resumed_profile).
@@ -537,7 +541,7 @@ async function launch(key, client, since = Date.now(), retry = false) {
   const team = s.profile ?? s.resumed_profile;
   // A routine run has no person: the tick applied the team's gates, and ctl takes the run from its row (D6).
   const routine = Boolean(s.routine);
-  if (!routine && team && !mayStart(team, s.owner)) {
+  if (!routine && !s.routine_pr && team && !mayStart(team, s.owner)) {
     sessions.patch(key, { state: 'stopped' });
     dropInbox(key, inboxes.get(key));
     await say(s, `<@${s.owner}> is not on the ${team} team now, so this session does not start.`).catch(() => {});
@@ -780,7 +784,7 @@ async function onMessage({ message, client, replay = false }) {
   if (message.subtype && !['thread_broadcast', 'file_share'].includes(message.subtype)) return;
   const s = sessions.get(message.channel, message.thread_ts);
   // People discuss a routine's result in its thread: a plain reply gets no answer and steers nothing.
-  if (s?.routine) return;
+  if (ofRoutine(s)) return;
   // Starting (no session yet, or a resume of one): the reply joins the start. A tag's app_mention returns on the reservation.
   if (allowed(message.channel, message.user) && !strip(message.text).startsWith('!') && joinStarting(message, strip(message.text))) return;
   if (!s) return;
@@ -1786,7 +1790,7 @@ app.action('more', async ({ ack, body, action, client }) => {
 app.action('interrupt', async ({ ack, body, action, client }) => {
   await ack();
   const s = fresh(action.value);
-  if (!s || s.routine || !allowed(s.channel, body.user.id)) return;
+  if (!s || ofRoutine(s) || !allowed(s.channel, body.user.id)) return;
   await interrupt(s, client, body).catch((e) => fail(client, s, e));
 });
 async function interrupt(s, client, body) {
@@ -2756,7 +2760,7 @@ async function autoRound(s, prev, cur) {
   const max = reviewRounds(s.profile);
   const why = (s.auto_rounds ?? 0) >= max ? (max ? `I already ran ${max} automatic round${max === 1 ? '' : 's'} on this PR.` : 'This team runs no automatic rounds.')
     : (s.edited_at ?? 0) > s.pr_pushed_at ? 'Files changed since the last push, so I will fix it without pushing; you push with Update PR.'
-    : ['stopped', 'failed'].includes(s.state) ? 'This session was stopped.' : '';
+    : ['stopped', 'failed'].includes(s.state) && !ofRoutine(s) ? 'This session was stopped.' : '';
   pp(seen);
   // A stack's round names its repo, so the agent works in that tree.
   const text = `${s.repo ? `This is about ${s.repo}, in /workspace/${s.repo.split('/')[1].toLowerCase()}.\n\n` : ''}${job.text}`;
@@ -2850,6 +2854,11 @@ async function endRoutine(key, end) {
   const a = await done(key).catch((e) => (/is not session/.test(e.stderr ?? '') ? done(undefined) : Promise.reject(e)))
     .catch((e) => { console.error('routine', key, `run ${r.run} done: ${e.stderr || e.message}`); return null; });
   if (!['stopped', 'failed'].includes(fresh(key)?.state)) await stopSession(key);
+  // The thread follows the routine's PR as any session's: a Copilot review or a red CI run starts a round (autoRound).
+  if (a?.changed && end.state === 'ok' && end.pr && !r.fix && s.channel !== NO_CHANNEL) {
+    sessions.patch(key, prPatch(fresh(key), end.repo, { pr_url: end.pr, pr_follow_since: Date.now(), pr_pushed_at: Date.now(), pr_follow_done: false }));
+    if (end.repo) sessions.patch(key, { pr_url: end.pr });
+  }
   // The text follows what ctl recorded: no answer is a store error, and a call that changed nothing shows the
   // row's own end, never this call's report (its scan did not run on what is kept).
   const post = a?.changed === true && a.post === true;
@@ -2877,7 +2886,7 @@ async function endRoutine(key, end) {
 async function routineEvent(key, ev) {
   const r = fresh(key)?.routine;
   if (!r || r.ended) return;
-  if (r.finishing && ev.type === 'pr' && ev.url) return endRoutine(key, { state: 'ok', pr: ev.url });
+  if (r.finishing && ev.type === 'pr' && ev.url) return endRoutine(key, { state: 'ok', pr: ev.url, repo: ev.repo ?? null });
   // ctl's wrap-up error when the agent chose to ship nothing: its reason is already in the thread.
   if (r.finishing && ev.type === 'error' && /I wrote no handoff/.test(ev.text ?? '')) return endRoutine(key, { state: 'nochange' });
   if (ev.type === 'error') return endRoutine(key, { state: 'failed', reason: String(ev.text ?? '').split('\n')[0].slice(0, 300) || 'the turn failed' });
