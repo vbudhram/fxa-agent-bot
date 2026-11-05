@@ -126,6 +126,10 @@ export function treeRows(key, trees, { readOnly = false } = {}) {
 // The repos a stack ships as PRs now: each with changes that the App can push to.
 export const shipRepos = (trees) => (trees ?? []).filter((t) => t.changes > 0 && t.out === 'pr' && SLUG.test(t.slug ?? '')).map((t) => t.slug);
 
+// The agent still writes "Tap Open PR below" for one button; with n PR buttons, name the real ones.
+export const shipHint = (text, n) => (n < 2 ? text : String(text ?? '').replace(/\b(t)ap (?:the )?Open PR(?: button)?(?: below)?\.?/gi,
+  (_, t) => `${t === 'T' ? 'R' : 'r'}eply \`open PR\`, or tap Open ${n} PRs.`));
+
 // A button row once a ship starts. One repo of a stack (a slug) loses its own Open PR and Push, in
 // the buttons and the More menu, and Open N PRs goes; any other ship (no repo, or several) takes every button.
 export function afterShip(blocks, repo) {

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseStack, teamAlias, stackHelp, STACK_ADD, stackRepos, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, treeRows, valueRepo, prView, prPatch, followTargets, carryPrs,
-  shipRepos, afterShip, shipAsk, treeFor, namedRepos } from '../src/stack.js';
+  shipRepos, afterShip, shipAsk, treeFor, namedRepos, shipHint } from '../src/stack.js';
 
 test('parseStack: pick, a team, a checkout, a bad link', () => {
   assert.deepEqual(parseStack('!stack'), { sub: 'pick' });
@@ -178,4 +178,10 @@ test('pickerRefusal: anyone may use an open picker, but not over someone else\'s
   assert.match(pickerRefusal({ user: 'U2', cur, env }), /<@U1>'s session/);
   assert.equal(pickerRefusal({ user: 'U1', cur, env }), null, 'the owner may pick again');
   assert.equal(pickerRefusal({ user: 'U2', cur: { ...cur, pr_seen: { state: 'MERGED' } }, env }), null, 'a merged PR frees the thread');
+});
+
+test('shipHint names the Open N PRs button, and leaves one repo alone', () => {
+  assert.equal(shipHint('Done.\n\nTap Open PR below.', 2), 'Done.\n\nReply `open PR`, or tap Open 2 PRs.');
+  assert.equal(shipHint('When ready, tap the Open PR button.', 3), 'When ready, reply `open PR`, or tap Open 3 PRs.');
+  assert.equal(shipHint('Tap Open PR below.', 1), 'Tap Open PR below.');
 });

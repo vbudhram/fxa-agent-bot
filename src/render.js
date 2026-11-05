@@ -1,4 +1,4 @@
-import { treeRows } from './stack.js';
+import { treeRows, shipRepos, shipHint } from './stack.js';
 
 // Event → Slack message. Templates only: the bot states facts from events and
 // never invents status.
@@ -362,7 +362,7 @@ export function render(key, ev) {
     case 'turn_end': {
       if (NOISE.test(ev.text ?? '') && ev.text) return null;
       if (ev.status !== 'needs-input' && ev.status !== 'ready') return null; // working: stay quiet
-      const full = ev.text || EMPTY_FALLBACK;
+      const full = shipHint(ev.text || EMPTY_FALLBACK, ev.status === 'ready' && !ev.read_only ? shipRepos(ev.trees).length : 0);
       // A needs-input reply is not split: its question is often last.
       const [head, more] = ev.status === 'ready' ? splitReply(full) : [full, ''];
       // A team stack: a row for each changed repo (treeRows), each shipping on its own.
