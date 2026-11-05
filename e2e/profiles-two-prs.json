@@ -1,0 +1,4 @@
+[
+  {"profile": "fxa", "label": "fxa", "defaults": [], "repos": [{"slug": "mozilla/fxa", "role": "work", "write": true}]},
+  {"profile": "pyfxa-team", "label": "PyFxA team", "defaults": [], "repos": [{"slug": "mozilla/fxa", "role": "work", "write": true, "aliases": []}, {"slug": "mozilla/ecosystem-platform", "role": "work", "write": true, "aliases": ["docs"]}]}
+]
