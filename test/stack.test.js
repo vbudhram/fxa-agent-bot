@@ -113,6 +113,11 @@ test('shipAsk: a short ship phrase is the Open PR tap; a longer message that onl
     assert.deepEqual(shipAsk(t), { repo: null }, t);
   assert.deepEqual(shipAsk('open PR for docs'), { repo: 'docs' });
   assert.deepEqual(shipAsk('Open the PR for ecosystem-platform, please'), { repo: 'ecosystem-platform' });
+  // A question for the PR is the same ask: the link when there is one, else Open PR.
+  for (const t of ['where is the PR?', "Where's the PR", 'ok where is my PR', 'make a PR', 'is there a PR?'])
+    assert.deepEqual(shipAsk(t), { repo: null, ...(/make/.test(t) ? {} : { where: true }) }, t);
+  assert.deepEqual(shipAsk('where is the PR for docs?'), { repo: 'docs', where: true });
+  for (const t of ['where is the PR description?', 'where is the bug?']) assert.equal(shipAsk(t), null, t);
   for (const t of ["don't open a PR yet", 'why did you open pr 3?', 'open pr 3', 'open the pr and fix the test', 'what about the PR?', 'did you open a PR?', 'open', '', `open pr ${'x'.repeat(60)}`])
     assert.equal(shipAsk(t), null, t);
 });

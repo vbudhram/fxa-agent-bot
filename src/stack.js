@@ -144,16 +144,17 @@ export function afterShip(blocks, repo) {
     .filter((x) => x.type !== 'actions' || x.elements.length);
 }
 
-// A short reply that only asks to ship: "open PR", "open both PRs", "ship it", "open PR for docs".
-// {repo: the repo word, or null for every repo}, or null when the text says anything more.
+// A short reply that only asks to ship: "open PR", "open both PRs", "ship it", "open PR for docs", "where is the PR?".
+// {repo: the repo word, or null for every repo, where: true for a question}, or null when the text says anything more.
 const SHIP_LEAD = /^(?:(?:ok|okay|yes|yep|great|cool|thanks|thank you|please|pls|now|go ahead and|go ahead,?|can you|could you|would you|let'?s)\s+)+/;
 const SHIP_TAIL = /(?:\s+(?:please|pls|now|thanks|thank you|then))+$/;
 const SHIP_ASK = /^(?:(?:open|ship|create|raise|make|send)(?:\s+(?:the|a|both|all|all the|2|two|those|these|my|our))?\s+(?:prs?|pull requests?)|ship\s+(?:it|them|both))(?:\s+(?:for|in|on)\s+(?:the\s+)?([\w./-]+)(?:\s+repo)?)?$/;
+const SHIP_WHERE = /^(?:where(?:'s|’s| is)|is there)\s+(?:the|a|my|our)\s+(?:prs?|pull requests?)(?:\s+(?:for|in|on)\s+(?:the\s+)?([\w./-]+)(?:\s+repo)?)?$/;
 export function shipAsk(text) {
   const t = String(text ?? '').toLowerCase().replace(/[.!?,;:]+/g, ' ').replace(/\s+/g, ' ').trim();
   if (!t || t.length > 60) return null;
-  const m = t.replace(SHIP_LEAD, '').replace(SHIP_TAIL, '').match(SHIP_ASK);
-  return m ? { repo: m[1] ?? null } : null;
+  const s = t.replace(SHIP_LEAD, '').replace(SHIP_TAIL, ''), m = s.match(SHIP_ASK), w = !m && s.match(SHIP_WHERE);
+  return m ? { repo: m[1] ?? null } : w ? { repo: w[1] ?? null, where: true } : null;
 }
 
 // The tree a word names: its name, slug, or one of the team's aliases for it (any case). null for none.

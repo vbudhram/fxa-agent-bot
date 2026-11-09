@@ -239,6 +239,8 @@ async function onMention({ event, body, client }) {
   if (prompt.startsWith('!')) { if (!cur) await bang(null, prompt, { user: event.user, channel: event.channel, thread_ts, ts: event.ts }, client); return; }
   // The work moved to another thread (!stack checkout): the reply handler's resume says so.
   if (cur?.moved_to) return;
+  // "open the PR" or "where is the PR?": the reply handler takes it as the Open PR tap, with no agent turn.
+  if (cur && shipAskOf(cur, prompt, event.files)) return;
   if (cur?.stop_failed) {
     await client.chat.postEphemeral({ channel: event.channel, thread_ts, user: event.user,
       text: 'The last session here did not stop cleanly. `@fxa-agent !stop` first, so its sandbox is not left running.' }).catch(() => {});
@@ -762,6 +764,13 @@ async function crowded(client, s) {
 }
 const untaggedOwner = (m, s) => m.user === s.owner && STEER_MODE === 'mention' && botUserId && !String(m.text ?? '').includes(`<@${botUserId}`);
 const LIVE = ['queued', 'starting', 'active', 'wrapping'];
+// The session's PR links, one for each repo of a stack.
+const prUrls = (s) => [...new Set([s?.pr_url, ...Object.values(s?.prs ?? {}).map((p) => p?.pr_url)].filter(Boolean))];
+// A reply that only asks for the PR (shipAsk) that the reply handler takes as the Open PR tap, or answers with the link.
+const shipAskOf = (s, text, files) => {
+  const a = !files?.length && shipAsk(text);
+  return a && ((a.where && prUrls(s).length) || ['active', 'paused', 'stopped', 'failed'].includes(s.state)) ? a : null;
+};
 async function onMessage({ message, client, replay = false }) {
   noteAsker(message.ts, message.user);
   // A person's reply under a running turn's status: the status moves below it at its next update.
@@ -826,8 +835,13 @@ async function onMessage({ message, client, replay = false }) {
     await fileDraft(s, card.d, message.user, false, card.priv, card.ts);
     return;
   }
-  // "open PR" (or "ship it", "open PR for docs") from someone who may tap Open PR is that tap: !pr, no agent turn.
-  const ask = !message.files?.length && ['active', 'paused', 'stopped', 'failed'].includes(s.state) && shipAsk(text);
+  // "open PR" (or "ship it", "where is the PR?") from someone who may tap Open PR is that tap: !pr, no agent turn.
+  // A question for a PR that exists gets its link.
+  const ask = shipAskOf(s, text, message.files);
+  if (ask?.where && prUrls(s).length && allowed(message.channel, message.user)) {
+    await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: `Here is the PR: ${prUrls(s).join(', ')}` }).catch((e) => console.error('pr link', s.key, e.data?.error ?? e.message));
+    return;
+  }
   if (ask && mayTap('open_pr', s.owner, message.user, allowed(message.channel, message.user), STEER_ANYONE, onTeam(s, message.user), adminOf(s, message.user), prOk(s, message.user))) {
     await bang(s, `!pr${ask.repo ? ` ${ask.repo}` : ''}`, { user: message.user, channel: message.channel, thread_ts: message.thread_ts, ts: message.ts }, client);
     return;
@@ -933,11 +947,9 @@ async function steerEdit(message, client) {
   // Only a message the agent received: one sent after the session started.
   if (Number(m.ts) * 1000 < (s.started_at ?? Infinity) - 60_000) return;
   const edited = `I edited an earlier message. It now says:\n${after}`;
-  const text = `${voice(s, m.user, edited)}\n\n(If that changes nothing important in your last answer, reply in one line.)`;
-  if (s.state === 'queued') { sessions.patch(s.key, { prompt: `${fresh(s.key).prompt}\n\n${text}` }); return; }
-  seen(message.channel, m.ts);
-  if (s.state === 'paused') { addAck(s.key, m.ts); await resumePaused(s, text, client); return; }
-  if (LIVE.includes(s.state)) await steerAndAck(s, text, client, m.user, m.ts);
+  if (s.state === 'queued') { sessions.patch(s.key, { prompt: `${fresh(s.key).prompt}\n\n${voice(s, m.user, edited)}` }); return; }
+  // A turn took the first version (or takes it now): a second turn would answer it twice. The next turn sees the edit.
+  keepAside(s, { user: m.user, text: edited });
 }
 
 // 1: files attached in the thread go to the runner's /workspace/.fxa-inbox/, so
