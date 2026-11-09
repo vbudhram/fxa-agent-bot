@@ -1939,7 +1939,8 @@ async function shipAfterResume(key, what, ev) {
   // A review round updates the PR when it changed files and asked nothing; its reply says the rest.
   if (what === 'pr_auto') {
     const r = roundOutcome(ev, s.round_lines ?? 0), repo = s.then_wrap_repo ?? null;
-    if (r.large) sessions.patch(key, prPatch(fresh(key), repo, { auto_rounds: (prView(fresh(key), repo)?.auto_rounds ?? 0) + 1 }));
+    const v = prView(fresh(key), repo);
+    sessions.patch(key, prPatch(fresh(key), repo, { all_rounds: (v?.all_rounds ?? 0) + 1, ...(r.large ? { auto_rounds: (v?.auto_rounds ?? 0) + 1 } : {}) }));
     if (!r.ship) return;
     what = 'pr';
   }
@@ -2409,7 +2410,9 @@ async function pollOne(key) {
         if (a) setTimeout(() => shipOnAsk(key, a).catch((e) => console.error('ship', key, e.message)), 1000);
       };
       // A Show-nothing turn end (No response requested) still ends the turn: acks and a pending ship.
-      if (!msg) { if (i === endAt) { await settle(fresh(key)); ship(); } continue; }
+      // A resume for Open PR or Push that found its work: the ship's result is the only news.
+      const quiet = i === endAt && ev.type === 'turn_end' && ev.status === 'ready' && ['pr', 'push'].includes(fresh(key)?.then_wrap);
+      if (!msg || quiet) { if (i === endAt) { await settle(fresh(key)); ship(); } continue; }
       if (msg.operator) { const kind = msg.operator; delete msg.operator; if (!firstOperatorNote(key, kind)) continue; }
       if (msg.more !== undefined) { sessions.patch(key, { more_text: msg.more }); delete msg.more; }
       // The PR link's message becomes the PR's card: the follower edits its state into it.
@@ -2785,6 +2788,7 @@ ownerAction('rebase_pr', async (s, client, action, body) => {
 // by itself: the agent fixes what is valid and asks about the rest, and
 // the host updates the PR when the round changed files and asked nothing
 // (shipAfterResume). After the team's pr.review_rounds (2 by default), the owner taps to run another.
+const ROUNDS_CEIL = 10;
 async function autoRound(s, prev, cur) {
   // pr_pushed_at: a PR this bot pushed since rounds began, so older PRs' old reviews start nothing.
   if (!s || s.muted || s.pr_ended || !s.pr_pushed_at) return;
@@ -2814,7 +2818,9 @@ async function autoRound(s, prev, cur) {
   // Ask, and count nothing, when an automatic round could mix with work the owner has in hand.
   const max = reviewRounds(s.profile);
   // The cap counts only large fixes (roundOutcome): small ones go on with no tap.
-  const why = (s.auto_rounds ?? 0) >= max ? (max ? `I already pushed ${max} large fix${max === 1 ? '' : 'es'} to this PR on my own.` : 'This team fixes reviews only when you tap.')
+  // ponytail: a fixed ceiling on all rounds, so a review bot that comments on each push cannot loop.
+  const why = (s.all_rounds ?? 0) >= ROUNDS_CEIL ? `I already ran ${ROUNDS_CEIL} review rounds on this PR on my own.`
+    : (s.auto_rounds ?? 0) >= max ? (max ? `I already pushed ${max} large fix${max === 1 ? '' : 'es'} to this PR on my own.` : 'This team fixes reviews only when you tap.')
     : (s.edited_at ?? 0) > s.pr_pushed_at ? 'Files changed since the last push, so I will fix it without pushing; you push with Update PR.'
     : ['stopped', 'failed'].includes(s.state) && !ofRoutine(s) ? 'This session was stopped.' : '';
   pp(seen);
