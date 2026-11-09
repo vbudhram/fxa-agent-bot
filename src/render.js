@@ -231,6 +231,13 @@ export function ciNote(cur, why) {
   return why ? `CI failed${names}. ${why} Tap to have me fix it.${checks}` : `CI failed${names}; I am fixing it, then I update the PR.${checks}`;
 }
 
+// A review round's end. ship: it changed files (fixed comments, or edited lines) and asked nothing, so the PR
+// updates with no tap. large: its edits added and removed more than LARGE_ROUND_LINES lines, so it counts
+// toward the team's cap on fixes the bot pushes on its own; a small fix never does.
+// ponytail: lines from the agent's Edit and Write calls only; a fix made by a script counts 0.
+export const LARGE_ROUND_LINES = 50;
+export const roundOutcome = (ev, lines = 0) => ({ ship: ev?.type === 'turn_end' && ev.status === 'ready' && (ev.fixed > 0 || lines > 0), large: lines > LARGE_ROUND_LINES });
+
 // One reminder when CI passed a day ago and no person has reviewed the PR. ciPassAt: when the bot saw CI pass.
 export const NUDGE_MS = 24 * 3_600_000;
 // asking: the thread has a question of the bot's that nobody answered, so the reminder repeats it.

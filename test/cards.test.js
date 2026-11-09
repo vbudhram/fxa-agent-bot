@@ -248,9 +248,9 @@ test('prFromStatus: merged and closed, CI none and pass, and a team stack names 
   assert.match(C.prFromStatus({ url, state: 'CLOSED', ci: 'none', reviews: [] }, { key: 'k' }).blocks[0].body.text, /No CI result yet/);
   assert.equal(C.prFromStatus(null, { key: 'k' }), null);
   const open = { url, state: 'OPEN', ci: 'pass', reviews: [] };
-  assert.match(C.prFromStatus(open, { key: 'k', rounds: 2, roundsMax: 2 }).blocks[0].subtext.text, /Automatic rounds: 2 of 2$/);
-  assert.doesNotMatch(C.prFromStatus(open, { key: 'k', rounds: 0, roundsMax: 2 }).blocks[0].subtext.text, /Automatic rounds/);
-  assert.match(JSON.stringify(C.prFromStatus(open, { key: 'k', rounds: 1, roundsMax: 3 }).fallback), /Automatic rounds: 1 of 3/);
+  assert.match(C.prFromStatus(open, { key: 'k', rounds: 2, roundsMax: 2 }).blocks[0].subtext.text, /Large fixes on my own: 2 of 2$/);
+  assert.doesNotMatch(C.prFromStatus(open, { key: 'k', rounds: 0, roundsMax: 2 }).blocks[0].subtext.text, /Large fixes/);
+  assert.match(JSON.stringify(C.prFromStatus(open, { key: 'k', rounds: 1, roundsMax: 3 }).fallback), /Large fixes on my own: 1 of 3/);
 });
 
 test('the PR card changes when Jira or CI none and running change, where the old line did not', async () => {

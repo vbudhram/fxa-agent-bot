@@ -268,7 +268,7 @@ test('Copilot gets one short note, and its comments go to the agent fenced', asy
   assert.match(note, /^Copilot left 6 comments\. I fix/);
   assert.match(note, /• `b\.ts:5` Use 'const' here\./);
   assert.match(note, /…and 1 more\.$/);
-  assert.match(copilotNote(cs.slice(0, 1), 'I already ran 2 automatic rounds on this PR.'), /^Copilot left 1 comment\. I already ran 2 automatic rounds on this PR\. Tap/);
+  assert.match(copilotNote(cs.slice(0, 1), 'I already pushed 2 large fixes to this PR on my own.'), /^Copilot left 1 comment\. I already pushed 2 large fixes to this PR on my own\. Tap/);
   const rabbit = [{ id: 7, who: 'coderabbitai', path: 'e.ts', line: 9, body: '** Minor** · **Functional Correctness** · **Quick win**\n\n**End the pending state.**\n\nIf the refresh stalls...' }];
   assert.match(copilotNote(rabbit), /^CodeRabbit left 1 comment\. I fix[\s\S]*• `e\.ts:9` End the pending state\.$/);
   assert.match(copilotNote([...rabbit, { ...cs[0], who: 'Copilot' }]), /^CodeRabbit and Copilot left 2 comments/);
@@ -408,7 +408,7 @@ test('PR events: one message each, the follower skipping what a round or the sto
   assert.equal(prChanges({ ci: 'running', reviews: [] }, fail).length, 1);
   assert.equal(prChanges({ ci: 'running', reviews: [] }, fail, { ciByRound: true }).length, 0);
   assert.match(ciNote(fail, ''), /^CI failed \(unit, lint\); I am fixing it/);
-  assert.match(ciNote(fail, 'I already ran 3 automatic rounds on this PR.'), /Tap to have me fix it/);
+  assert.match(ciNote(fail, 'I already pushed 3 large fixes to this PR on my own.'), /Tap to have me fix it/);
   const merged = { url, state: 'MERGED', ci: 'pass', reviews: [] };
   assert.equal(prChanges({ state: 'OPEN', ci: 'pass', reviews: [] }, merged).length, 1);
   assert.equal(prChanges({ state: 'OPEN', ci: 'pass', reviews: [] }, merged, { endByStop: true }).length, 0);
@@ -772,4 +772,17 @@ test('render: once a PR is open, a ready turn offers Update PR and no Push branc
   const m = render('agent-x', { type: 'turn_end', status: 'ready', text: 'Done.', changes: 3, pr: 'https://github.com/mozilla/fxa/pull/1' });
   assert.deepEqual(ids(m), ['diff', 'open_pr']);
   assert.deepEqual(labels(m), ['Diff', 'Update PR']);
+});
+
+test('roundOutcome: a round that changed files and asked nothing updates the PR; only a large one counts toward the cap', async () => {
+  const { roundOutcome, LARGE_ROUND_LINES } = await import('../src/render.js');
+  const ready = { type: 'turn_end', status: 'ready' };
+  // Two small CodeRabbit fixes: the PR updates with no tap, and the cap does not move.
+  assert.deepEqual(roundOutcome(ready, 6), { ship: true, large: false });
+  assert.deepEqual(roundOutcome({ ...ready, fixed: 2 }, 0), { ship: true, large: false });
+  assert.deepEqual(roundOutcome(ready, LARGE_ROUND_LINES + 1), { ship: true, large: true });
+  // Nothing changed, or a question: no update.
+  assert.equal(roundOutcome(ready, 0).ship, false);
+  assert.equal(roundOutcome({ type: 'turn_end', status: 'needs-input', fixed: 1 }, 10).ship, false);
+  assert.equal(roundOutcome({ type: 'question' }, 10).ship, false);
 });

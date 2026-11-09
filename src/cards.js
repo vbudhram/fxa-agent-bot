@@ -57,8 +57,8 @@ function _pr(d) {
     : d.ci === 'pass' ? `✓ CI passed${d.checks ? ` · ${d.checks} checks` : ''}` : d.ci === 'pending' ? `CI running${d.running ? ` · ${d.running} checks left` : ''}` : 'No CI result yet';
   const rev = changers.length ? `Changes requested by ${changers.slice(0, 3).join(', ')}` : approvers.length ? `Approved by ${approvers.slice(0, 3).join(', ')}` : 'No review yet';
   const jiraLine = d.jira ? `Jira ${link(jiraUrl(d.jira), d.jira)}` : 'No Jira ticket';
-  // The automatic fix rounds so far, against the team's cap, once one ran: a tap is needed after the cap.
-  const rounds = num(d.rounds) > 0 && `Automatic rounds: ${num(d.rounds)} of ${num(d.rounds_max)}`;
+  // The large fixes the bot pushed on its own, against the team's cap, once one ran: a tap is needed after the cap.
+  const rounds = num(d.rounds) > 0 && `Large fixes on my own: ${num(d.rounds)} of ${num(d.rounds_max)}`;
   // State buttons in order: conflict, review changes, draft with green CI, no Jira.
   const live = state === 'open' || state === 'draft';
   const next = live ? [conflict && btn('Rebase onto main', 'rebase_pr', d.key), changers.length && btn('Fix review', 'fix_review', d.key),
@@ -149,7 +149,7 @@ function _ci(d) {
   const rows = failing.slice(0, 7).map((f) => { const u = safeUrl(links.get(f));
     return sec(infra.has(f) ? `*${pill(f)}*\nInfra failure, not the change` : `*${pill(f)}*\nFailed`, u ? btn('Logs', 'wo_open', d.key, { url: u }) : undefined); });
   const tail = [...(failing.length > 7 ? [ctx(`${failing.length - 7} more failing checks`)] : []), ...(d.needsTap && d.why ? [ctx(cut(d.why, 300))] : []),
-    ...actions(d.needsTap ? [btn('Run a round', 'auto_round', d.key, { style: 'primary' })] : [])];
+    ...actions(d.needsTap ? [btn('Fix it', 'auto_round', d.key, { style: 'primary' })] : [])];
   return {
     text: plain(`CI on PR #${d.number}: ${counts || 'no checks'}.`),
     blocks: [{ type: 'container', title: pt(`CI on #${d.number}`), ...(counts ? { subtitle: pt(counts) } : {}), child_blocks: [...rows, ...tail].slice(0, L.children) }],
@@ -165,7 +165,7 @@ function _review(d) {
   const sub = dot(`${cs.length} comment${cs.length === 1 ? '' : 's'}`, ...Object.entries(by).map(([k, v]) => `${v} ${k}`));
   const where = (c) => `${String(c.path ?? '').split('/').pop()}${c.line ? `:${c.line}` : ''}`;
   const title = `${cut(d.who ?? 'Copilot', 40)} review on #${d.number}`;
-  const act = actions(d.action === 'auto_round' ? [btn('Run a round', 'auto_round', d.key, { style: 'primary' })] : d.action === 'fix_review' ? [btn('Fix review', 'fix_review', d.key)] : []);
+  const act = actions(d.action === 'auto_round' ? [btn('Fix it', 'auto_round', d.key, { style: 'primary' })] : d.action === 'fix_review' ? [btn('Fix review', 'fix_review', d.key)] : []);
   return {
     text: plain(`${title}: ${sub}.`),
     // One line per comment: a three-column table cut off its outcome column at phone width.

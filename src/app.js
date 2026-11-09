@@ -23,7 +23,7 @@ import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateA
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, fromAdmin, ADMIN, LINE_BREAK, laterMessage, slackLinks, threadFile,
   emptyTurn, EMPTY_RETRY, EMPTY_FALLBACK, sinceTurn } from './render.js';
 import * as cards from './cards.js';
-import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound, reviewNote, roundAsk, pauseAsk, lastBotSaid, readyNote } from './render.js';
+import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, roundOutcome, reviewNudge, reviewRound, reviewNote, roundAsk, pauseAsk, lastBotSaid, readyNote } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { routineStart, routineSkip, routineEnd, routineEndLine, routineReport, routineHint, routineLabel, fixStart, fixEnd, fixEndLine, fixSkip } from './render.js';
 import { render, rateLimitLine, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, toSomeoneElse, asideBlock, REBASE_PROMPT, operatorNext, fileRefs, distinctFiles, maskSecrets, maskUpload } from './render.js';
@@ -1642,7 +1642,9 @@ function ensureWatch(key) {
     if (ev.type === 'thinking') thinkAt.set(key, Date.now());
     if (ev.type === 'text_start') saidText(key, null);
     if (ev.type === 'text') saidText(key, ev.text);
-    if (ev.type === 'edit') sessions.patch(key, { edited_at: Date.now() }); // work not yet pushed (autoRound)
+    // edited_at: work not yet pushed (autoRound). round_lines: a review round's size (roundOutcome).
+    if (ev.type === 'edit') { const c = fresh(key);
+      sessions.patch(key, { edited_at: Date.now(), ...(c?.then_wrap === 'pr_auto' ? { round_lines: (c.round_lines ?? 0) + (Number(ev.added) || 0) + (Number(ev.removed) || 0) } : {}) }); }
     if (LIVE_ON && LIVE_EVENTS.has(ev.type)) {
       const L = liveOf(key);
       L.st = live.reduce(L.st, ev);
@@ -1934,9 +1936,11 @@ async function resumeToShip(s, client, what, repo) {
 async function shipAfterResume(key, what, ev) {
   const s = fresh(key);
   if (!s) return;
-  // An automatic round updates the PR only when it changed files and asked nothing; its reply says the rest.
+  // A review round updates the PR when it changed files and asked nothing; its reply says the rest.
   if (what === 'pr_auto') {
-    if (ev.type !== 'turn_end' || ev.status !== 'ready' || !(ev.fixed > 0)) return;
+    const r = roundOutcome(ev, s.round_lines ?? 0), repo = s.then_wrap_repo ?? null;
+    if (r.large) sessions.patch(key, prPatch(fresh(key), repo, { auto_rounds: (prView(fresh(key), repo)?.auto_rounds ?? 0) + 1 }));
+    if (!r.ship) return;
     what = 'pr';
   }
   const repo = s.then_wrap_repo ?? undefined, label = what === 'push' ? 'Push branch' : shipWhat(s, repo);
@@ -2809,7 +2813,8 @@ async function autoRound(s, prev, cur) {
   if (!job) { if (seen) pp(seen); return; }
   // Ask, and count nothing, when an automatic round could mix with work the owner has in hand.
   const max = reviewRounds(s.profile);
-  const why = (s.auto_rounds ?? 0) >= max ? (max ? `I already ran ${max} automatic round${max === 1 ? '' : 's'} on this PR.` : 'This team runs no automatic rounds.')
+  // The cap counts only large fixes (roundOutcome): small ones go on with no tap.
+  const why = (s.auto_rounds ?? 0) >= max ? (max ? `I already pushed ${max} large fix${max === 1 ? '' : 'es'} to this PR on my own.` : 'This team fixes reviews only when you tap.')
     : (s.edited_at ?? 0) > s.pr_pushed_at ? 'Files changed since the last push, so I will fix it without pushing; you push with Update PR.'
     : ['stopped', 'failed'].includes(s.state) && !ofRoutine(s) ? 'This session was stopped.' : '';
   pp(seen);
@@ -2817,11 +2822,10 @@ async function autoRound(s, prev, cur) {
   const text = `${s.repo ? `This is about ${s.repo}, in /workspace/${s.repo.split('/')[1].toLowerCase()}.\n\n` : ''}${job.text}`;
   if (why) {
     pp({ round_text: text, round_ship: !((s.edited_at ?? 0) > s.pr_pushed_at) });
-    const row = buttons(s.repo ? `${s.key}||${s.repo}` : s.key, ['Run a round', 'auto_round']);
+    const row = buttons(s.repo ? `${s.key}||${s.repo}` : s.key, ['Fix it', 'auto_round']);
     await postMsg(s.key, { text: job.note(why), blocks: [md(job.note(why)), row] });
     return;
   }
-  pp({ auto_rounds: (s.auto_rounds ?? 0) + 1 });
   const noteTs = await postMsg(s.key, { text: job.note('') });
   await startRound(s, text, true, null, noteTs);
 }
@@ -2830,7 +2834,7 @@ async function autoRound(s, prev, cur) {
 // by: who tapped the round's button; the owner for an automatic round. A question at the round's end names them.
 // noteTs: the round's note, which becomes its status and then its result: one message, not two.
 async function startRound(s, text, ship = true, by = null, noteTs = null) {
-  const cur = fresh(s.key), wrap = { ...(ship ? { then_wrap: 'pr_auto', then_wrap_at: Date.now(), then_wrap_repo: s.repo ?? null } : {}), ...(noteTs ? { round_note_ts: noteTs } : {}) };
+  const cur = fresh(s.key), wrap = { ...(ship ? { then_wrap: 'pr_auto', then_wrap_at: Date.now(), then_wrap_repo: s.repo ?? null, round_lines: 0 } : {}), ...(noteTs ? { round_note_ts: noteTs } : {}) };
   if (['paused', 'stopped', 'failed', 'pr_open'].includes(cur.state)) {
     if (sessions.get(cur.channel, cur.thread_ts)?.key !== cur.key || cur.stop_failed) return;
     sessions.patch(cur.key, { round_by: by ?? cur.owner });
