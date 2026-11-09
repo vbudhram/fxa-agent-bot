@@ -19,7 +19,7 @@ export async function channelRefusal(client, run) {
   if (!run.private && run.template !== 'security-review') return null;
   let scope = false;
   const c = await client.conversations.info({ channel: run.channel }).then((r) => r.channel ?? null, (e) => { scope = lacksGroupsRead(e); return null; });
-  if (scope) return `the Slack app lacks the groups:read scope, so I cannot tell whether channel ${run.channel} is private, and ${RULE}. The operator must update the app from manifest.yml and reinstall it`;
+  if (scope) return `the Slack app lacks the groups:read scope, so I cannot tell whether channel ${run.channel} is private, and ${RULE}. The FxA Agent admin must update the app from manifest.yml and reinstall it`;
   if (!c) return `I cannot read channel ${run.channel}, and ${RULE}`;
   if (!c.is_private) return `channel ${run.channel} is public, and ${RULE}`;
   if (c.is_ext_shared || c.is_shared) return `channel ${run.channel} is shared, and ${RULE}`;

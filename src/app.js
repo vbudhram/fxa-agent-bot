@@ -894,6 +894,7 @@ async function onMessage({ message, client, replay = false }) {
     await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: message.user,
       text: fresh(s.key)?.wrap_push
         ? "I'm pushing the branch, so I can't act on this now. I kept it as context, and I'll send it with your next message once the push is done."
+        : prOpenFor(fresh(s.key)) ? "I'm updating the PR, so I can't act on this now. I kept it as context. Reply here once it is updated, and I'll pick it up."
         : "I'm wrapping up and opening the PR, so I can't act on this now. I kept it as context. Reply here once the PR is open, and I'll pick it up." }).catch(() => {});
     return;
   }
@@ -1145,12 +1146,14 @@ function treeArg(s, text) {
 }
 // What a ship of these repos is called: several are "Open 2 PRs".
 const shipWhat = (s, repo) => (Array.isArray(repo) ? `Open ${repo.length} PRs` : prView(s, repo)?.pr_url ? 'Update PR' : 'Open PR');
+// The repo's PR is open (not merged or closed): a push then is Update PR, never Push branch.
+const prOpenFor = (s, repo) => { const v = prView(s, repo); return Boolean(v?.pr_url && !v.pr_ended && !['MERGED', 'CLOSED'].includes(v.pr_seen?.state)); };
 
 // Bang commands, as in Claude Tag: @fxa-agent !status, !help, and so on. The
 // ones that change the session are for its owner.
 async function bang(s, text, m, client) {
   text = teamAlias(text);
-  const cmd = text.slice(1).split(/\s+/)[0].toLowerCase();
+  let cmd = text.slice(1).split(/\s+/)[0].toLowerCase();
   const note = (t) => client.chat.postEphemeral({ channel: m.channel, thread_ts: m.thread_ts, user: m.user, text: t }).catch((e) => console.error('note', e.data?.error ?? e.message));
   if (!allowed(m.channel, m.user)) { await note("Sorry, you're not on the list of people who can use the agent here."); return; }
   // Mute goes as far as steering does: anyone allowed, or only the owner under STEER=owner.
@@ -1190,6 +1193,7 @@ async function bang(s, text, m, client) {
     if (steerOnly() || prOnly()) return;
     // A team stack: !pr <name> or !pr <owner/repo> ships that repo; !pr alone ships each changed repo with a PR.
     let repo = treeArg(s, text);
+    if (cmd === 'push' && repo !== false && repo !== null && prOpenFor(fresh(s.key), repo)) cmd = 'pr'; // the push updates the open PR
     if (repo === false || (repo === null && cmd === 'push')) { await note(`Name the repo: \`!${cmd} <repo>\`, one of ${(fresh(s.key).trees ?? []).map((t) => `\`${t.name}\``).join(', ')}.`); return; }
     if (repo === null) {
       const all = shipRepos(fresh(s.key).trees);
@@ -1352,7 +1356,7 @@ async function desktopFor(s, client, note) {
   if (desktopStarting.has(s.key)) { await note('The desktop is already starting; the link comes here in a moment.'); return; }
   // A person whose Slack email is not the Google account they sign in with.
   const email = DESKTOP_EMAILS.get(s.owner) ?? await client.users.info({ user: s.owner }).then((r) => r.user?.profile?.email, () => null);
-  if (!email) { await note('I could not get your email from Slack, so I cannot open the desktop. Ask the bot admin to add you to DESKTOP_EMAILS.'); return; }
+  if (!email) { await note('I could not get your email from Slack, so I cannot open the desktop. Ask the FxA Agent admin to add you to DESKTOP_EMAILS.'); return; }
   desktopStarting.add(s.key);
   try {
     let url = null;
@@ -1360,7 +1364,7 @@ async function desktopFor(s, client, note) {
     const ts = await sayWhile(s, 'Starting the desktop… about a minute the first time.', async () => {
       url = await ctl.desktop(s.key, email).catch((e) => { console.error('desktop', s.key, e.stderr || e.message); return null; });
       return url ? `<${url}|Open the desktop> for this session: ${what}. Only <@${s.owner}> can open it. It works until the session pauses. While the tab is open, the session stays awake, so close the tab when you are done.`
-        : 'The desktop did not start. Try `!desktop` again; if it fails twice, tell the bot admin.';
+        : 'The desktop did not start. Try `!desktop` again; if it fails twice, tell the FxA Agent admin.';
     }).catch((e) => { console.error('desktop post', s.key, e.data?.error ?? e.message); return null; });
     if (url && ts) sessions.patch(s.key, { desktop_ts: ts });
     // The email only to the owner, not in the thread.
@@ -1903,6 +1907,8 @@ ownerAction('open_prs', async (s, client, action, body) => {
 });
 ownerAction('push_branch', async (s, client, action, body) => {
   const repo = valueRepo(action.value);
+  // An older row's Push branch, once the PR is open: it updates the PR.
+  if (prOpenFor(fresh(s.key), repo)) { await tapFns.get('open_pr')(s, client, action, body); return; }
   if (!(await wrapTap(s, client, body, `Push branch${repo ? ` · ${repo}` : ''}`, repo))) return;
   await (ENDED.includes(fresh(s.key)?.state) ? resumeToShip(fresh(s.key), client, 'push', repo) : pushBranch(s, client, repo))
     .catch((e) => shipFailed(client, s, e, 'Push branch'));
@@ -1922,7 +1928,7 @@ async function resumeToShip(s, client, what, repo) {
     await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'That button is from an earlier session in this thread. Use the newest one, or `!pr`.' });
     return;
   }
-  await resumePaused(s, `The engineer tapped ${what === 'push' ? 'Push branch' : 'Open PR'}. Run git status and check that your work carried over. Say so in one line, and end with 'status: ready' if it did. The host then ships it.`,
+  await resumePaused(s, `The engineer tapped ${what === 'push' ? 'Push branch' : shipWhat(s, repo)}. Run git status and check that your work carried over. Say so in one line, and end with 'status: ready' if it did. The host then ships it.`,
     client, { then_wrap: what, then_wrap_at: Date.now(), then_wrap_repo: repo ?? null });
 }
 async function shipAfterResume(key, what, ev) {
@@ -1933,16 +1939,17 @@ async function shipAfterResume(key, what, ev) {
     if (ev.type !== 'turn_end' || ev.status !== 'ready' || !(ev.fixed > 0)) return;
     what = 'pr';
   }
+  const repo = s.then_wrap_repo ?? undefined, label = what === 'push' ? 'Push branch' : shipWhat(s, repo);
+  const verb = what === 'push' ? 'push' : label === 'Update PR' ? 'update the PR' : 'open the PR';
   // The owner wrote after the ship was queued (while it booted or answered): do not ship under their turn.
-  if ((s.last_person_at ?? 0) > (s.then_wrap_at ?? Infinity)) { await postMsg(key, { text: `I did not ${what === 'push' ? 'push' : 'update the PR'}: you sent more. Tap the button when it is ready.` }); return; }
+  if ((s.last_person_at ?? 0) > (s.then_wrap_at ?? Infinity)) { await postMsg(key, { text: `I did not ${verb}: you sent more. Tap ${label} when it is ready.` }); return; }
   if (ev.type !== 'turn_end' || ev.status !== 'ready') {
-    await postMsg(key, { text: `I did not ${what === 'push' ? 'push' : 'open the PR'}: my reply above says why. Tap the button again when it is ready.` });
+    await postMsg(key, { text: `I did not ${verb}: my reply above says why. Tap ${label} again when it is ready.` });
     return;
   }
-  const repo = s.then_wrap_repo ?? undefined;
-  if (await startWrap(s, app.client, what === 'push' ? 'Push branch' : shipWhat(s, repo), s.owner, undefined, repo)) return;
+  if (await startWrap(s, app.client, label, s.owner, undefined, repo)) return;
   await (what === 'push' ? pushBranch(s, app.client, repo) : openPr(s, app.client, repo))
-    .catch((e) => shipFailed(app.client, s, e, what === 'push' ? 'Push branch' : 'Open PR'));
+    .catch((e) => shipFailed(app.client, s, e, label));
 }
 // The person asked for the PR in words and the agent wrote 'ship: pr' (askedShip): the same path as !pr.
 async function shipOnAsk(key, a) {
@@ -2353,7 +2360,7 @@ async function pollOne(key) {
       const tw = fresh(key).then_wrap;
       sessions.patch(key, { then_wrap: null });
       // The person asked for this step; say it did not happen rather than drop it quietly.
-      const what = tw === 'pr_auto' ? 'update the PR' : /push/.test(tw) ? 'push the branch' : 'open the PR';
+      const what = tw === 'pr_auto' || (tw === 'pr' && prOpenFor(fresh(key), fresh(key).then_wrap_repo ?? undefined)) ? 'update the PR' : /push/.test(tw) ? 'push the branch' : 'open the PR';
       await say(s, `That turn failed, so I did not ${what}.${tw === 'pr_auto' ? '' : ' Tap the button again when you are ready.'}`).catch(() => {});
     }
     // Each event posts on its own: ctl has already moved the cursor past this
@@ -2388,7 +2395,8 @@ async function pollOne(key) {
         sessions.patch(key, { empty_retry: retried ? null : true });
         if (!retried && await ctl.steer(key, EMPTY_RETRY).then(() => true, (e) => { console.error('steer', key, e.stderr || e.message); return false; })) continue;
       } else if (ev.type === 'turn_end' && fresh(key)?.empty_retry) sessions.patch(key, { empty_retry: null });
-      const msg = render(s.key, { ...ev, desktop: Boolean(process.env.DESKTOP_GATEWAY), read_only: Boolean(s.read_only) });
+      // pr: once a PR is open the row says Update PR, also when the controller's event lacks it.
+      const msg = render(s.key, { ...ev, desktop: Boolean(process.env.DESKTOP_GATEWAY), read_only: Boolean(s.read_only), pr: ev.pr || (prOpenFor(fresh(key)) ? fresh(key).pr_url : undefined) });
       // A session resumed by Open PR or Push, or an automatic round, ships after the turn closes.
       const ship = () => {
         const tw = i === endAt && fresh(key)?.then_wrap;

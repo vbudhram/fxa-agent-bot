@@ -758,3 +758,18 @@ test('lastBotSaid: the pause note waits only when the bot posted after its quest
   assert.equal(lastBotSaid([{ ts: '9.0', user: 'UBOT' }, { ts: '10.0', user: 'UBOT' }, { ts: '11.0', user: 'UA' }], q, 'UBOT'), true);
   assert.equal(lastBotSaid([{ ts: '10.0', user: 'UBOT' }, { ts: '12.0', user: 'UBOT' }], q, 'UBOT'), false);
 });
+
+test('user-facing problems name the FxA Agent admin, not the operator', async () => {
+  const { NO_GROUPS_READ } = await import('../src/access.js');
+  const texts = ['Reauthentication failed', 'authentication_error', 'codex login', 'could not mint a GitHub App installation token', 'egress firewall did not apply']
+    .map((e) => operatorProblem(e).text).concat(NO_GROUPS_READ);
+  for (const t of texts) { assert.doesNotMatch(t, /operator/i, t); assert.match(t, /The FxA Agent admin must/, t); }
+});
+
+test('render: once a PR is open, a ready turn offers Update PR and no Push branch', () => {
+  const ids = (m) => m.blocks.flatMap((b) => b.elements ?? []).map((e) => e.action_id);
+  const labels = (m) => m.blocks.flatMap((b) => b.elements ?? []).map((e) => e.text?.text);
+  const m = render('agent-x', { type: 'turn_end', status: 'ready', text: 'Done.', changes: 3, pr: 'https://github.com/mozilla/fxa/pull/1' });
+  assert.deepEqual(ids(m), ['diff', 'open_pr']);
+  assert.deepEqual(labels(m), ['Diff', 'Update PR']);
+});

@@ -93,19 +93,19 @@ export { md, buttons, defuse };
 // controller: runners reach Claude through the LLM proxy, and gcloud runs as the manager's service account.
 const OPERATOR = [
   [/Reauthentication failed|gcloud auth login|problem refreshing your current auth tokens|invalid_grant/i, 'gcloud',
-    "Google Cloud refused the manager's sign-in, so I can't reach the sandbox. The operator must check it. Then try again.",
+    "Google Cloud refused the manager's sign-in, so I can't reach the sandbox. The FxA Agent admin must check it. Then try again.",
     'check the manager service account and its roles: vm.sh status'],
   [/OAuth token has expired|Invalid API key|authentication_error|Please run \/login|CLAUDE_CODE_OAUTH_TOKEN is unset/i, 'claude',
-    'The Claude key behind the agent was rejected. The operator must store a new one. Then send your message again.',
+    'The Claude key behind the agent was rejected. The FxA Agent admin must store a new one. Then send your message again.',
     "store a new key: vm.sh secret fxa-anthropic-api-key, then vm.sh sys 'sudo systemctl restart fxa-llm-proxy'"],
   [/Codex auth|codex login|refresh_token_reused|token_expired/i, 'codex',
-    'The Codex sign-in on the host expired. The operator must sign in to Codex again. Then send your message again.',
+    'The Codex sign-in on the host expired. The FxA Agent admin must sign in to Codex again. Then send your message again.',
     'sign in to Codex again on the manager'],
   [/could not mint a GitHub App installation token/i, 'github-app',
-    'The GitHub App could not get a token. The operator must check its key and installation. The work is not lost; try again after that.',
+    'The GitHub App could not get a token. The FxA Agent admin must check its key and installation. The work is not lost; try again after that.',
     'check the GitHub App key (fxa-github-app-key) and its installation'],
   [/Refusing to launch on a base|egress firewall did not apply/i, 'host',
-    'The sandbox host refused to start the session safely, so a retry now fails the same way. The operator must check the host. Tag me again after that.',
+    'The sandbox host refused to start the session safely, so a retry now fails the same way. The FxA Agent admin must check the host. Tag me again after that.',
     'check the runner pin and the egress firewall: vm.sh status, then the session log'],
 ];
 // The operator's next step for an operator-problem kind, for the error row.

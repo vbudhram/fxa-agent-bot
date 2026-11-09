@@ -52,7 +52,7 @@ export async function loadMembers(client, gates, members) {
 // private channels (groups:read), so a public channel's lookup fails, and that counts as public.
 export const PRIVATE_ONLY = 'This team has a private repo, so I post its code and files only in a private channel.';
 export const START_PRIVATE = 'This team has a private repo, so its sessions run only in a private channel. Start it there.';
-export const NO_GROUPS_READ = 'I cannot tell whether this channel is private, because the Slack app lacks the groups:read scope. The operator must update the app from manifest.yml and reinstall it.';
+export const NO_GROUPS_READ = 'I cannot tell whether this channel is private, because the Slack app lacks the groups:read scope. The FxA Agent admin must update the app from manifest.yml and reinstall it.';
 let scopeLogged = false;
 // True when a channel lookup failed because the app lacks groups:read (logged once): a private channel's lookup
 // then fails like a public one's, so a refusal must name the scope, not the channel.
