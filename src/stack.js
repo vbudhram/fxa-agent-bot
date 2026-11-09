@@ -192,6 +192,9 @@ export const PR_FIELDS = ['pr_url', 'pr_seen', 'pr_follow_since', 'pr_pushed_at'
 // The session as the follower sees one repo's PR: its PR fields over the session's. No repo: the session.
 export const prView = (s, repo) => (s && repo ? { ...s, ...Object.fromEntries(PR_FIELDS.map((f) => [f, s.prs?.[repo]?.[f]])), repo } : s);
 
+// The card a PR event changes in place: the view's card, when it is for that same PR. null: post one.
+export const prCardFor = (view, url) => (view?.pr_card_ts && url && view.pr_url === url ? view.pr_card_ts : null);
+
 // The patch that writes PR fields for a view: into .prs[repo] for a stack, else at the top.
 // Other fields (state, then_wrap) always go to the top.
 export function prPatch(cur, repo, fields) {

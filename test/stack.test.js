@@ -149,6 +149,16 @@ test('valueRepo: the repo after the key, or after the login', () => {
   assert.equal(valueRepo('agent-1'), null);
 });
 
+test('prCardFor: a PR event edits the card of the same PR; another PR, or none yet, posts one', async () => {
+  const { prCardFor } = await import('../src/stack.js');
+  const u = 'https://github.com/mozilla/fxa/pull/1';
+  assert.equal(prCardFor({ pr_card_ts: '5.0', pr_url: u }, u), '5.0');
+  assert.equal(prCardFor({ pr_card_ts: '5.0', pr_url: u }, 'https://github.com/mozilla/fxa/pull/2'), null);
+  assert.equal(prCardFor({ pr_url: u }, u), null);
+  // A stack repo's view has its own card.
+  assert.equal(prCardFor(prView({ prs: { 'mozilla/docs': { pr_card_ts: '7.0', pr_url: u } } }, 'mozilla/docs'), u), '7.0');
+});
+
 test('prView and prPatch: a stack reads and writes one repo PR state; a plain session is untouched', () => {
   const s = { key: 'k', state: 'active', pr_url: 'top', prs: { 'mozilla/fxa': { pr_url: 'u1', pr_card_ts: '1.1' } } };
   const v = prView(s, 'mozilla/fxa');

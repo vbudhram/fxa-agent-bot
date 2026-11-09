@@ -333,6 +333,8 @@ test('one review reminder a day after CI passed with no person reviewing', async
   assert.equal(reviewNudge(cur, 1000, null, 1000 + NUDGE_MS - 1), null);
   assert.match(reviewNudge(cur, 1000, null, 1000 + NUDGE_MS), /nobody has reviewed/);
   assert.equal(reviewNudge(cur, 1000, 1000, 1000 + NUDGE_MS), null);
+  // Once for each PR: CI passed again after a push, and the reminder does not come back.
+  assert.equal(reviewNudge(cur, 5000, 1000, 5000 + NUDGE_MS), null);
   assert.equal(reviewNudge({ ...cur, reviews: [{ login: 'rev1', state: 'COMMENTED' }] }, 1000, null, 1000 + NUDGE_MS), null);
   assert.deepEqual(reviewNudge({ ...cur, draft: true }, 1000, null, 1000 + NUDGE_MS).buttons, [['Mark ready for review', 'pr_ready']]);
   assert.equal(reviewNudge({ ...cur, ci: 'running' }, null, null, 1000 + NUDGE_MS), null);
@@ -748,4 +750,11 @@ test('sinceTurn: a resume gets the messages after the last turn, without its own
   const msgs = [{ ts: '100.0', text: 'old' }, { ts: '200.0', text: 'new' }, { ts: '201.0', text: 'mine' }, { ts: '202.0', text: 'aside' }, { ts: '203.0', text: '<@UBOT> !pause' }];
   assert.deepEqual(sinceTurn(msgs, '150.5', ['201.0'], ['aside']).map((m) => m.text), ['new']);
   assert.deepEqual(sinceTurn(msgs, 0).map((m) => m.text), ['old', 'new', 'mine', 'aside']);
+});
+
+test('lastBotSaid: the pause note waits only when the bot posted after its question', async () => {
+  const { lastBotSaid } = await import('../src/render.js');
+  const q = '10.0';
+  assert.equal(lastBotSaid([{ ts: '9.0', user: 'UBOT' }, { ts: '10.0', user: 'UBOT' }, { ts: '11.0', user: 'UA' }], q, 'UBOT'), true);
+  assert.equal(lastBotSaid([{ ts: '10.0', user: 'UBOT' }, { ts: '12.0', user: 'UBOT' }], q, 'UBOT'), false);
 });

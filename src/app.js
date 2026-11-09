@@ -17,13 +17,13 @@ import { teamChannels, reviewRounds } from './teams.js';
 import { ROUTINES_ENV, TICK_MS, NO_CHANNEL, channelRefusal, inFlightGuard, muted, mutedReply, pollChannels, pollUsers } from './routines.js';
 import { ingest } from './db.js';
 import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs,
-  shipRepos, afterShip, shipAsk, treeFor, namedRepos } from './stack.js';
+  shipRepos, afterShip, shipAsk, treeFor, namedRepos, PR_FIELDS, prCardFor } from './stack.js';
 import { asksForJira, JIRA_YES, draftCard, filedCard, changedCard, editModal, readEdit } from './jira-draft.js';
 import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateAllows, loadMembers, maySteer, mayTap, SHIP_ACTIONS, PR_ACTIONS, askedShip } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, fromAdmin, ADMIN, LINE_BREAK, laterMessage, slackLinks, threadFile,
   emptyTurn, EMPTY_RETRY, EMPTY_FALLBACK, sinceTurn } from './render.js';
 import * as cards from './cards.js';
-import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound, reviewNote, roundAsk, pauseAsk, readyNote } from './render.js';
+import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound, reviewNote, roundAsk, pauseAsk, lastBotSaid, readyNote } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { routineStart, routineSkip, routineEnd, routineEndLine, routineReport, routineHint, routineLabel, fixStart, fixEnd, fixEndLine, fixSkip } from './render.js';
 import { render, rateLimitLine, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, toSomeoneElse, asideBlock, REBASE_PROMPT, operatorNext, fileRefs, distinctFiles, maskSecrets, maskUpload } from './render.js';
@@ -344,9 +344,8 @@ async function begin(key, client) {
   // Continuing a PR: the new session replaces the old one in the thread, so it
   // takes over following the PR from what the old one saw.
   const from = rest.resume_from && fresh(rest.resume_from);
-  const pr = from?.pr_seen || from?.pr_url ? { pr_seen: from.pr_seen, pr_follow_since: from.pr_follow_since, pr_url: from.pr_url,
-    auto_rounds: from.auto_rounds, copilot_seen_at: from.copilot_seen_at, pr_pushed_at: from.pr_pushed_at, ci_seen: from.ci_seen, last_person_at: from.last_person_at, edited_at: from.edited_at,
-    pr_card_ts: from.pr_card_ts, pr_card_head: from.pr_card_head, pr_card_text: from.pr_card_text } : {};
+  // Every PR field: one the new record lost (nudged_at, ci_pass_at) made the review reminder come again.
+  const pr = from?.pr_seen || from?.pr_url ? { ...Object.fromEntries(PR_FIELDS.map((f) => [f, from[f]])), last_person_at: from.last_person_at, edited_at: from.edited_at } : {};
   // A team stack's PRs, one set for each repo. A move (!stack checkout) leaves each card in the old thread.
   if (from?.prs) pr.prs = carryPrs(from.prs, Boolean(rest.moved_from));
   if (rest.moved_from) Object.assign(pr, { pr_card_ts: null, pr_card_head: null, pr_card_text: null });
@@ -1399,7 +1398,10 @@ async function sweepOnce() {
     await desktopClosed(key, 'paused');
     // One small grey line, as the design has it: the status of a session at rest, not a chat message.
     // A pause posts only while a question waits on a person; else the status line says paused, and a reply resumes.
-    if (s.buttons_msg?.question && !s.muted) {
+    // Not when that question is still the newest thing the bot said: it already ended the turn, right above.
+    const q = s.buttons_msg?.question && !s.muted && s.buttons_msg.ts;
+    const after = q && await app.client.conversations.replies({ channel: s.channel, ts: s.thread_ts, oldest: q, limit: 200 }).then((r) => r.messages ?? [], () => null);
+    if (q && !(after && lastBotSaid(after, q, botUserId))) {
       const text = pauseAsk(s.owner);
       await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text, blocks: [{ type: 'context', elements: [{ type: 'mrkdwn', text: `⏸ ${text}` }] }] }).catch(() => {});
     }
@@ -1495,10 +1497,11 @@ async function startStatusNow(s, verb) {
   liveTurn.set(s.key, newLive());
   const asker_name = await askerName(cur);
   const msg = statusMessage({ title: statusTitle({ ...cur, asker_name }, verb, 0) });
-  // A request that waited in line already has its status message: it changes in place.
-  const ts = cur.queue_ts ? await app.client.chat.update({ channel: s.channel, ts: cur.queue_ts, ...msg }).then(() => cur.queue_ts, () => null) : null;
+  // A request that waited in line, or a review round's note, already has its message: it changes in place.
+  const reuse = cur.queue_ts ?? cur.round_note_ts;
+  const ts = reuse ? await app.client.chat.update({ channel: s.channel, ts: reuse, ...msg }).then(() => reuse, () => null) : null;
   const status_ts = ts ?? (await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...msg })).ts;
-  sessions.patch(cur.key, { status_ts, queue_ts: null, status_text: msg.text, status_box: `${cur.state}\n`, asker_name, edit_at: Date.now(), busy_since: Date.now(), status_opened_at: Date.now(), last_act: null,
+  sessions.patch(cur.key, { status_ts, queue_ts: null, round_note_ts: null, status_text: msg.text, status_box: `${cur.state}\n`, asker_name, edit_at: Date.now(), busy_since: Date.now(), status_opened_at: Date.now(), last_act: null,
     step_n: 0, rows_done: null, cur_kind: null, cur_count: 0, cur_label: null, cur_since: null });
   said.delete(cur.key); saidAt.delete(cur.key); thinkAt.delete(cur.key); // the last turn's reply is not this turn's note
   if (cur.state === 'active') ensureWatch(s.key);
@@ -1879,7 +1882,8 @@ async function openPr(s, client, repo) {
   await ctl.finish(s.key, false, repo);
 }
 async function pushBranch(s, client, repo) {
-  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: `Pushing the branch${repo ? ` of ${repo}` : ''}: a commit title, the safety checks, then the push. No PR, and the session stays open. The review runs when you open the PR.` });
+  const { ts } = await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: `Pushing the branch${repo ? ` of ${repo}` : ''}: a commit title, the safety checks, then the push. No PR, and the session stays open. The review runs when you open the PR.` });
+  sessions.patch(s.key, { push_note_ts: ts });
   await ctl.finish(s.key, true, repo);
 }
 ownerAction('open_pr', async (s, client, action, body) => {
@@ -2360,6 +2364,8 @@ async function pollOne(key) {
       // The PR outlives the session's state: the thread follows it from here.
       // A team stack's PR names its repo, and its follow state is that repo's (prPatch). pr_url at
       // the top too: "this thread has a PR" reads it.
+      // The PR this event updates already has its card: the card changes in place, not a second card.
+      const card = ev.type === 'pr' && prView(fresh(key), ev.repo ?? null), cardTs = prCardFor(card, ev.url);
       if (ev.type === 'pr' && ev.url) {
         const r = ev.repo ?? null;
         sessions.patch(key, prPatch(fresh(key), r, { pr_url: ev.url, pr_follow_since: prView(fresh(key), r)?.pr_follow_since ?? Date.now(), pr_pushed_at: Date.now(), pr_follow_done: false }));
@@ -2396,8 +2402,16 @@ async function pollOne(key) {
       if (msg.more !== undefined) { sessions.patch(key, { more_text: msg.more }); delete msg.more; }
       // The PR link's message becomes the PR's card: the follower edits its state into it.
       if (ev.type === 'pr' && i !== endAt) {
-        const ts = await postMsg(key, msg).catch((e) => console.error('post', key, ev.type, e.data?.error ?? e.message));
-        if (ts) sessions.patch(key, prPatch(fresh(key), ev.repo ?? null, { pr_card_ts: ts, pr_card_head: msg.text, pr_card_text: null }));
+        const blocks = (t) => [{ type: 'section', text: { type: 'mrkdwn', text: msg.text } }, ...(t ? JSON.parse(t) : [])];
+        const upd = (t) => app.client.chat.update({ channel: s.channel, ts: cardTs, text: msg.text, blocks: blocks(t) });
+        const ok = cardTs && !fresh(key)?.muted && await upd(card.pr_card_text).catch(() => upd(null)).then(() => true, () => false);
+        const ts = ok ? cardTs : await postMsg(key, msg).catch((e) => console.error('post', key, ev.type, e.data?.error ?? e.message));
+        if (ts) sessions.patch(key, prPatch(fresh(key), ev.repo ?? null, { pr_card_ts: ts, pr_card_head: msg.text, ...(ok ? {} : { pr_card_text: null }) }));
+      // The push's result goes into its "Pushing" message.
+      } else if (fresh(key)?.push_note_ts && (ev.type === 'pushed' || (ev.type === 'error' && /^Push branch failed/.test(ev.text ?? '')))) {
+        const ts = fresh(key).push_note_ts;
+        sessions.patch(key, { push_note_ts: null });
+        await app.client.chat.update({ channel: s.channel, ts, ...msg }).catch(() => postMsg(key, msg)).catch((e) => console.error('post', key, ev.type, e.data?.error ?? e.message));
       // Each turn end closes its own turn, also when two ended in one poll: the first takes the status
       // message and settles its acks, so the steer queued behind it gets its ✅ from the second.
       } else await (ev.type === 'turn_end' || ev.type === 'question' ? finishTurn(key, msg, ev) : postMsg(key, msg))
@@ -2800,21 +2814,22 @@ async function autoRound(s, prev, cur) {
     return;
   }
   pp({ auto_rounds: (s.auto_rounds ?? 0) + 1 });
-  await postMsg(s.key, { text: job.note('') });
-  await startRound(s, text);
+  const noteTs = await postMsg(s.key, { text: job.note('') });
+  await startRound(s, text, true, null, noteTs);
 }
 // ship false: the owner has unpushed edits, so the round fixes and the owner pushes with Update PR.
 // s may be a stack repo's view (s.repo): the PR update after the round goes to that repo.
 // by: who tapped the round's button; the owner for an automatic round. A question at the round's end names them.
-async function startRound(s, text, ship = true, by = null) {
-  const cur = fresh(s.key), wrap = { then_wrap: 'pr_auto', then_wrap_at: Date.now(), then_wrap_repo: s.repo ?? null };
+// noteTs: the round's note, which becomes its status and then its result: one message, not two.
+async function startRound(s, text, ship = true, by = null, noteTs = null) {
+  const cur = fresh(s.key), wrap = { ...(ship ? { then_wrap: 'pr_auto', then_wrap_at: Date.now(), then_wrap_repo: s.repo ?? null } : {}), ...(noteTs ? { round_note_ts: noteTs } : {}) };
   if (['paused', 'stopped', 'failed', 'pr_open'].includes(cur.state)) {
     if (sessions.get(cur.channel, cur.thread_ts)?.key !== cur.key || cur.stop_failed) return;
     sessions.patch(cur.key, { round_by: by ?? cur.owner });
-    await resumePaused(cur, text, app.client, ship ? wrap : {});
+    await resumePaused(cur, text, app.client, wrap);
     return;
   }
-  sessions.patch(cur.key, { round_by: by ?? cur.owner, ...(ship ? wrap : {}) });
+  sessions.patch(cur.key, { round_by: by ?? cur.owner, ...wrap });
   await steerAndAck(cur, text, app.client, null, null);
 }
 ownerAction('auto_round', async (s, client, action, body) => {
@@ -2826,7 +2841,7 @@ ownerAction('auto_round', async (s, client, action, body) => {
   // Not wrapTap: its 30 s lock would refuse the PR update after a short round.
   await client.chat.update({ channel: s.channel, ts: body.message.ts, text: body.message.text,
     blocks: [...(body.message.blocks ?? []).filter((b) => b.type !== 'actions'), { type: 'context', elements: [{ type: 'mrkdwn', text: `Round started by <@${body.user.id}>` }] }] }).catch(() => {});
-  await startRound(prView(fresh(s.key), repo), text, ship, body.user.id);
+  await startRound(prView(fresh(s.key), repo), text, ship, body.user.id, body.message.ts);
 });
 
 // 6: DM the operator once for each new or reopened error signature. The first

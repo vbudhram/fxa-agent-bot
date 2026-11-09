@@ -9,7 +9,7 @@ export default {
     { advance: 'setup' },
     { advance: 'turn', wait: { text: /Wrapping up/ } },
     { advance: 'finish', wait: { ctl: /"routine","done"/ } },
-    { advance: 5, wait: { ctl: /Copilot reviewed the PR/ }, expect: { text: /Copilot/, ctl: { match: /Copilot reviewed the PR/, n: 1 } } },
+    { advance: 5, wait: { ctl: /Copilot reviewed the PR/ }, expect: { ctl: { match: /Copilot reviewed the PR/, n: 1 } } },
     // The round's turn ends, and the host updates the PR (pr_auto): a second finish.
     { advance: 'turn' },
     { pause: 3, expect: { ctl: { match: /"--resume-from"/, n: 1 } } },

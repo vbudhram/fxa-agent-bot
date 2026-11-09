@@ -235,7 +235,8 @@ export function ciNote(cur, why) {
 export const NUDGE_MS = 24 * 3_600_000;
 // asking: the thread has a question of the bot's that nobody answered, so the reminder repeats it.
 export function reviewNudge(cur, ciPassAt, nudgedAt, now, asking = false) {
-  if (cur?.state !== 'OPEN' || cur.ci !== 'pass' || !ciPassAt || nudgedAt === ciPassAt || now - ciPassAt < NUDGE_MS) return null;
+  // Once for each PR: a push after the reminder does not start a new daily one.
+  if (cur?.state !== 'OPEN' || cur.ci !== 'pass' || !ciPassAt || nudgedAt || now - ciPassAt < NUDGE_MS) return null;
   if ((cur.reviews ?? []).some((r) => !isCopilot(r.login))) return null;
   const url = gh(cur.url), pr = url ? `<${url}|the PR>` : 'the PR';
   const ask = asking ? ' My question above still waits for your answer.' : '';
@@ -258,6 +259,8 @@ export function readyNote(cur) {
 // by: who tapped the round's button, or the owner for an automatic round.
 const slackId = (u) => (/^[UW][A-Z0-9]{1,20}$/.test(u ?? '') ? u : '');
 export const roundAsk = (ev, by) => slackId(by) && (ev?.type === 'question' || (ev?.type === 'turn_end' && ev.status === 'needs-input')) ? `<@${by}> I need your answer above.` : null;
+// The bot posted nothing after its question qTs: the question is the last thing it said.
+export const lastBotSaid = (msgs, qTs, botId) => !msgs.some((m) => Number(m.ts) > Number(qTs) && m.user === botId);
 // The idle pause while a question waits: it names the person, so the pause is not the last word.
 export const pauseAsk = (by) => `Paused: my question above still waits for your answer${slackId(by) ? `, <@${by}>` : ''}. Everything is saved. Reply here to pick it up.`;
 
