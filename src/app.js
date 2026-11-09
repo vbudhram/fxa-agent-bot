@@ -21,7 +21,7 @@ import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCar
 import { asksForJira, JIRA_YES, draftCard, filedCard, changedCard, editModal, readEdit } from './jira-draft.js';
 import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateAllows, loadMembers, maySteer, mayTap, SHIP_ACTIONS, PR_ACTIONS, askedShip } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, fromAdmin, ADMIN, LINE_BREAK, laterMessage, slackLinks, threadFile,
-  emptyTurn, EMPTY_RETRY, EMPTY_FALLBACK } from './render.js';
+  emptyTurn, EMPTY_RETRY, EMPTY_FALLBACK, sinceTurn } from './render.js';
 import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, reviewNudge, reviewRound, reviewNote, roundAsk, pauseAsk, readyNote } from './render.js';
 import { randomBytes } from 'node:crypto';
@@ -356,7 +356,7 @@ async function begin(key, client) {
   const prior = from ?? sessions.get(rest.channel, rest.thread_ts);
   if (prior?.buttons_msg && !rest.moved_from) pr.buttons_msg = prior.buttons_msg;
   // The team the resumed session ran as: the new record replaces the old one in this thread, and launch checks it.
-  if (from) pr.resumed_profile = from.profile ?? from.resumed_profile;
+  if (from) Object.assign(pr, { resumed_profile: from.profile ?? from.resumed_profile, turn_end_ts: from.turn_end_ts });
   // A round on a routine's PR: the thread stays a routine thread, and its tags get the PR hint.
   if (ofRoutine(from)) pr.routine_pr = { hint: 'pr' };
   // private (a private repo) on every way a session starts: a resume keeps it, else the team says, and no answer is private.
@@ -702,7 +702,8 @@ function lost(s, e, where) {
 
 // files: an array that gets the files people attached earlier in the thread, the 5 newest.
 // full: an object that gets the whole thread as a file's text (full.text), for the runner's inbox.
-async function threadContext(client, event, { withBot = false, files, full } = {}) {
+// since: only people's messages from then on (sinceTurn), with skip {ts, texts}.
+async function threadContext(client, event, { withBot = false, files, full, since, skip } = {}) {
   try {
     // replies pages oldest first; walk to the end so a long thread keeps its newest messages.
     let msgs = [], cursor;
@@ -716,6 +717,7 @@ async function threadContext(client, event, { withBot = false, files, full } = {
     // Another app's post (an alert the thread is about) is context too; this bot's own, only as mine() says.
     const app = (m) => fromBot(m) && m.user !== botUserId;
     if (files) files.push(...msgs.filter((m) => m.ts !== event.ts && !fromBot(m)).flatMap((m) => fileRefs(m.files)).slice(-5));
+    if (since !== undefined) msgs = sinceTurn(msgs.filter((m) => !fromBot(m)), since, skip?.ts, skip?.texts);
     const lines = msgs.filter((m) => m.ts !== event.ts && (!fromBot(m) || mine(m) || app(m)))
       .map((m) => {
         const who = app(m) ? appLabel(m) : fromBot(m) ? 'you (an earlier answer)' : m.user === event.user ? 'owner' : 'someone else';
@@ -1304,22 +1306,32 @@ app.event('reaction_added', async ({ event, client }) => {
 // A reply to a paused session continues it on a fresh runner, with its changes
 // and conversation; the reply is the new session's first message.
 async function resumePaused(s, text, client, extra = {}) {
-  if ([...pending.values()].some((p) => p.channel === s.channel && p.thread_ts === s.thread_ts)) return;
   // Every resume comes here: a reply, a tag, a ship button, a tapped answer. A moved session continues in its new thread.
   if (fresh(s.key)?.moved_to) {
     await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts,
       text: `This work moved to ${fresh(s.key).moved_to}. Continue it there, or tag me in a new thread to start something else.` }).catch(() => {});
     return;
   }
+  // A start is under way here (a tag, or another resume): this joins it, as a reply does (joinStarting), not dropped.
+  const p0 = [...pending.values()].find((p) => p.channel === s.channel && p.thread_ts === s.thread_ts);
+  if (p0) {
+    const { held_files, ...rest } = extra;
+    Object.assign(p0, rest, { prompt: `${p0.prompt}\n\n${text}`, acks: [...new Set([...(p0.acks ?? []), ...ackList(fresh(s.key))])],
+      held_files: [...(p0.held_files ?? []), ...(held_files ?? [])] });
+    return;
+  }
+  const asideTexts = (fresh(s.key)?.aside ?? []).map((a) => a.text);
   text = takeAside(s.key) + text;
   const key = sessions.newKey();
   // Reserve the thread before any await, as onMention does.
   pending.set(key, { prompt: text, request: requestOf(s), owner: s.owner, team: s.team, channel: s.channel, thread_ts: s.thread_ts, resume_from: s.key, acks: ackList(fresh(s.key)), ...extra,
     held_files: [...(fresh(s.key)?.held_files ?? []), ...(extra.held_files ?? [])] });
   // The new runner starts empty: the thread's files go again, whichever handler took the reply.
-  const earlier = [];
-  await threadContext(app.client, { channel: s.channel, thread_ts: s.thread_ts, user: s.owner }, { files: earlier });
-  if (earlier.length && pending.has(key)) pending.set(key, { ...pending.get(key), held_files: [...earlier, ...pending.get(key).held_files] });
+  // People's messages since the last turn go too: the agent has not seen them (a ship tap or a round carries none).
+  const earlier = [], cur = fresh(s.key);
+  const ctx = await threadContext(app.client, { channel: s.channel, thread_ts: s.thread_ts, user: s.owner },
+    { files: earlier, since: cur?.turn_end_ts ?? cur?.last_ts ?? s.thread_ts, skip: { ts: ackList(cur), texts: asideTexts } });
+  if (pending.has(key)) pending.set(key, { ...pending.get(key), prompt: pending.get(key).prompt + ctx, ...(earlier.length ? { held_files: [...earlier, ...pending.get(key).held_files] } : {}) });
   // No note before the status: its first row says it picks up where it left off.
   await begin(key, client);
 }
@@ -2355,6 +2367,11 @@ async function pollOne(key) {
       }
       // The repos of a stack, for !pr <repo> and the buttons.
       if (ev.type === 'turn_end' && Array.isArray(ev.trees)) sessions.patch(key, { trees: ev.trees.map(({ name, slug, out, changes }) => ({ name, slug, out, changes })) });
+      // The newest reply this turn could know of: a resume sends the thread's messages after it (resumePaused).
+      if (ev.type === 'turn_end' || ev.type === 'question') {
+        const c = fresh(key), seenTs = [c.last_ts, ...ackList(c)].filter(Boolean).sort((a, b) => Number(b) - Number(a))[0];
+        if (seenTs) sessions.patch(key, { turn_end_ts: seenTs });
+      }
 
       // The wrap-up's result: its flag is done, even when it ended between two polls and none saw 'wrapping'.
       if (ev.type === 'pr' || ev.type === 'pushed') wrapping.delete(key);

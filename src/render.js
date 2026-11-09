@@ -695,6 +695,11 @@ export const EMPTY_RETRY = 'Your last message had only its status line, so the p
 export const EMPTY_FALLBACK = 'I stopped without writing a message. Reply here and ask what I need.';
 
 // A long thread keeps its start (its topic, often the options it weighs) and its newest lines, with "..." between.
+// A resume's thread messages: the ones after since (the newest Slack ts the last turn had seen), but not
+// the resume's own (skipTs), a !command, nor those it already carries as kept-aside text (skipTexts, cut as keepAside cuts).
+export const sinceTurn = (msgs, since, skipTs = [], skipTexts = []) =>
+  msgs.filter((m) => Number(m.ts) > Number(since) && !skipTs.includes(m.ts) && !/^(<@[A-Z0-9]+>\s*)*!/.test(String(m.text ?? '').trim())
+    && !skipTexts.includes(String(m.text ?? '').slice(0, 1000)));
 export function trimContext(lines, max = 6000, per = 1500, head = 1600) {
   const out = lines.map((l) => (l.length > per ? `${l.slice(0, per - 1)}…` : l));
   let len = out.reduce((n, l) => n + l.length + 1, 0);

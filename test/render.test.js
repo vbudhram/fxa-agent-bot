@@ -742,3 +742,10 @@ test('a Slack rate limit names the method from the URL the client gives', () => 
   assert.equal(rateLimitLine(3, { url: 'https://slack.com/api/users.info' }), 'slack rate limited: users.info waits 3s');
   assert.equal(rateLimitLine(5, {}), 'slack rate limited: a call waits 5s');
 });
+
+test('sinceTurn: a resume gets the messages after the last turn, without its own or the kept-aside ones', async () => {
+  const { sinceTurn } = await import('../src/render.js');
+  const msgs = [{ ts: '100.0', text: 'old' }, { ts: '200.0', text: 'new' }, { ts: '201.0', text: 'mine' }, { ts: '202.0', text: 'aside' }, { ts: '203.0', text: '<@UBOT> !pause' }];
+  assert.deepEqual(sinceTurn(msgs, '150.5', ['201.0'], ['aside']).map((m) => m.text), ['new']);
+  assert.deepEqual(sinceTurn(msgs, 0).map((m) => m.text), ['old', 'new', 'mine', 'aside']);
+});
