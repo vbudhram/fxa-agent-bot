@@ -2961,14 +2961,16 @@ async function routineEvent(key, ev) {
   if (ev.type === 'question') return endRoutine(key, { state: 'report', report: ev.text || ev.questions?.map((q) => q.q).join('\n') || '' });
   if (ev.type !== 'turn_end' || !['ready', 'needs-input'].includes(ev.status)) return;
   const changed = ev.trees?.length ? ev.trees.filter((t) => t.changes > 0) : ev.changes > 0 ? [{}] : [];
-  if (r.mode !== 'report' && !r.finishing && ev.status === 'ready' && changed.length) {
+  // report and tickets open no PR: ctl files the tickets from the report.
+  const shipping = r.mode !== 'report' && r.mode !== 'tickets';
+  if (shipping && !r.finishing && ev.status === 'ready' && changed.length) {
     sessions.patch(key, { routine: { ...r, finishing: true } });
     // One work repo in a pr mode (D11): a team stack names it.
     return ctl.finish(key, false, changed[0].slug).catch((e) => endRoutine(key, { state: 'failed', reason: lastLine(e.stderr) || 'the wrap-up did not start' }));
   }
   // pr+notes lists what it did not fix: with no fix, those findings are the report.
   // A fix run's reason for no fix goes as its report, through ctl's scan.
-  if (r.mode !== 'report' && !r.finishing && ev.status === 'ready') return endRoutine(key, r.fix ? { state: 'nochange', report: ev.text ?? '' } : r.mode === 'pr+notes' && ev.text?.trim() ? { state: 'report', report: ev.text } : { state: 'nochange' });
+  if (shipping && !r.finishing && ev.status === 'ready') return endRoutine(key, r.fix ? { state: 'nochange', report: ev.text ?? '' } : r.mode === 'pr+notes' && ev.text?.trim() ? { state: 'report', report: ev.text } : { state: 'nochange' });
   return endRoutine(key, { state: 'report', report: ev.text ?? '' });
 }
 async function startRoutine(r) {
