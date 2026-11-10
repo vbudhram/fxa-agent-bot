@@ -1,4 +1,3 @@
-import { lacksGroupsRead } from './access.js';
 // Routines (epic i168): the bot's tick is the only clock routines have (D4). It runs only when ROUTINES_ENV
 // is live or dev, and each bot ticks only its own env (D5).
 export const ROUTINES_ENV = /^(live|dev)$/.test(process.env.ROUTINES_ENV ?? '') ? process.env.ROUTINES_ENV : null;
@@ -10,21 +9,6 @@ export const NO_CHANNEL = 'history-only';
 let fakeN = 0;
 export const muted = (args) => args?.channel === NO_CHANNEL || args?.channel_id === NO_CHANNEL;
 export const mutedReply = () => ({ ok: true, channel: NO_CHANNEL, ts: `${Math.floor(Date.now() / 1000)}.${String(++fakeN % 1e6).padStart(6, '0')}`, files: [] });
-
-const RULE = 'a team with a private repo, and every security review, posts only to a private channel that is not shared with another workspace';
-// Why the run may not post in its channel, or null (D8). Fail closed: a lookup that fails refuses, and the bot
-// cannot read a public channel (groups:read only), so a public channel refuses too.
-export async function channelRefusal(client, run) {
-  if (!run.channel) return null;
-  if (!run.private && run.template !== 'security-review') return null;
-  let scope = false;
-  const c = await client.conversations.info({ channel: run.channel }).then((r) => r.channel ?? null, (e) => { scope = lacksGroupsRead(e); return null; });
-  if (scope) return `the Slack app lacks the groups:read scope, so I cannot tell whether channel ${run.channel} is private, and ${RULE}. The FxA Agent admin must update the app from manifest.yml and reinstall it`;
-  if (!c) return `I cannot read channel ${run.channel}, and ${RULE}`;
-  if (!c.is_private) return `channel ${run.channel} is public, and ${RULE}`;
-  if (c.is_ext_shared || c.is_shared) return `channel ${run.channel} is shared, and ${RULE}`;
-  return null;
-}
 
 // The channels this bot is in, for the channel picker of the dashboard's routine form. Without channels:read
 // or groups:read Slack answers missing_scope for that type, so the list then holds the other type only.

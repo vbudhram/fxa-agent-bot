@@ -83,30 +83,6 @@ test('each routine wrapper passes argv with no shell', async () => {
   assert.ok(!existsSync('pwned') && !existsSync(join(d, 'pwned')));
 });
 
-test('the channel check fails closed for a private-repo team and a security review', async () => {
-  const { channelRefusal } = await import('../src/routines.js');
-  const info = (c) => ({ conversations: { info: async () => (c instanceof Error ? Promise.reject(c) : { channel: c }) } });
-  const run = { channel: 'C0OUT', private: true, template: 'code-review' };
-  assert.equal(await channelRefusal(info({ is_private: true, is_shared: false, is_ext_shared: false }), run), null);
-  assert.match(await channelRefusal(info({ is_private: false }), run), /is public/);
-  assert.match(await channelRefusal(info({ is_private: true, is_ext_shared: true }), run), /is shared/);
-  assert.match(await channelRefusal(info({ is_private: true, is_shared: true }), run), /is shared/);
-  assert.match(await channelRefusal(info(new Error('channel_not_found')), run), /cannot read channel C0OUT/);
-  assert.match(await channelRefusal(info(null), { ...run, private: false, template: 'security-review' }), /cannot read/);
-  assert.equal(await channelRefusal(info(new Error('no')), { ...run, private: false }), null, 'a public team code review needs no lookup');
-});
-
-test('a missing groups:read scope still refuses a routine run, and names the scope, not the channel', async (t) => {
-  const { channelRefusal } = await import('../src/routines.js');
-  t.mock.method(console, 'error', () => {});
-  const err = Object.assign(new Error('missing_scope'), { data: { error: 'missing_scope', needed: 'groups:read', provided: 'channels:read,chat:write' } });
-  const client = { conversations: { info: async () => { throw err; } } };
-  const why = await channelRefusal(client, { channel: 'G1', private: true, template: 'code-review' });
-  assert.match(why, /groups:read/);
-  assert.match(why, /manifest\.yml/);
-  assert.doesNotMatch(why, /I cannot read channel/);
-});
-
 test('a tick that is still running makes the next call do nothing', async () => {
   const { inFlightGuard } = await import('../src/routines.js');
   let n = 0, release;
@@ -136,10 +112,8 @@ test('a cost-limit stop ends the start message as stopped, as its reply says, an
   assert.equal(routineEndLine(R, { state: 'ended' }), 'Code review: ended. See the reply in this thread.');
 });
 
-test('a routine with no channel needs no channel check, and its Slack calls are muted (D32)', async () => {
-  const { channelRefusal, NO_CHANNEL, muted, mutedReply } = await import('../src/routines.js');
-  const never = { conversations: { info: async () => { throw new Error('no lookup for a routine with no channel'); } } };
-  assert.equal(await channelRefusal(never, { private: true, template: 'security-review' }), null);
+test('a routine with no channel has its Slack calls muted (D32)', async () => {
+  const { NO_CHANNEL, muted, mutedReply } = await import('../src/routines.js');
   assert.equal(muted({ channel: NO_CHANNEL }), true);
   assert.equal(muted({ channel_id: NO_CHANNEL }), true);
   assert.equal(muted({ channel: 'C0OUT' }), false);

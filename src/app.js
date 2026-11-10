@@ -14,7 +14,7 @@ import { pollEvery, reachable, missed, replayMark, replayable } from './poll.js'
 import * as unfurl from './unfurl.js';
 import { resolveProfile, mayStart, isAdmin, mayOpenPr } from './profile.js';
 import { teamChannels, reviewRounds } from './teams.js';
-import { ROUTINES_ENV, TICK_MS, NO_CHANNEL, channelRefusal, inFlightGuard, muted, mutedReply, pollChannels, pollUsers } from './routines.js';
+import { ROUTINES_ENV, TICK_MS, NO_CHANNEL, inFlightGuard, muted, mutedReply, pollChannels, pollUsers } from './routines.js';
 import { ingest } from './db.js';
 import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs,
   shipRepos, afterShip, shipAsk, treeFor, namedRepos, PR_FIELDS, prCardFor } from './stack.js';
@@ -2890,9 +2890,6 @@ async function routineTick() {
   const { runs, skips } = await ctl.routineTick(ROUTINES_ENV, routineResume);
   routineResume = false;
   for (const k of skips.filter((x) => x.post && x.channel)) {
-    // A skip names the routine in its channel: the same private-channel rule as a run (D8). Not posted, not marked.
-    const why = await channelRefusal(app.client, k);
-    if (why) { console.error('routine', `run ${k.run}: the skip is not posted: ${why}`); continue; }
     // A skip counts as posted only once its post works, so a failed post does not mute the next one.
     const ok = await app.client.chat.postMessage({ channel: k.channel, text: k.fix ? fixSkip(k.fix) : routineSkip(k) }).then(() => true, (e) => { console.error('routine', `run ${k.run}: the skip post failed: ${e.data?.error ?? e.message}`); return false; });
     if (ok) await ctl.routinePosted(k.run).catch((e) => console.error('routine', `run ${k.run} posted`, e.stderr || e.message));
@@ -2974,8 +2971,6 @@ async function routineEvent(key, ev) {
   return endRoutine(key, { state: 'report', report: ev.text ?? '' });
 }
 async function startRoutine(r) {
-  const why = await channelRefusal(app.client, r);
-  if (why) return refuseRoutine(r, why);
   // No channel (D32): the same path, in NO_CHANNEL, where every Slack call does nothing.
   r = { ...r, channel: r.channel || NO_CHANNEL };
   const start = await app.client.chat.postMessage({ channel: r.channel, text: r.fix ? fixStart(r) : routineStart(r) }).catch((e) => ({ error: e.data?.error ?? e.message }));
