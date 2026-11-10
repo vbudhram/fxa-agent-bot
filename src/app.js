@@ -26,7 +26,7 @@ import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, roundOutcome, reviewNudge, reviewRound, reviewNote, roundAsk, pauseAsk, lastBotSaid, readyNote } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { routineStart, routineSkip, routineEnd, routineEndLine, routineReport, routineHint, routineLabel, fixStart, fixEnd, fixEndLine, fixSkip } from './render.js';
-import { render, rateLimitLine, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, toSomeoneElse, asideBlock, REBASE_PROMPT, operatorNext, fileRefs, distinctFiles, maskSecrets, maskUpload } from './render.js';
+import { render, rateLimitLine, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, toSomeoneElse, asideBlock, REBASE_PROMPT, operatorNext, fileRefs, distinctFiles, maskUpload, slackArgs } from './render.js';
 
 const { App } = bolt;
 installErrorLog(ctl.errorsPush);
@@ -48,12 +48,9 @@ if (process.env.SLACK_CALL_LOG) {
 // No link previews on the bot's own posts: a PR link drew GitHub's large preview under each card.
 {
   const proto = bolt.webApi.WebClient.prototype, call = proto.apiCall;
-  // Every string the bot posts or edits goes through maskSecrets.
-  const mask = (v) => (typeof v === 'string' ? maskSecrets(v) : Array.isArray(v) ? v.map(mask)
-    : v && typeof v === 'object' && v.constructor === Object ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, mask(x)])) : v);
   proto.apiCall = function (method, args = {}) {
     if (muted(args)) return Promise.resolve(mutedReply());
-    if (/^chat\./.test(method)) args = mask(args);
+    args = slackArgs(method, args);
     return call.call(this, method, method === 'chat.postMessage' ? { unfurl_links: false, unfurl_media: false, ...args } : args);
   };
   // An upload sends its bytes outside apiCall, so it gets its own wrapper.

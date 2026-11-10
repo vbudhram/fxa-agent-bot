@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fromAdmin, ADMIN, threadStarter, endWord, render, operatorProblem, operatorNext, summaryLine, closestCommand, watchUrl, threadLine, maskSecrets, maskUpload, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, slackLinks, threadFile, emptyTurn, EMPTY_FALLBACK, fromOther, othersLines, laterMessage, rateLimitLine } from '../src/render.js';
+import { fromAdmin, ADMIN, threadStarter, endWord, render, operatorProblem, operatorNext, summaryLine, closestCommand, watchUrl, threadLine, maskSecrets, maskUpload, slackArgs, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, slackLinks, threadFile, emptyTurn, EMPTY_FALLBACK, fromOther, othersLines, laterMessage, rateLimitLine } from '../src/render.js';
 
 test('operator problems are named, other errors are not', () => {
   assert.equal(operatorProblem('ERROR: (gcloud.compute.ssh) Reauthentication failed. cannot prompt').kind, 'gcloud');
@@ -785,4 +785,21 @@ test('roundOutcome: a round that changed files and asked nothing updates the PR;
   assert.equal(roundOutcome(ready, 0).ship, false);
   assert.equal(roundOutcome({ type: 'turn_end', status: 'needs-input', fixed: 1 }, 10).ship, false);
   assert.equal(roundOutcome({ type: 'question' }, 10).ship, false);
+});
+
+test('slackArgs: half an emoji from a cut posts as U+FFFD, not a URI malformed throw', async () => {
+  const { stringify } = await import('node:querystring');
+  // The answer that crashed: its 🔍 sat at characters 149 and 150, and plain() cuts at 150.
+  const text = `${'x'.repeat(149)}🔍 more`.slice(0, 150);
+  const args = { channel: 'C1', text, blocks: [{ type: 'markdown', text }], n: 3 };
+  assert.throws(() => stringify({ text }), /URI malformed/);
+  const out = slackArgs('chat.update', args);
+  assert.equal(out.text, `${'x'.repeat(149)}�`);
+  assert.equal(out.blocks[0].text, out.text);
+  assert.equal(out.n, 3);
+  assert.doesNotThrow(() => stringify({ ...out, blocks: JSON.stringify(out.blocks) }));
+  assert.equal(slackArgs('views.publish', { view: { title: text } }).view.title, out.text);
+  // chat.* text stays masked; other calls are not.
+  assert.equal(slackArgs('chat.postMessage', { text: 'ghp_abcdefghijklmnop1234' }).text, 'ghp_<masked>');
+  assert.equal(slackArgs('conversations.info', { channel: 'ghp_abcdefghijklmnop1234' }).channel, 'ghp_abcdefghijklmnop1234');
 });

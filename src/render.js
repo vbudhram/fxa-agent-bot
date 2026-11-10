@@ -566,6 +566,15 @@ export const maskSecrets = (t, mark = '<masked>') => String(t).replace(
   /(?:(sk-ant-[a-z0-9]+-|xox[abpr]-|xapp-)[A-Za-z0-9_-]{8,}|(fxl_|fxm_|ghs_|ghp_|gho_|github_pat_)[A-Za-z0-9]{12,}[A-Za-z0-9_]*)/g,
   (_, a, b) => `${a ?? b}${mark}`);
 
+// Every string of a Slack call: masked in chat.* calls, and well formed in all of them. A .slice() through
+// an emoji leaves half a surrogate pair, and Slack's client then throws "URI malformed" and posts nothing.
+export const slackArgs = (method, args) => {
+  const chat = /^chat\./.test(method);
+  const walk = (v) => (typeof v === 'string' ? (chat ? maskSecrets(v) : v).toWellFormed() : Array.isArray(v) ? v.map(walk)
+    : v && typeof v === 'object' && v.constructor === Object ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)])) : v);
+  return walk(args);
+};
+
 // An upload's text (a Diff's content, an agent's .patch or .diff file, the comment, the name and title) through maskSecrets.
 // Media bytes stay as they are. The Diff is for reading: Apply and Open PR work from the branch.
 export const maskUpload = (args) => ({ ...args,
