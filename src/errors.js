@@ -9,6 +9,14 @@ import { ingest } from './db.js';
 const FILE = process.env.FXA_ERRORS_FILE || `${process.env.HOME}/.claude/state/fxa-ai-fixme/errors.jsonl`;
 const KEY = /agent-[a-z0-9]{4,12}/;
 
+// Slack's client retries a failed call for about 30 minutes. An error from the bot's own data (a bad
+// string, a bad value) fails the same way each time, and a session's messages wait behind it: stop at once.
+// The client throws a body it cannot encode as it is, and wraps an error from the request in .original.
+export const slackRetry = (e) => {
+  const o = e?.original ?? e;
+  if (['URIError', 'RangeError', 'SyntaxError'].includes(o?.name)) throw o;
+};
+
 export function signature(where, message) {
   const w = String(where).replace(/:[0-9]+/g, '');
   const m = String(message)

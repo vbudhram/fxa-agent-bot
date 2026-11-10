@@ -6,7 +6,7 @@ import { statSync, readFileSync, readdirSync, lstatSync, writeFileSync, appendFi
 import { join } from 'node:path';
 import * as ctl from './ctl.js';
 import { quickFirst, askId, answerBlocks, findingsOf, stepRows, doneLine, stepCount, rowTitle, ON_IT, FIRST_ROW, seamless } from './answer.js';
-import { installErrorLog } from './errors.js';
+import { installErrorLog, slackRetry } from './errors.js';
 import * as sessions from './sessions.js';
 import * as live from './live.js';
 import { statusMessage } from './status.js';
@@ -26,7 +26,7 @@ import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, roundOutcome, reviewNudge, reviewRound, reviewNote, roundAsk, pauseAsk, lastBotSaid, readyNote } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { routineStart, routineSkip, routineEnd, routineEndLine, routineReport, routineHint, routineLabel, fixStart, fixEnd, fixEndLine, fixSkip } from './render.js';
-import { render, rateLimitLine, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, toSomeoneElse, asideBlock, REBASE_PROMPT, operatorNext, fileRefs, distinctFiles, maskUpload, slackArgs } from './render.js';
+import { render, rateLimitLine, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, toSomeoneElse, asideBlock, REBASE_PROMPT, operatorNext, fileRefs, distinctFiles, maskUpload, slackArgs, LOST_REPLY } from './render.js';
 
 const { App } = bolt;
 installErrorLog(ctl.errorsPush);
@@ -61,6 +61,7 @@ const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
   appToken: process.env.SLACK_APP_TOKEN,
   socketMode: true,
+  clientOptions: { retryConfig: { ...bolt.webApi.retryPolicies.tenRetriesInAboutThirtyMinutes, onFailedAttempt: slackRetry } },
 });
 // Which buttons people use, for deciding which to keep.
 app.use(async ({ body, next }) => {
@@ -1586,7 +1587,11 @@ const finishTurn = (key, msg, ev) => serial(key, async function finishTurn() {
       sessions.patch(s.key, STATUS_CLEAR);
     }
   }
-  await postMsg(key, msg);
+  await postMsg(key, msg).catch(async (e) => {
+    // The answer posted nowhere: a plain line, with none of the answer's text, says so.
+    await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: LOST_REPLY }).catch(() => {});
+    throw e;
+  });
 });
 
 async function postMsg(key, msg) {

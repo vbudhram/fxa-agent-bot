@@ -566,6 +566,8 @@ export const maskSecrets = (t, mark = '<masked>') => String(t).replace(
   /(?:(sk-ant-[a-z0-9]+-|xox[abpr]-|xapp-)[A-Za-z0-9_-]{8,}|(fxl_|fxm_|ghs_|ghp_|gho_|github_pat_)[A-Za-z0-9]{12,}[A-Za-z0-9_]*)/g,
   (_, a, b) => `${a ?? b}${mark}`);
 
+export const LOST_REPLY = 'My answer did not post: Slack refused it. Reply here and I will answer again.';
+
 // Every string of a Slack call: masked in chat.* calls, and well formed in all of them. A .slice() through
 // an emoji leaves half a surrogate pair, and Slack's client then throws "URI malformed" and posts nothing.
 export const slackArgs = (method, args) => {
