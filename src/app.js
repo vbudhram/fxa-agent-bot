@@ -2933,14 +2933,16 @@ async function endRoutine(key, end) {
   const fix = r.fix && { state: a ? a.state : 'store', fix: { ...r.fix, ...a?.fix } };
   // posted: the report is really in the thread, so the end text may say so (a blank report or a failed post is not).
   let posted = false;
-  if (end.report?.trim() && post) {
-    const rep = routineReport(end.report);
+  // ctl's own report wins when it gives one: a security review's ticket keys, in place of the findings.
+  const report = a?.changed === true && typeof a.report === 'string' ? a.report : end.report;
+  if (report?.trim() && post) {
+    const rep = routineReport(report);
     posted = await (rep.snippet ? app.client.filesUploadV2({ channel_id: s.channel, thread_ts: r.start_ts, content: rep.text, filename: 'report.md', title: `${r.name} report` })
       : app.client.chat.postMessage({ ...at, text: rep.text })).then(() => true, (e) => { console.error('routine', key, `report post: ${e.data?.error ?? e.message}`); return false; });
   }
   // A later tag's hint follows what the thread shows: a report only when one posted, a PR only when the end names one.
   if (fresh(key)?.routine) sessions.patch(key, { routine: { ...fresh(key).routine, hint: posted ? 'report' : shown.state === 'ok' ? 'pr' : 'run' } });
-  const text = fix ? fixEnd(fix.state, fix.fix, { post: a?.changed ? a.post : undefined, posted }) : routineEnd(r, { ...shown, post, posted, blank: !end.report?.trim(), next: a?.next });
+  const text = fix ? fixEnd(fix.state, fix.fix, { post: a?.changed ? a.post : undefined, posted }) : routineEnd(r, { ...shown, post, posted, blank: !report?.trim(), next: a?.next });
   await app.client.chat.update({ channel: s.channel, ts: r.start_ts, text: fix ? fixEndLine(fix.state, fix.fix) : routineEndLine(r, shown) }).catch((e) => console.error('routine', key, `start edit: ${e.data?.error ?? e.message}`));
   await app.client.chat.postMessage({ ...at, text, ...(fix ? { reply_broadcast: true } : {}) }).catch((e) => console.error('routine', key, `end post: ${e.data?.error ?? e.message}`));
 }
