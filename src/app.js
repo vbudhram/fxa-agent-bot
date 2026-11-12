@@ -1769,7 +1769,9 @@ app.action('tree_more', async ({ ack, body, action, client }) => {
 });
 async function ownerTap(id, fn, body, action, client) {
   // A value can carry more after the key: "<key>|<login>".
-  const s = sessions.all().find((x) => x.key === action.value.split('|')[0]);
+  // A Jira card outlives its session key (a follow-up or resume makes a new one): it acts on the thread's session.
+  const s = sessions.all().find((x) => x.key === action.value.split('|')[0])
+    ?? (id.startsWith('jira_') && body.channel?.id && body.message ? sessions.get(body.channel.id, body.message.thread_ts ?? body.message.ts) : null);
   if (!s) return;
   const u = body.user.id, pr = prOk(s, u);
   if (!mayTap(id, s.owner, u, allowed(s.channel, u), STEER_ANYONE, onTeam(s, u), adminOf(s, u), pr)) {
