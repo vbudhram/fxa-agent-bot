@@ -30,10 +30,12 @@ export async function botChannels(client) {
 }
 
 // The people in the workspace, for the people picker of a team's Settings: no bot, no deactivated account.
-export async function workspaceUsers(client) {
+// users.list is Tier 2 (about 20 a minute): back-to-back pages of a large workspace hit the limit at each start.
+export async function workspaceUsers(client, pause = 3000) {
   const out = [];
   let cursor;
   do {
+    if (cursor) await new Promise((r) => setTimeout(r, pause));
     const r = await client.users.list({ limit: 200, cursor });
     for (const u of r.members ?? []) {
       if (u.deleted || u.is_bot || u.id === 'USLACKBOT') continue;

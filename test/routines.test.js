@@ -157,7 +157,15 @@ test('the user list reads every page, and leaves out bots, deactivated accounts 
   const c = { users: { list: async (a) => (a.cursor
     ? { members: [{ id: 'U2', name: 'pat', profile: { real_name: 'Pat Doe', display_name: 'pat', email: 'pat@example.com' } }, { id: 'U3', deleted: true, name: 'x' }] }
     : { members: [{ id: 'USLACKBOT', name: 'slackbot' }, { id: 'B1', is_bot: true, name: 'bot' }, { id: 'U1', name: 'sam', real_name: 'Sam' }], response_metadata: { next_cursor: 'p2' } }) } };
-  assert.deepEqual(await workspaceUsers(c), [{ id: 'U1', name: 'Sam', handle: 'sam', email: '' }, { id: 'U2', name: 'Pat Doe', handle: 'pat', email: 'pat@example.com' }]);
+  assert.deepEqual(await workspaceUsers(c, 0), [{ id: 'U1', name: 'Sam', handle: 'sam', email: '' }, { id: 'U2', name: 'Pat Doe', handle: 'pat', email: 'pat@example.com' }]);
+});
+
+test('the user list waits between pages, so a large workspace stays under the rate limit', async () => {
+  const at = [];
+  const c = { users: { list: async (a) => { at.push(Date.now()); return { members: [], response_metadata: { next_cursor: at.length < 3 ? `p${at.length}` : '' } }; } } };
+  await workspaceUsers(c, 40);
+  assert.equal(at.length, 3);
+  assert.ok(at[1] - at[0] >= 35 && at[2] - at[1] >= 35, `gaps ${at[1] - at[0]} ${at[2] - at[1]}`);
 });
 
 test('a missing scope names the scope Slack wants and the reinstall step', async () => {
