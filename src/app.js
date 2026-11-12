@@ -2959,7 +2959,7 @@ async function endRoutine(key, end) {
       : app.client.chat.postMessage({ ...at, text: rep.text })).then(() => true, (e) => { console.error('routine', key, `report post: ${e.data?.error ?? e.message}`); return false; });
   }
   // A later tag's hint follows what the thread shows: a report only when one posted, a PR only when the end names one.
-  if (fresh(key)?.routine) sessions.patch(key, { routine: { ...fresh(key).routine, hint: posted ? 'report' : shown.state === 'ok' ? 'pr' : 'run' } });
+  if (fresh(key)?.routine) sessions.patch(key, { routine: { ...fresh(key).routine, hint: posted ? (r.mode === 'tickets' ? 'tickets' : 'report') : shown.state === 'ok' ? 'pr' : 'run' } });
   const text = fix ? fixEnd(fix.state, fix.fix, { post: a?.changed ? a.post : undefined, posted }) : routineEnd(r, { ...shown, post, posted, blank: !report?.trim(), next: a?.next });
   await app.client.chat.update({ channel: s.channel, ts: r.start_ts, text: fix ? fixEndLine(fix.state, fix.fix) : routineEndLine(r, shown) }).catch((e) => console.error('routine', key, `start edit: ${e.data?.error ?? e.message}`));
   await app.client.chat.postMessage({ ...at, text, ...(fix ? { reply_broadcast: true } : {}) }).catch((e) => console.error('routine', key, `end post: ${e.data?.error ?? e.message}`));

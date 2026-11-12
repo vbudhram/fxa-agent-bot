@@ -764,6 +764,7 @@ export function routineEnd(r, end) {
     ? `${n}: the report holds data I do not post in Slack. A team admin can read it in the dashboard ${historyLink(r.team, r.routine)}.${next}`
     : end.blank ? `${n}: the run ended with no report. No code changed.${next}`
     : end.posted === false ? `${n}: the run ended with no report I could post here. A team admin can read it in the dashboard ${historyLink(r.team, r.routine)}.${next}`
+    : r.mode === 'tickets' ? `${n}: the findings are filed as Jira tickets, listed in this thread. No code changed.${next}`
     : `${n}: the report is in this thread. No code changed.${next}`;
   if (end.state === 'nochange') return `${n}: no issue to fix.${next}`;
   // done did not answer: nothing is recorded, so nothing of the run is posted.
@@ -781,6 +782,7 @@ export const routineSkip = (s) => `${esc(s.name ?? 'A routine')} skipped: ${esc(
 // kind: how the run ended. A report or a PR is in the thread; any other run (live, failed, no change) has neither.
 export const routineHint = (kind, fix) => (kind === 'report'
   ? 'This thread holds a routine\'s report. To work on a finding, tag me in a new thread and paste the finding.'
+  : kind === 'tickets' ? 'This thread lists a routine\'s Jira tickets. To work on one, tag me in a new thread with its Jira key.'
   : kind === 'pr' ? 'To work on this PR, tag me in a new thread with the PR link.'
   : kind === 'fix' ? `This thread is for a dependency fix run. To ask again, push a new commit and add ${fixLabel(fix)} on the PR, or tag me in a new thread with the PR link.`
   : 'This thread is for a routine run. I do not take requests here. To start work, tag me in a new thread.');

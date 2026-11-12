@@ -183,3 +183,11 @@ test('a missing scope stops the channel list polling; another error keeps it', a
     assert.ok(lists.length > 1 && lists[0][0].id === 'G1', 'each list is written');
   } finally { console.error = quiet; }
 });
+
+test('a tickets-mode run says its findings are Jira tickets, and the tag hint asks for a key, not the finding', () => {
+  const end = routineEnd({ name: 'Sec', mode: 'tickets' }, { state: 'report', posted: true });
+  assert.match(end, /filed as Jira tickets/);
+  assert.doesNotMatch(end, /the report is in this thread/);
+  assert.match(routineHint('tickets'), /Jira key/);
+  assert.doesNotMatch(routineHint('tickets'), /paste the finding/);
+});
