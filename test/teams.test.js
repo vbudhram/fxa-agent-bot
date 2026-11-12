@@ -117,3 +117,11 @@ test("a team's automatic review rounds come from its record, 2 when unset or out
   write({ rusty: rusty({ review_rounds: 4 }), zero: rusty({ review_rounds: 0 }), bad: rusty({ review_rounds: 9 }), plain: rusty() });
   assert.deepEqual(['rusty', 'zero', 'bad', 'plain', 'norecord'].map((p) => reviewRounds(p, env)), [4, 0, 2, 2, 2]);
 });
+
+test("app.js reads a session's review rounds from its team, also after a resume (no s.profile)", async () => {
+  const { readFileSync } = await import('node:fs');
+  const app = readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
+  const calls = app.match(/reviewRounds\([^)]*\)\)?/g) ?? [];
+  assert.ok(calls.length >= 2);
+  for (const c of calls) assert.match(c, /^reviewRounds\(sessionTeam\(s, fresh\)\)/, c);
+});

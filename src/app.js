@@ -2592,7 +2592,7 @@ setInterval(followPrs, FOLLOW_EVERY_MS);
 // The PR's card: its link message with the state line under it, edited when the line
 // changes. A session with no card (older, or one continued from another) gets one, once.
 async function updatePrCard(s, cur) {
-  const c = cards.prFromStatus(cur, { key: s.key, repo: s.repo, rounds: s.auto_rounds, roundsMax: reviewRounds(s.profile) });
+  const c = cards.prFromStatus(cur, { key: s.key, repo: s.repo, rounds: s.auto_rounds, roundsMax: reviewRounds(sessionTeam(s, fresh)) });
   // The change key is the card itself: the old one-line text left out Jira and CI none or running.
   const line = c && JSON.stringify(c.blocks);
   if (!line || line === prView(fresh(s.key), s.repo)?.pr_card_text) return;
@@ -2831,7 +2831,7 @@ async function autoRound(s, prev, cur) {
   }
   if (!job) { if (seen) pp(seen); return; }
   // Ask, and count nothing, when an automatic round could mix with work the owner has in hand.
-  const max = reviewRounds(s.profile);
+  const max = reviewRounds(sessionTeam(s, fresh));
   // The cap counts only large fixes (roundOutcome): small ones go on with no tap.
   // ponytail: a fixed ceiling on all rounds, so a review bot that comments on each push cannot loop.
   const why = (s.all_rounds ?? 0) >= ROUNDS_CEIL ? `I already ran ${ROUNDS_CEIL} review rounds on this PR on my own.`
