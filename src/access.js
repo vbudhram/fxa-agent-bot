@@ -18,6 +18,12 @@ export const PR_ACTIONS = ['open_pr', 'open_prs', 'push_branch', 'fix_review', '
 export const mayTap = (action, owner, user, allowedHere, steerAnyone, team, admin = false, prOk = true) =>
   PR_ACTIONS.includes(action) && !prOk ? false
     : SHIP_ACTIONS.includes(action) ? maySteer(owner, user, allowedHere, steerAnyone, team, admin) : allowedHere && (user === owner || admin);
+// Why a queued ship (Open PR, Push, a round's PR update) must not run: someone wrote after it was queued.
+// 'owner': the owner sent more. 'list': a person off the PR list steered, and the push would carry their text.
+export function shipHeld(s) {
+  const at = s?.then_wrap_at ?? Infinity;
+  return (s?.last_person_at ?? 0) > at ? 'owner' : (s?.off_list_at ?? 0) > at ? 'list' : null;
+}
 // The agent's 'ship: pr' line on a ready turn: it writes one after every finished change. prOk: whether the
 // person behind the turn is on the team's PR list. A stack of more than one repo ships each changed repo that
 // ships as a PR (repo: a slug, or a list of them). Null: nothing to ship. A refusal only when the person asked

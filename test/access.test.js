@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseGates, gateAllows, loadMembers, codeAllowed, codeRefusal, NO_GROUPS_READ, START_PRIVATE, PRIVATE_ONLY, sessionTeam, maySteer, mayTap, askedShip } from '../src/access.js';
+import { parseGates, gateAllows, loadMembers, codeAllowed, codeRefusal, NO_GROUPS_READ, START_PRIVATE, PRIVATE_ONLY, sessionTeam, maySteer, mayTap, askedShip, shipHeld } from '../src/access.js';
 
 test('a gated channel allows only members of its source channel', () => {
   const gates = parseGates('CPUBLIC:CPRIVATE');
@@ -117,4 +117,12 @@ test('a turn that ends with ship: pr opens the PR for a person on the PR list, a
   assert.equal(askedShip({ ...ev, status: 'needs-input' }, s, true), null);
   assert.equal(askedShip({ type: 'question', ship: true }, s, true), null);
   assert.equal(askedShip(ev, { state: 'paused' }, true), null);
+});
+
+test('a queued ship holds when the owner, or a person off the PR list, wrote after it was queued', () => {
+  assert.equal(shipHeld({ then_wrap_at: 100 }), null);
+  assert.equal(shipHeld({ then_wrap_at: 100, last_person_at: 150 }), 'owner');
+  assert.equal(shipHeld({ then_wrap_at: 100, off_list_at: 150 }), 'list', 'a round steered by someone off the PR list does not push');
+  assert.equal(shipHeld({ then_wrap_at: 100, off_list_at: 50 }), null, 'a steer before the ship was queued does not hold it');
+  assert.equal(shipHeld({ off_list_at: 150 }), null, 'no ship queued');
 });

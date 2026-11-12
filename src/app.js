@@ -19,7 +19,7 @@ import { ingest } from './db.js';
 import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs,
   shipRepos, afterShip, shipAsk, asksForPr, treeFor, namedRepos, PR_FIELDS, prCardFor } from './stack.js';
 import { asksForJira, JIRA_YES, draftCard, filedCard, changedCard, editModal, readEdit } from './jira-draft.js';
-import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateAllows, loadMembers, maySteer, mayTap, SHIP_ACTIONS, PR_ACTIONS, askedShip } from './access.js';
+import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateAllows, loadMembers, maySteer, mayTap, SHIP_ACTIONS, PR_ACTIONS, askedShip, shipHeld } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, fromAdmin, ADMIN, LINE_BREAK, laterMessage, slackLinks, threadFile,
   emptyTurn, EMPTY_RETRY, EMPTY_FALLBACK, sinceTurn } from './render.js';
 import * as cards from './cards.js';
@@ -1441,6 +1441,7 @@ async function steerAndAck(s, text, client, userId, ts) {
   }
   text = takeAside(s.key) + text;
   if (userId && userId === s.owner) sessions.patch(s.key, { last_person_at: Date.now() }); // the owner wrote: a queued ship waits (shipAfterResume)
+  else if (userId && !prOk(s, userId)) sessions.patch(s.key, { off_list_at: Date.now() }); // their text must not reach a push (PRODUCT 5)
   if (userId) sessions.patch(s.key, { asked_by: userId, asked_pr: asksForPr(text) }); // whose request a 'ship: pr' turn answers, and whether it asked for the PR (shipOnAsk)
   // A tapped answer or an edit after the session ended (paused, Stop, a failure):
   // continue it on a new runner, as a reply to a paused session does.
@@ -1956,7 +1957,9 @@ async function shipAfterResume(key, what, ev) {
   const repo = s.then_wrap_repo ?? undefined, label = what === 'push' ? 'Push branch' : shipWhat(s, repo);
   const verb = what === 'push' ? 'push' : label === 'Update PR' ? 'update the PR' : 'open the PR';
   // The owner wrote after the ship was queued (while it booted or answered): do not ship under their turn.
-  if ((s.last_person_at ?? 0) > (s.then_wrap_at ?? Infinity)) { await postMsg(key, { text: `I did not ${verb}: you sent more. Tap ${label} when it is ready.` }); return; }
+  const held = shipHeld(s);
+  if (held === 'owner') { await postMsg(key, { text: `I did not ${verb}: you sent more. Tap ${label} when it is ready.` }); return; }
+  if (held === 'list') { await postMsg(key, { text: `I did not ${verb}: someone who is not on the team's PR list steered this. Someone on the list can tap ${label} when it is ready.` }); return; }
   if (ev.type !== 'turn_end' || ev.status !== 'ready') {
     await postMsg(key, { text: `I did not ${verb}: my reply above says why. Tap ${label} again when it is ready.` });
     return;
