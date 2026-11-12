@@ -40,6 +40,8 @@ function runOne({ file, sc, vary, persona }) {
   // sc.state: session records already in the bot's store when it starts, as after a restart.
   if (sc.state) writeFileSync(join(home, 'sessions.json'), JSON.stringify(Object.fromEntries(sc.state.map((x) => [`${x.channel}:${x.thread_ts}`, x]))));
   if (sc.sessions) writeFileSync(join(home, 'sessions.json'), JSON.stringify(sc.sessions));
+  // sc.homeFiles: other bot state files at start (a quick look a restart cut off).
+  for (const [f, v] of Object.entries(sc.homeFiles ?? {})) writeFileSync(join(home, f), JSON.stringify(v));
   writeFileSync(join(out, 'meta.json'), JSON.stringify(persona ? { persona } : { scenario: join(HERE, SCEN, file), vary }));
   return new Promise((done) => {
     const people = Object.entries(sc.people);

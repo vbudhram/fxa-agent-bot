@@ -8,6 +8,7 @@ import * as ctl from './ctl.js';
 import { quickFirst, askId, answerBlocks, findingsOf, stepRows, doneLine, stepCount, rowTitle, ON_IT, FIRST_ROW, seamless } from './answer.js';
 import { installErrorLog, slackRetry } from './errors.js';
 import * as sessions from './sessions.js';
+import * as inflight from './inflight.js';
 import * as live from './live.js';
 import { statusMessage } from './status.js';
 import { pollEvery, reachable, missed, replayMark, replayable } from './poll.js';
@@ -440,6 +441,7 @@ function quickStatus(p) {
     const msg = () => statusMessage({ title: statusTitle(who, 'Working', Date.now() - t0, n ? st.label : null), rows: n ? [`› ${rowTitle(st)}`] : [],
       id: `quick-${t0}` });
     ({ ts } = await app.client.chat.postMessage({ channel: p.channel, thread_ts: p.thread_ts, ...msg() }));
+    if (!closed) p.onStatus?.(ts);
     // answer() or done() may come before this run ends: then no timer, or it would edit a closed status.
     // An edit only for a new step, or for the clock every 15 s, as a sandbox turn's status does.
     sent = `${n}|${lastStep}`; sentAt = Date.now();
@@ -484,11 +486,13 @@ function quickStatus(p) {
 // session), {findings} (the agent asked for a sandbox), or null (busy, down or
 // failed: a session starts, as before). The person sees one bot either way.
 const HANDOFF = 'Looked into it';
+const RESTART_CUT = 'Stopped: I restarted before I answered.';
 async function quick(key, p, client) {
   if (p.card_ts) await client.chat.update({ channel: p.channel, ts: p.card_ts, text: ON_IT, blocks: [] }).catch(() => {});
-  const status = quickStatus(p);
+  inflight.mark(key, { channel: p.channel, thread_ts: p.thread_ts, card_ts: p.card_ts ?? null });
+  const status = quickStatus({ ...p, onStatus: (ts) => inflight.mark(key, { status_ts: ts }) });
   // A throw below (a render, a store write) skipped done and answer: the count of live quick looks stayed up.
-  try { return await quickWith(key, p, client, status); } finally { status.close(); }
+  try { return await quickWith(key, p, client, status); } finally { status.close(); inflight.clear(key); }
 }
 async function quickWith(key, p, client, status) {
   let res;
@@ -3009,6 +3013,12 @@ if (GATES.size) { await loadMembers(app.client, GATES, gateMembers); setInterval
 // A request waiting for capacity lived only in a timer; pick it up again.
 // From the time it joined the line (started_at), so a restart neither resets the give-up clock nor the wait it reports.
 for (const s of sessions.all()) if (s.state === 'queued') launch(s.key, app.client, s.started_at ?? Date.now()).catch((e) => console.error('launch', s.key, e.message));
+// A quick look a restart cut off: its card and status say so, and the person tags again (the request is not kept).
+for (const q of inflight.takeLeft()) {
+  const gone = { text: RESTART_CUT, blocks: [{ type: 'context', elements: [{ type: 'mrkdwn', text: RESTART_CUT }] }] };
+  for (const ts of [q.card_ts, q.status_ts].filter(Boolean)) await app.client.chat.update({ channel: q.channel, ts, ...gone }).catch(() => {});
+  await app.client.chat.postMessage({ channel: q.channel, thread_ts: q.thread_ts, text: 'I restarted before I could answer this. Tag me again to ask it.' }).catch((e) => console.error('quick restart', e.data?.error ?? e.message));
+}
 replayMissed(replayMarks).catch((e) => console.error('replay', e.message));
 if (ROUTINES_ENV) { const tick = inFlightGuard(() => routineTick().catch((e) => console.error('routine tick', e.stderr || e.message))); setInterval(tick, TICK_MS); }
 // ponytail: polled, so a channel the bot joins shows in the routine form's picker within 10 minutes.
