@@ -105,6 +105,8 @@ test('a turn that ends with ship: pr opens the PR for a person on the PR list, a
   assert.deepEqual(askedShip(ev, { ...s, asked_pr: true }, false), { refuse: 'access' }, 'the person asked for the PR in words');
   assert.equal(askedShip(ev, { ...s, read_only: true, asked_pr: true }, true), null);
   assert.equal(askedShip(ev, { ...s, read_only: true }, true), null);
+  // The owner wrote while the turn ran: the agent has not read it, so the PR waits, as a tap does (shipAfterResume).
+  assert.deepEqual(askedShip(ev, { ...s, held: true }, true), { refuse: 'held' });
   assert.equal(askedShip(ev, { ...s, trees: [{ slug: 'o/a' }, { slug: 'o/b' }] }, true), null);
   const trees = [{ slug: 'o/a', out: 'pr', changes: 2 }, { slug: 'o/b', out: 'pr', changes: 1 }, { slug: 'o/c', out: 'diff', changes: 1 }, { slug: 'o/d', out: 'pr', changes: 0 }];
   assert.deepEqual(askedShip(ev, { ...s, trees }, true), { repo: ['o/a', 'o/b'] });

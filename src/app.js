@@ -1454,6 +1454,7 @@ async function steerAndAck(s, text, client, userId, ts) {
     const queued = out.includes('queued');
     addAck(s.key, ts, queued);
     // 👀 says it was seen, ⏳ that it waits for this step; settle clears both. No message.
+    if (queued && userId && userId === s.owner) sessions.patch(s.key, { held: true }); // the turn that runs has not read it: its 'ship: pr' waits (askedShip)
     if (queued && ts) await client.reactions.add({ channel: s.channel, timestamp: ts, name: 'hourglass_flowing_sand' }).catch(() => {});
     // The turn this started came after the last one's reply closed its status: open one.
     else if (!fresh(s.key)?.status_ts) await startStatus(fresh(s.key), 'Working').catch((e) => console.error('status', s.key, e.data?.error ?? e.message));
@@ -1963,7 +1964,8 @@ async function shipOnAsk(key, a) {
   const s = fresh(key);
   if (!s) return;
   if (a.refuse) {
-    await postMsg(key, { text: a.refuse === 'access' ? PR_REFUSAL : 'No repo that ships as a PR has changes, so I opened nothing. Use `!diff`.' });
+    await postMsg(key, { text: a.refuse === 'access' ? PR_REFUSAL : a.refuse === 'held' ? 'I did not open the PR: you sent more. Ask for the PR when it is ready.'
+      : 'No repo that ships as a PR has changes, so I opened nothing. Use `!diff`.' });
     return;
   }
   const what = shipWhat(s, a.repo);
@@ -2409,6 +2411,7 @@ async function pollOne(key) {
         const tw = i === endAt && fresh(key)?.then_wrap;
         if (tw) { sessions.patch(key, { then_wrap: null }); setTimeout(() => shipAfterResume(key, tw, ev).catch((e) => console.error('ship', key, e.message)), 1000); return; }
         const cur = i === endAt && fresh(key), a = cur && askedShip(ev, cur, prOk(cur, cur.asked_by ?? cur.owner));
+        if (cur?.held) sessions.patch(key, { held: null }); // the next turn reads the held message
         if (a) setTimeout(() => shipOnAsk(key, a).catch((e) => console.error('ship', key, e.message)), 1000);
       };
       // A Show-nothing turn end (No response requested) still ends the turn: acks and a pending ship.

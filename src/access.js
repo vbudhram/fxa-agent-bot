@@ -26,6 +26,7 @@ export const mayTap = (action, owner, user, allowedHere, steerAnyone, team, admi
 export function askedShip(ev, s, prOk) {
   if (ev?.type !== 'turn_end' || !ev.ship || ev.status !== 'ready' || s?.state !== 'active' || s.read_only) return null;
   if (!prOk) return s.asked_pr ? { refuse: 'access' } : null;
+  if (s.held) return { refuse: 'held' };
   const trees = s.trees ?? [];
   if (trees.length <= 1) return { repo: trees[0]?.slug };
   const repos = shipRepos(trees);
