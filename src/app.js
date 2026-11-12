@@ -596,7 +596,7 @@ async function launch(key, client, since = Date.now(), retry = false) {
     }
     inbox = inboxes.get(key);
     if (routine) await ctl.routineTask({ key, profile: s.profile, run: s.routine.run, thread: s.channel === NO_CHANNEL ? undefined : `${s.channel}:${s.thread_ts}`, link });
-    else await ctl.task({ key, owner: s.owner, prompt: s.prompt + (inbox?.note ?? ''), inboxDir: inbox?.note ? inbox.dir : undefined, resumeFrom: s.resume_from, fresh: s.fresh, thread: `${s.channel}:${s.thread_ts}`, isNew: s.is_new, runtime: s.resume_from ? undefined : s.runtime, profile: s.profile, link, who, queuedS, findings: s.findings, repos: s.repos, checkout: s.checkout });
+    else await ctl.task({ key, owner: s.owner, prompt: s.prompt + (inbox?.note ?? ''), inboxDir: inbox?.note ? inbox.dir : undefined, resumeFrom: s.resume_from, fresh: s.fresh, thread: `${s.channel}:${s.thread_ts}`, isNew: s.is_new, runtime: s.resume_from ? undefined : s.runtime, profile: s.profile, link, who, queuedS, findings: s.findings, repos: s.repos, checkout: s.checkout, ciOk: adminOf(s, s.owner) });
     dropInbox(key, inbox); // task copied them
   } catch (e) {
     if (!/cap \d+ \(FXA_SESSION_MAX\)/.test(e.stderr ?? '')) dropInbox(key, inbox);
@@ -1458,7 +1458,7 @@ async function steerAndAck(s, text, client, userId, ts) {
   const busyBefore = Boolean(fresh(s.key)?.status_ts);
   if (!busyBefore) await startStatus(s, 'Working').catch((e) => console.error('status', s.key, e.data?.error ?? e.message));
   try {
-    const out = await ctl.steer(s.key, text, userId ? await whoIs(client, userId) : null);
+    const out = await ctl.steer(s.key, text, userId ? await whoIs(client, userId) : null, Boolean(userId) && adminOf(s, userId));
     if (userId) await retireQuestion(s.key); // a person's reply answers any open question
     const queued = out.includes('queued');
     addAck(s.key, ts, queued);
