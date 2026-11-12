@@ -13,8 +13,8 @@ export const maySteer = (owner, user, allowedHere, steerAnyone, team, admin = fa
 // A Jira draft goes as far too: anyone who may steer can ask for a ticket in words, which files it at once.
 export const SHIP_ACTIONS = ['open_pr', 'open_prs', 'push_branch', 'create_jira', 'pr_ready', 'fix_review', 'answer_review', 'rebase_pr', 'auto_round',
   'jira_create', 'jira_create_fixme', 'jira_edit', 'jira_discard', 'jira_queue', 'jira_undo', 'jira_edit_filed'];
-// Open PR and Push also need the team's PR list (prOk: mayOpenPr).
-export const PR_ACTIONS = ['open_pr', 'open_prs', 'push_branch'];
+// The taps that push to a branch or a PR also need the team's PR list (prOk: mayOpenPr).
+export const PR_ACTIONS = ['open_pr', 'open_prs', 'push_branch', 'fix_review', 'auto_round'];
 export const mayTap = (action, owner, user, allowedHere, steerAnyone, team, admin = false, prOk = true) =>
   PR_ACTIONS.includes(action) && !prOk ? false
     : SHIP_ACTIONS.includes(action) ? maySteer(owner, user, allowedHere, steerAnyone, team, admin) : allowedHere && (user === owner || admin);

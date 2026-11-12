@@ -93,6 +93,8 @@ test('a team admin takes over every control, and a PR list limits Open PR and Pu
   assert.equal(mayTap('push_branch', 'U1', 'U1', true, true, true, false, false), false, 'Push, the owner not on the PR list');
   assert.equal(mayTap('pr_ready', 'U1', 'U2', true, true, true, false, false), true, 'Mark ready is not on the PR list rule');
   assert.equal(mayTap('open_pr', 'U1', 'U2', true, true, true, false, true), true, 'Open PR, a teammate on the PR list');
+  assert.equal(mayTap('fix_review', 'U1', 'U2', true, true, true, false, false), false, 'Fix these pushes to the PR: not for a teammate off the PR list');
+  assert.equal(mayTap('auto_round', 'U1', 'U2', true, true, true, false, false), false, 'Run a round pushes to the PR: not for a teammate off the PR list');
 });
 
 test('a turn that ends with ship: pr opens the PR for a person on the PR list, and only then', () => {
