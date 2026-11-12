@@ -511,6 +511,7 @@ async function quickWith(key, p, client, status) {
   if (!cur || cur.state === 'answered') sessions.put({ key, state: 'answered', channel: p.channel, thread_ts: p.thread_ts,
     owner: cur?.owner ?? p.owner, team: p.team, prompt: cur?.prompt ?? p.request ?? p.prompt, runtime: 'claude', started_at: cur?.started_at ?? Date.now(), answered_at: Date.now() });
   if (res.jira_draft && fresh(key)) await jiraTurn(key, res.jira_draft).catch((e) => console.error('jira draft', key, e.data?.error ?? e.message));
+  else if (fresh(key)) jiraYesOff(key);
   for (const ts of p.acks ?? []) {
     await client.reactions.remove({ channel: p.channel, timestamp: ts, name: 'eyes' }).catch(() => {});
     await client.reactions.add({ channel: p.channel, timestamp: ts, name: 'white_check_mark' }).catch(() => {});
@@ -825,8 +826,9 @@ async function onMessage({ message, client, replay = false }) {
   const steers = allowed(message.channel, message.user) && (boss(s, message.user) || (STEER_ANYONE && onTeam(s, message.user)));
   if (steers) noteJiraAsk(s.channel, s.thread_ts, message.user, text);
   // "yes" or "go ahead" to the draft card files that card, with no agent turn that would draft it again.
+  // Only while the card is the last thing the bot asked: after a later turn, "yes" answers that turn.
   const card = steers && JIRA_YES.test(text) && fresh(s.key)?.jira_card;
-  if (card) {
+  if (card?.yes) {
     seen(message.channel, message.ts);
     await client.reactions.remove({ channel: message.channel, timestamp: message.ts, name: 'eyes' }).catch(() => {});
     await client.reactions.add({ channel: message.channel, timestamp: message.ts, name: 'white_check_mark' }).catch(() => {});
@@ -2443,8 +2445,11 @@ async function pollOne(key) {
         if (ask && !fresh(key).muted) await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: ask }).catch((e) => console.error('round ask', key, e.data?.error ?? e.message));
       }
       if (ev.jira_draft && fresh(key)) await jiraTurn(key).catch((e) => console.error('jira draft', key, e.data?.error ?? e.message));
-      // A finished turn with no draft dealt with the request another way: a later draft must not file on it.
-      else if (ev.type === 'turn_end' && ev.status === 'ready' && fresh(key)) jiraAsks.delete(`${fresh(key).channel}:${fresh(key).thread_ts}`);
+      else if ((ev.type === 'turn_end' || ev.type === 'question') && fresh(key)) {
+        // A finished turn with no draft dealt with the request another way: a later draft must not file on it.
+        if (ev.type === 'turn_end' && ev.status === 'ready') jiraAsks.delete(`${fresh(key).channel}:${fresh(key).thread_ts}`);
+        jiraYesOff(key);
+      }
       ship();
     }
     if (!fresh(key)) return; // restarted or replaced while this poll ran
@@ -2650,7 +2655,7 @@ async function jiraTurn(key, draft) {
   if (ask && Date.now() - ask.at < 2 * 3600_000) { await fileDraft(s, d, ask.by, false, priv); return; }
   const c = draftCard(d, key, { privateChannel: priv, jiraUrl: JIRA_URL });
   const { ts } = await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...c });
-  sessions.patch(key, { jira_card: { d, ts, priv } });
+  sessions.patch(key, { jira_card: { d, ts, priv, yes: true } });
 }
 async function fileDraft(s, d, by, fixme, priv, cardTs) {
   const who = await person(by);
@@ -2679,6 +2684,8 @@ async function fileDraft(s, d, by, fixme, priv, cardTs) {
   // Undo works for 10 minutes on the controller too; the button goes when it would only be refused.
   setTimeout(() => { const x = fresh(s.key)?.jira_filed?.[ticket]; if (x && !x.undone) app.client.chat.update({ channel: s.channel, ts, ...filedCard({ ...x.f, undo: false }) }).catch(() => {}); }, 10 * 60_000).unref?.();
 }
+// The card's buttons still work; only a typed "yes" stops filing it.
+function jiraYesOff(key) { const c = fresh(key)?.jira_card; if (c?.yes) sessions.patch(key, { jira_card: { ...c, yes: false } }); }
 const ephemeral = (s, user, text) => app.client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user, text }).catch(() => {});
 const jiraCard = (s, action, user) => {
   const c = fresh(s.key)?.jira_card;

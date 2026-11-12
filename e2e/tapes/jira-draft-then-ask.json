@@ -1,0 +1,5 @@
+{"sessions": [{"turns": [
+  {"steps": ["Reading packages/fxa-auth-client/lib/client.ts"], "diff": [], "end": {"status": "ready", "text": "I drafted a ticket for the sign-in timeout.", "jira_draft": true}},
+  {"steps": ["Reading packages/fxa-auth-client/lib/retry.ts"], "diff": [], "end": {"status": "ready", "text": "The retry logic looks fine. Should I also update the tests?"}},
+  {"steps": ["Editing packages/fxa-auth-client/test/retry.ts"], "diff": [], "end": {"status": "ready", "text": "I updated the tests."}}
+]}]}
