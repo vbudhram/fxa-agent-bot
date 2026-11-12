@@ -232,7 +232,6 @@ async function onMention({ event, body, client }) {
   prompt = prof.text;
   if (!prompt) return;
   const thread_ts = thread;
-  if (!prompt.startsWith('!')) noteJiraAsk(event.channel, thread_ts, event.user, prompt);
   // In a thread with a session, the message handler runs the bang; answer once.
   if (prompt.startsWith('!')) { if (!cur) await bang(null, prompt, { user: event.user, channel: event.channel, thread_ts, ts: event.ts }, client); return; }
   // The work moved to another thread (!stack checkout): the reply handler's resume says so.
@@ -263,6 +262,8 @@ async function onMention({ event, body, client }) {
       text: `This is <@${cur.owner}>'s session. Only they can continue it here.` }).catch(() => {});
     return;
   }
+  // Only a tag that starts or resumes may ask for a ticket: a refused one must not file the next draft.
+  noteJiraAsk(event.channel, thread_ts, event.user, prompt);
   seen(event.channel, event.ts);
   if (resume_from) runtime = cur.runtime || 'claude'; // ctl resumes with the session's own agent
   const deadline = Date.now() + START_DELAY_S * 1000;
