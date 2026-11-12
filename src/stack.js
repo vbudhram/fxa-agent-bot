@@ -150,6 +150,9 @@ const SHIP_LEAD = /^(?:(?:ok|okay|yes|yep|great|cool|thanks|thank you|please|pls
 const SHIP_TAIL = /(?:\s+(?:please|pls|now|thanks|thank you|then))+$/;
 const SHIP_ASK = /^(?:(?:open|ship|create|raise|make|send)(?:\s+(?:the|a|both|all|all the|2|two|those|these|my|our))?\s+(?:prs?|pull requests?)|ship\s+(?:it|them|both))(?:\s+(?:for|in|on)\s+(?:the\s+)?([\w./-]+)(?:\s+repo)?)?$/;
 const SHIP_WHERE = /^(?:where(?:'s|’s| is)|is there)\s+(?:the|a|my|our)\s+(?:prs?|pull requests?)(?:\s+(?:for|in|on)\s+(?:the\s+)?([\w./-]+)(?:\s+repo)?)?$/;
+// Words that ask for a PR inside a longer message ("looks good, open a PR"): the steer goes to the agent, and
+// a refusal for its 'ship: pr' is then an answer to what the person asked.
+export const asksForPr = (text) => /\b(pr|pull request)s?\b/i.test(String(text ?? '')) && /\b(open|make|create|ship|raise|send|put up)\b/i.test(String(text ?? ''));
 export function shipAsk(text) {
   const t = String(text ?? '').toLowerCase().replace(/[.!?,;:]+/g, ' ').replace(/\s+/g, ' ').trim();
   if (!t || t.length > 60) return null;

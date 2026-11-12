@@ -18,16 +18,18 @@ export const PR_ACTIONS = ['open_pr', 'open_prs', 'push_branch'];
 export const mayTap = (action, owner, user, allowedHere, steerAnyone, team, admin = false, prOk = true) =>
   PR_ACTIONS.includes(action) && !prOk ? false
     : SHIP_ACTIONS.includes(action) ? maySteer(owner, user, allowedHere, steerAnyone, team, admin) : allowedHere && (user === owner || admin);
-// The agent's 'ship: pr' line on a ready turn: the person asked for the PR. prOk: whether that person
-// is on the team's PR list. A stack of more than one repo ships each changed repo that ships as a PR
-// (repo: a slug, or a list of them). Null: nothing to ship.
+// The agent's 'ship: pr' line on a ready turn: it writes one after every finished change. prOk: whether the
+// person behind the turn is on the team's PR list. A stack of more than one repo ships each changed repo that
+// ships as a PR (repo: a slug, or a list of them). Null: nothing to ship. A refusal only when the person asked
+// for the PR in words (s.asked_pr): else a read-only team, a person off the PR list, or no PR repo changed
+// keeps the ready reply and its buttons.
 export function askedShip(ev, s, prOk) {
-  if (ev?.type !== 'turn_end' || !ev.ship || ev.status !== 'ready' || s?.state !== 'active') return null;
-  if (!prOk) return { refuse: 'access' };
+  if (ev?.type !== 'turn_end' || !ev.ship || ev.status !== 'ready' || s?.state !== 'active' || s.read_only) return null;
+  if (!prOk) return s.asked_pr ? { refuse: 'access' } : null;
   const trees = s.trees ?? [];
   if (trees.length <= 1) return { repo: trees[0]?.slug };
   const repos = shipRepos(trees);
-  return repos.length ? { repo: repos.length === 1 ? repos[0] : repos } : { refuse: 'none' };
+  return repos.length ? { repo: repos.length === 1 ? repos[0] : repos } : s.asked_pr ? { refuse: 'none' } : null;
 }
 
 // Reads each source channel's members. A failed read keeps the last list.

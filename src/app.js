@@ -17,7 +17,7 @@ import { teamChannels, reviewRounds } from './teams.js';
 import { ROUTINES_ENV, TICK_MS, NO_CHANNEL, inFlightGuard, muted, mutedReply, pollChannels, pollUsers } from './routines.js';
 import { ingest } from './db.js';
 import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs,
-  shipRepos, afterShip, shipAsk, treeFor, namedRepos, PR_FIELDS, prCardFor } from './stack.js';
+  shipRepos, afterShip, shipAsk, asksForPr, treeFor, namedRepos, PR_FIELDS, prCardFor } from './stack.js';
 import { asksForJira, JIRA_YES, draftCard, filedCard, changedCard, editModal, readEdit } from './jira-draft.js';
 import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateAllows, loadMembers, maySteer, mayTap, SHIP_ACTIONS, PR_ACTIONS, askedShip } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, fromAdmin, ADMIN, LINE_BREAK, laterMessage, slackLinks, threadFile,
@@ -1437,7 +1437,7 @@ async function steerAndAck(s, text, client, userId, ts) {
   }
   text = takeAside(s.key) + text;
   if (userId && userId === s.owner) sessions.patch(s.key, { last_person_at: Date.now() }); // the owner wrote: a queued ship waits (shipAfterResume)
-  if (userId) sessions.patch(s.key, { asked_by: userId }); // whose request a 'ship: pr' turn answers (shipOnAsk)
+  if (userId) sessions.patch(s.key, { asked_by: userId, asked_pr: asksForPr(text) }); // whose request a 'ship: pr' turn answers, and whether it asked for the PR (shipOnAsk)
   // A tapped answer or an edit after the session ended (paused, Stop, a failure):
   // continue it on a new runner, as a reply to a paused session does.
   const ended = fresh(s.key);
