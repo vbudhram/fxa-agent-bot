@@ -1332,8 +1332,9 @@ async function resumePaused(s, text, client, extra = {}) {
     held_files: [...(fresh(s.key)?.held_files ?? []), ...(extra.held_files ?? [])] });
   // The new runner starts empty: the thread's files go again, whichever handler took the reply.
   // People's messages since the last turn go too: the agent has not seen them (a ship tap or a round carries none).
+  // A routine thread's replies steer nothing (D24), so none goes into its round's prompt.
   const earlier = [], cur = fresh(s.key);
-  const ctx = await threadContext(app.client, { channel: s.channel, thread_ts: s.thread_ts, user: s.owner },
+  const ctx = ofRoutine(cur ?? s) ? '' : await threadContext(app.client, { channel: s.channel, thread_ts: s.thread_ts, user: s.owner },
     { files: earlier, since: cur?.turn_end_ts ?? cur?.last_ts ?? s.thread_ts, skip: { ts: ackList(cur), texts: asideTexts } });
   if (pending.has(key)) pending.set(key, { ...pending.get(key), prompt: pending.get(key).prompt + ctx, ...(earlier.length ? { held_files: [...earlier, ...pending.get(key).held_files] } : {}) });
   // No note before the status: its first row says it picks up where it left off.
