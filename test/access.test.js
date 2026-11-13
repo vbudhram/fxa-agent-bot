@@ -1,6 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseGates, gateAllows, loadMembers, codeAllowed, codeRefusal, NO_GROUPS_READ, START_PRIVATE, PRIVATE_ONLY, sessionTeam, maySteer, mayTap, askedShip, askerPatch, shipHeld } from '../src/access.js';
+import { parseGates, gateAllows, loadMembers, codeAllowed, codeRefusal, NO_GROUPS_READ, START_PRIVATE, PRIVATE_ONLY, sessionTeam, maySteer, mayTap, mayConfirm, askedShip, askerPatch, shipHeld } from '../src/access.js';
+
+test('only a team admin allows a host action card; the owner may deny it', () => {
+  assert.equal(mayConfirm(true, 'U1', 'U1', true, false), false);
+  assert.equal(mayConfirm(true, 'U1', 'U2', true, true), true);
+  assert.equal(mayConfirm(false, 'U1', 'U1', true, false), true);
+  assert.equal(mayConfirm(false, 'U1', 'U3', true, false), false);
+  assert.equal(mayConfirm(true, 'U1', 'U2', false, true), false);
+});
 
 test('a gated channel allows only members of its source channel', () => {
   const gates = parseGates('CPUBLIC:CPRIVATE');

@@ -173,6 +173,9 @@ export const desktop = async (key, email) => {
 };
 export const summary = async (key) => { try { return JSON.parse((await run(['session', 'summary', key])).trim() || 'null'); } catch { return null; } };
 export const interrupt = (key) => run(['interrupt', key], { timeout: 60_000 });
+// A tap on a host action card (ctl asks_confirm); --admin only for a team admin. The one-line result, also on a refusal.
+export const confirm = (key, nonce, sha, allow, name, admin) => run(['session', 'confirm', key, nonce, sha, allow ? 'allow' : 'deny', name || 'someone',
+  ...(admin ? ['--admin'] : [])], { timeout: 5 * 60_000 }).catch((e) => (e.stdout?.trim() ? e.stdout : Promise.reject(e)));
 // Stops the agent's running Bash command (SIGINT, KILL after 10 s); the turn goes on. Claude only.
 export const interruptTool = (key) => run(['session', 'interrupt', '--tool', key], { timeout: 60_000 });
 // The agent's output, masked by the ctl. by: the Slack user it is posted for. The word goes on stdin, as all Slack text does.

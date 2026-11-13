@@ -393,6 +393,23 @@ export function render(key, ev) {
       return { text: `${head}${noteLines(ev.notes)}` };
     }
     case 'target': return { text: ev.text || (ev.ok ? 'Switched.' : 'I did not switch.') };
+    // A host: line from a turn that no team admin started (ctl _asks_card). A team admin's Allow runs it once. The body is
+    // literal text (rich_text), so no markup in it can hide a link or ping anyone. hidden: a private team's public channel.
+    case 'confirm': {
+      const v = JSON.stringify({ key, n: ev.nonce, s: ev.sha }), ask = esc(ev.ask).replace(/`/g, '').slice(0, 300);
+      const by = ev.who && ev.who !== 'host' ? `${esc(ev.who)} is not a team admin` : 'No person started that turn';
+      return {
+        text: `The agent asks the host to run ${plain(ask)}. Only a team admin can allow it.`,
+        blocks: [
+          { type: 'section', text: { type: 'mrkdwn', text: `The agent asks the host to run \`${ask}\` on *${esc(ev.target)}*. ${by}, so only a team admin can allow it. It counts as Deny when a person's next turn ends.` } },
+          ...(ev.body ? [{ type: 'rich_text', elements: [{ type: 'rich_text_preformatted', elements: [{ type: 'text', text: ev.body }] }] }] : []),
+          ...(ev.hidden ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: 'This team has a private repo, so I show the comment only in a private channel, and it cannot be allowed here.' }] }] : []),
+          { type: 'actions', elements: [
+            ...(ev.hidden ? [] : [{ type: 'button', style: 'primary', text: { type: 'plain_text', text: 'Allow' }, action_id: 'confirm_allow', value: v }]),
+            { type: 'button', style: 'danger', text: { type: 'plain_text', text: 'Deny' }, action_id: 'confirm_deny', value: v }] },
+        ],
+      };
+    }
     // A run.sh --bg job ended. turn: the host sent the agent its log; else the cap for this message was reached.
     case 'job_done': return { text: `The background job \`${esc(ev.name).replace(/`/g, '')}\` ended. ${ev.turn ? 'I am reading its log.' : 'Reply to have me read its log.'}` };
     case 'pushed': return { text: `Pushed \`${esc(ev.branch).replace(/`/g, '')}\`${repoOf(ev)}.${gh(ev.url) ? ` <${gh(ev.url)}|Open a PR from it> when you are ready, or keep steering here.` : ' Keep steering here, or open a PR from it on GitHub.'}${noteLines(ev.notes)}` };

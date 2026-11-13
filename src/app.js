@@ -20,7 +20,7 @@ import { ingest } from './db.js';
 import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs,
   shipRepos, afterShip, shipAsk, asksForPr, treeFor, namedRepos, PR_FIELDS, prCardFor, targetSwitch, otherOpen, targetsText } from './stack.js';
 import { asksForJira, JIRA_YES, draftCard, filedCard, changedCard, editModal, readEdit } from './jira-draft.js';
-import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateAllows, loadMembers, maySteer, mayTap, SHIP_ACTIONS, PR_ACTIONS, askedShip, askerPatch, shipHeld } from './access.js';
+import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateAllows, loadMembers, maySteer, mayTap, mayConfirm, SHIP_ACTIONS, PR_ACTIONS, askedShip, askerPatch, shipHeld } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, fromAdmin, ADMIN, LINE_BREAK, laterMessage, slackLinks, threadFile,
   emptyTurn, EMPTY_RETRY, EMPTY_FALLBACK, sinceTurn } from './render.js';
 import * as cards from './cards.js';
@@ -1903,6 +1903,23 @@ app.action('stop_tool', async ({ ack, body, action, client }) => {
   if (!out.includes('command stopped')) { working(s, body, 'No command is running right now.'); return; }
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Stopped the running command. The turn goes on.' });
 });
+// A host action card (ctl asks_confirm). The ctl claims the card on the first tap, so a second one runs nothing.
+app.action(/^confirm_(allow|deny)$/, async ({ ack, body, action, client }) => {
+  await ack();
+  let v; try { v = JSON.parse(action.value); } catch { return; }
+  const s = fresh(v?.key), u = body.user.id, allow = action.action_id === 'confirm_allow';
+  if (!s || ofRoutine(s)) return;
+  if (!mayConfirm(allow, s.owner, u, allowed(s.channel, u), adminOf(s, u))) {
+    if (allowed(s.channel, u)) working(s, body, allow ? 'Only a team admin can allow a host action.' : `Only <@${s.owner}> or a team admin can do that.`);
+    return;
+  }
+  const out = await ctl.confirm(s.key, v.n, v.s, allow, (await whoIs(client, u))?.name, adminOf(s, u))
+    .catch((e) => { console.error('confirm', s.key, e.stderr || e.message); return 'failed: the host did not answer, so nothing ran.'; });
+  const m = body.message;
+  if (m?.blocks) await client.chat.update({ channel: body.channel.id, ts: m.ts, text: m.text, blocks: [...m.blocks.filter((b) => b.type !== 'actions'),
+    { type: 'context', elements: [{ type: 'mrkdwn', text: `${allow ? 'Allow' : 'Deny'} tapped by <@${u}>: ${defuse(out.trim()).replace(/[<>&]/g, '').slice(0, 500)}` }] }] })
+    .catch((e) => console.error('confirm', s.key, e.data?.error ?? e.message));
+});
 const wrapping = new Set();
 // The row each wrap took buttons from, so a refused ship can put them back.
 const unwrap = new Map();
@@ -2480,7 +2497,9 @@ async function pollOne(key) {
         if (!retried && await ctl.steer(key, EMPTY_RETRY).then(() => true, (e) => { console.error('steer', key, e.stderr || e.message); return false; })) continue;
       } else if (ev.type === 'turn_end' && fresh(key)?.empty_retry) sessions.patch(key, { empty_retry: null });
       // pr: once a PR is open the row says Update PR, also when the controller's event lacks it.
-      const msg = render(s.key, { ...ev, desktop: Boolean(process.env.DESKTOP_GATEWAY), read_only: Boolean(s.read_only), pr: ev.pr || (prOpenFor(fresh(key)) ? fresh(key).pr_url : undefined) });
+      // A private team's comment body goes only to a private channel; its card then offers only Deny.
+      const hide = ev.type === 'confirm' && ev.body && Boolean(await codeRefusal(fresh(key) ?? s, app.client));
+      const msg = render(s.key, { ...ev, ...(hide ? { body: '', hidden: true } : {}), desktop: Boolean(process.env.DESKTOP_GATEWAY), read_only: Boolean(s.read_only), pr: ev.pr || (prOpenFor(fresh(key)) ? fresh(key).pr_url : undefined) });
       // A session resumed by Open PR or Push, or an automatic round, ships after the turn closes.
       const ship = () => {
         const tw = i === endAt && fresh(key)?.then_wrap;
@@ -2510,7 +2529,9 @@ async function pollOne(key) {
         await app.client.chat.update({ channel: s.channel, ts, ...msg }).catch(() => postMsg(key, msg)).catch((e) => console.error('post', key, ev.type, e.data?.error ?? e.message));
       // Each turn end closes its own turn, also when two ended in one poll: the first takes the status
       // message and settles its acks, so the steer queued behind it gets its ✅ from the second.
-      } else await (ev.type === 'turn_end' || ev.type === 'question' ? finishTurn(key, msg, ev) : postMsg(key, msg))
+      // A host action card keeps its buttons when later replies post theirs, so it is not the thread's buttons message.
+      } else await (ev.type === 'turn_end' || ev.type === 'question' ? finishTurn(key, msg, ev)
+        : ev.type === 'confirm' ? (fresh(key)?.muted ? null : app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...msg })) : postMsg(key, msg))
         .catch((e) => console.error('post', key, ev.type, e.data?.error ?? e.message));
       // A PR round that ends on a question: a new message that names the person, once.
       if (fresh(key)?.round_by && (ev.type === 'question' || ['ready', 'needs-input'].includes(ev.status))) {

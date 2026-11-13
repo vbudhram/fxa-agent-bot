@@ -821,3 +821,17 @@ test('the word of !log is the text after the command, as typed', () => {
   assert.equal(logWord('!log  a&lt;b &amp; c&gt;\nmore'), 'a<b & c>');
   assert.equal(logWord('!log'), '');
 });
+
+test('a host action card shows the target and the literal body, and only Deny where the body may not show', () => {
+  const ev = { type: 'confirm', nonce: 'a'.repeat(32), sha: 'b'.repeat(64), ask: 'comment `x`', target: 'mozilla/fxa#5 (PR by alice)', body: 'Hi <@U1> [x](https://evil)', who: 'Bo' };
+  const c = render('agent-x', ev);
+  assert.match(c.blocks[0].text.text, /run `comment x` on \*mozilla\/fxa#5 \(PR by alice\)\*\. Bo is not a team admin/);
+  assert.deepEqual(c.blocks[1], { type: 'rich_text', elements: [{ type: 'rich_text_preformatted', elements: [{ type: 'text', text: 'Hi <@U1> [x](https://evil)' }] }] });
+  const row = c.blocks.at(-1).elements;
+  assert.deepEqual(row.map((b) => b.action_id), ['confirm_allow', 'confirm_deny']);
+  assert.deepEqual(JSON.parse(row[0].value), { key: 'agent-x', n: 'a'.repeat(32), s: 'b'.repeat(64) });
+  const h = render('agent-x', { ...ev, body: '', hidden: true, who: 'host' });
+  assert.deepEqual(h.blocks.at(-1).elements.map((b) => b.action_id), ['confirm_deny']);
+  assert.match(h.blocks[0].text.text, /No person started that turn/);
+  assert.equal(h.blocks.some((b) => b.type === 'rich_text'), false);
+});
