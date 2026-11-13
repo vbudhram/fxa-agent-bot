@@ -36,14 +36,13 @@ const MCP = process.env.MCP_CONNECTORS;
 // second file, deleted with the first; an empty one means none.
 // profile: the team profile, passed only for a new session; later calls take it from the record.
 // repos: a team stack's picked repos (owner/name); checkout: an open PR to start on.
-// ciOk: a team admin asked (adminOf), so ctl lets the session ship CI config (.circleci/, .github/).
-export const task = ({ key, owner, prompt, resumeFrom, fresh, thread, isNew, runtime, profile, link, who, queuedS, findings, inboxDir, repos, checkout, ciOk }) => withFile(prompt, (f) =>
+export const task = ({ key, owner, prompt, resumeFrom, fresh, thread, isNew, runtime, profile, link, who, queuedS, findings, inboxDir, repos, checkout }) => withFile(prompt, (f) =>
   withFile(findings ?? '', (ff) => run([...(profile ? ['--pipeline', profile] : []), 'task', '--source', 'slack', '--id', key, '--owner', owner, '--prompt-file', f,
     ...(thread ? ['--thread', thread, ...(isNew ? ['--new'] : [])] : []),
     ...(resumeFrom ? ['--resume-from', resumeFrom, ...(fresh ? ['--fresh'] : [])] : []), ...(runtime ? ['--runtime', runtime] : []),
     ...(repos?.length ? ['--repos', repos.join(',')] : []), ...(checkout ? ['--checkout', checkout] : []),
     ...(link ? ['--link', link] : []), ...(queuedS ? ['--queued-s', String(queuedS)] : []), ...(findings ? ['--findings-file', ff] : []), ...(inboxDir ? ['--inbox-dir', inboxDir] : []),
-    ...(MCP !== undefined ? ['--mcp', MCP.replace(/\s+/g, '')] : []), ...(ciOk ? ['--ci-ok'] : []),
+    ...(MCP !== undefined ? ['--mcp', MCP.replace(/\s+/g, '')] : []),
     ...(who?.name ? ['--owner-name', who.name] : []), ...(who?.image ? ['--owner-image', who.image] : [])])));
 
 // Routines (epic i168). A routine run takes its prompt, repos and owner from its claimed row, so the task
@@ -92,7 +91,7 @@ export const askStream = ({ id, prompt, thread, onStep }) => withFile(prompt, (f
   });
 }));
 
-export const steer = (key, message, who, ciOk) => withFile(message, (f) => run(['steer', key, '--message-file', f, ...(ciOk ? ['--ci-ok'] : []),
+export const steer = (key, message, who) => withFile(message, (f) => run(['steer', key, '--message-file', f,
   ...(who?.name ? ['--from-name', who.name] : []), ...(who?.image ? ['--from-image', who.image] : [])]));
 
 // Returns { cursor, state, events: [{ type, text, ... }] }.

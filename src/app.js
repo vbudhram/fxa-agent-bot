@@ -20,7 +20,7 @@ import { ingest } from './db.js';
 import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs,
   shipRepos, afterShip, shipAsk, asksForPr, treeFor, namedRepos, PR_FIELDS, prCardFor } from './stack.js';
 import { asksForJira, JIRA_YES, draftCard, filedCard, changedCard, editModal, readEdit } from './jira-draft.js';
-import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateAllows, loadMembers, maySteer, mayTap, SHIP_ACTIONS, PR_ACTIONS, askedShip, shipHeld } from './access.js';
+import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateAllows, loadMembers, maySteer, mayTap, SHIP_ACTIONS, PR_ACTIONS, askedShip, askerPatch, shipHeld } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, fromAdmin, ADMIN, LINE_BREAK, laterMessage, slackLinks, threadFile,
   emptyTurn, EMPTY_RETRY, EMPTY_FALLBACK, sinceTurn } from './render.js';
 import * as cards from './cards.js';
@@ -596,7 +596,7 @@ async function launch(key, client, since = Date.now(), retry = false) {
     }
     inbox = inboxes.get(key);
     if (routine) await ctl.routineTask({ key, profile: s.profile, run: s.routine.run, thread: s.channel === NO_CHANNEL ? undefined : `${s.channel}:${s.thread_ts}`, link });
-    else await ctl.task({ key, owner: s.owner, prompt: s.prompt + (inbox?.note ?? ''), inboxDir: inbox?.note ? inbox.dir : undefined, resumeFrom: s.resume_from, fresh: s.fresh, thread: `${s.channel}:${s.thread_ts}`, isNew: s.is_new, runtime: s.resume_from ? undefined : s.runtime, profile: s.profile, link, who, queuedS, findings: s.findings, repos: s.repos, checkout: s.checkout, ciOk: adminOf(s, s.owner) });
+    else await ctl.task({ key, owner: s.owner, prompt: s.prompt + (inbox?.note ?? ''), inboxDir: inbox?.note ? inbox.dir : undefined, resumeFrom: s.resume_from, fresh: s.fresh, thread: `${s.channel}:${s.thread_ts}`, isNew: s.is_new, runtime: s.resume_from ? undefined : s.runtime, profile: s.profile, link, who, queuedS, findings: s.findings, repos: s.repos, checkout: s.checkout });
     dropInbox(key, inbox); // task copied them
   } catch (e) {
     if (!/cap \d+ \(FXA_SESSION_MAX\)/.test(e.stderr ?? '')) dropInbox(key, inbox);
@@ -1446,7 +1446,7 @@ async function steerAndAck(s, text, client, userId, ts) {
   text = takeAside(s.key) + text;
   if (userId && userId === s.owner) sessions.patch(s.key, { last_person_at: Date.now() }); // the owner wrote: a queued ship waits (shipAfterResume)
   else if (userId && !prOk(s, userId)) sessions.patch(s.key, { off_list_at: Date.now() }); // their text must not reach a push (PRODUCT 5)
-  if (userId) sessions.patch(s.key, { asked_by: userId, asked_pr: asksForPr(text) }); // whose request a 'ship: pr' turn answers, and whether it asked for the PR (shipOnAsk)
+  sessions.patch(s.key, askerPatch(userId, userId && asksForPr(text)));
   // A tapped answer or an edit after the session ended (paused, Stop, a failure):
   // continue it on a new runner, as a reply to a paused session does.
   const ended = fresh(s.key);
@@ -1458,7 +1458,7 @@ async function steerAndAck(s, text, client, userId, ts) {
   const busyBefore = Boolean(fresh(s.key)?.status_ts);
   if (!busyBefore) await startStatus(s, 'Working').catch((e) => console.error('status', s.key, e.data?.error ?? e.message));
   try {
-    const out = await ctl.steer(s.key, text, userId ? await whoIs(client, userId) : null, Boolean(userId) && adminOf(s, userId));
+    const out = await ctl.steer(s.key, text, userId ? await whoIs(client, userId) : null);
     if (userId) await retireQuestion(s.key); // a person's reply answers any open question
     const queued = out.includes('queued');
     addAck(s.key, ts, queued);
@@ -2425,6 +2425,7 @@ async function pollOne(key) {
         if (tw) { sessions.patch(key, { then_wrap: null }); setTimeout(() => shipAfterResume(key, tw, ev).catch((e) => console.error('ship', key, e.message)), 1000); return; }
         const cur = i === endAt && fresh(key), a = cur && askedShip(ev, cur, prOk(cur, cur.asked_by ?? cur.owner));
         if (cur?.held) sessions.patch(key, { held: null }); // the next turn reads the held message
+        if (cur?.asked_pr) sessions.patch(key, { asked_pr: null }); // one request for the PR answers one turn
         if (a) setTimeout(() => shipOnAsk(key, a).catch((e) => console.error('ship', key, e.message)), 1000);
       };
       // A Show-nothing turn end (No response requested) still ends the turn: acks and a pending ship.

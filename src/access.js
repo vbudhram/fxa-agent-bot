@@ -13,8 +13,8 @@ export const maySteer = (owner, user, allowedHere, steerAnyone, team, admin = fa
 // A Jira draft goes as far too: anyone who may steer can ask for a ticket in words, which files it at once.
 export const SHIP_ACTIONS = ['open_pr', 'open_prs', 'push_branch', 'create_jira', 'pr_ready', 'fix_review', 'answer_review', 'rebase_pr', 'auto_round',
   'jira_create', 'jira_create_fixme', 'jira_edit', 'jira_discard', 'jira_queue', 'jira_undo', 'jira_edit_filed'];
-// The taps that push to a branch or a PR also need the team's PR list (prOk: mayOpenPr).
-export const PR_ACTIONS = ['open_pr', 'open_prs', 'push_branch', 'fix_review', 'auto_round'];
+// The taps that push to a branch, change a PR or file a ticket also need the team's PR list (prOk: mayOpenPr).
+export const PR_ACTIONS = ['open_pr', 'open_prs', 'push_branch', 'fix_review', 'auto_round', 'pr_ready', 'rebase_pr', 'create_jira'];
 export const mayTap = (action, owner, user, allowedHere, steerAnyone, team, admin = false, prOk = true) =>
   PR_ACTIONS.includes(action) && !prOk ? false
     : SHIP_ACTIONS.includes(action) ? maySteer(owner, user, allowedHere, steerAnyone, team, admin) : allowedHere && (user === owner || admin);
@@ -29,6 +29,9 @@ export function shipHeld(s) {
 // ships as a PR (repo: a slug, or a list of them). Null: nothing to ship. A refusal only when the person asked
 // for the PR in words (s.asked_pr): else a read-only team, a person off the PR list, or no PR repo changed
 // keeps the ready reply and its buttons.
+// Whose request a 'ship: pr' turn answers, and whether it asked for the PR (shipOnAsk). A round with no
+// person (!rebase, a host note) answers nobody's request: it ships on the owner's PR-list status.
+export const askerPatch = (userId, askedPr) => (userId ? { asked_by: userId, asked_pr: askedPr } : { asked_by: null, asked_pr: null });
 export function askedShip(ev, s, prOk) {
   if (ev?.type !== 'turn_end' || !ev.ship || ev.status !== 'ready' || s?.state !== 'active' || s.read_only) return null;
   if (!prOk) return s.asked_pr ? { refuse: 'access' } : null;

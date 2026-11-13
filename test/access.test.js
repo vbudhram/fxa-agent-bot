@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseGates, gateAllows, loadMembers, codeAllowed, codeRefusal, NO_GROUPS_READ, START_PRIVATE, PRIVATE_ONLY, sessionTeam, maySteer, mayTap, askedShip, shipHeld } from '../src/access.js';
+import { parseGates, gateAllows, loadMembers, codeAllowed, codeRefusal, NO_GROUPS_READ, START_PRIVATE, PRIVATE_ONLY, sessionTeam, maySteer, mayTap, askedShip, askerPatch, shipHeld } from '../src/access.js';
 
 test('a gated channel allows only members of its source channel', () => {
   const gates = parseGates('CPUBLIC:CPRIVATE');
@@ -91,7 +91,10 @@ test('a team admin takes over every control, and a PR list limits Open PR and Pu
   assert.equal(maySteer('U1', 'UADM', true, false, false, true), true, 'a team admin steers under STEER=owner');
   assert.equal(mayTap('open_pr', 'U1', 'U2', true, true, true, false, false), false, 'Open PR, a teammate not on the PR list');
   assert.equal(mayTap('push_branch', 'U1', 'U1', true, true, true, false, false), false, 'Push, the owner not on the PR list');
-  assert.equal(mayTap('pr_ready', 'U1', 'U2', true, true, true, false, false), true, 'Mark ready is not on the PR list rule');
+  assert.equal(mayTap('pr_ready', 'U1', 'U2', true, true, true, false, false), false, 'Mark ready, a teammate not on the PR list');
+  assert.equal(mayTap('rebase_pr', 'U1', 'U2', true, true, true, false, false), false, 'Rebase, a teammate not on the PR list');
+  assert.equal(mayTap('create_jira', 'U1', 'U2', true, true, true, false, false), false, 'Create Jira, a teammate not on the PR list');
+  assert.equal(mayTap('pr_ready', 'U1', 'U2', true, true, true, false, true), true, 'Mark ready, a teammate on the PR list');
   assert.equal(mayTap('open_pr', 'U1', 'U2', true, true, true, false, true), true, 'Open PR, a teammate on the PR list');
   assert.equal(mayTap('fix_review', 'U1', 'U2', true, true, true, false, false), false, 'Fix these pushes to the PR: not for a teammate off the PR list');
   assert.equal(mayTap('auto_round', 'U1', 'U2', true, true, true, false, false), false, 'Run a round pushes to the PR: not for a teammate off the PR list');
@@ -125,4 +128,9 @@ test('a queued ship holds when the owner, or a person off the PR list, wrote aft
   assert.equal(shipHeld({ then_wrap_at: 100, off_list_at: 150 }), 'list', 'a round steered by someone off the PR list does not push');
   assert.equal(shipHeld({ then_wrap_at: 100, off_list_at: 50 }), null, 'a steer before the ship was queued does not hold it');
   assert.equal(shipHeld({ off_list_at: 150 }), null, 'no ship queued');
+});
+
+test('a round with no person clears whose request it answers, so it ships on the owner, not the last writer', () => {
+  assert.deepEqual(askerPatch('UB', true), { asked_by: 'UB', asked_pr: true });
+  assert.deepEqual(askerPatch(null, undefined), { asked_by: null, asked_pr: null }, 'a !rebase round or a host note');
 });
