@@ -1,6 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pollEvery, IDLE_MS, reachable, missed, REPLAY_S, replayable, REPLAY_IDLE_S, mediaDue } from '../src/poll.js';
+import { pollEvery, IDLE_MS, reachable, missed, REPLAY_S, replayable, REPLAY_IDLE_S, mediaDue, mediaSettled } from '../src/poll.js';
+
+test('mediaSettled: mid-turn, a file posts once, and only after a minute with no change', () => {
+  const now = 1_000_000;
+  assert.equal(mediaSettled('run.log', now - 61_000, new Set(), now), true);
+  assert.equal(mediaSettled('run.log', now - 5_000, new Set(), now), false);
+  assert.equal(mediaSettled('run.log', now - 61_000, new Set(['run.log:120']), now), false);
+  assert.equal(mediaSettled('run.log', now - 61_000, new Set(['run.log.old:120']), now), true);
+});
 
 test('mediaDue: a step posts media at most once a minute', () => {
   assert.equal(mediaDue(undefined, 1_000), true);

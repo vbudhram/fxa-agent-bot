@@ -4,6 +4,9 @@ export const IDLE_MS = 60_000;
 // The agent's media posts at a step at most once a minute; the turn's end posts the rest at once.
 export const MEDIA_MID_MS = 60_000;
 export const mediaDue = (lastAt, now) => lastAt === undefined || now - lastAt >= MEDIA_MID_MS;
+// mediaSettled(name, mtime, sent, now): mid-turn, post a file only when no version of it has posted and it has not
+// changed for a minute. A growing .log or a video being recorded waits for the turn's end.
+export const mediaSettled = (name, mtime, sent, now) => now - mtime >= MEDIA_MID_MS && ![...sent].some((id) => id.startsWith(`${name}:`));
 
 // pollEvery(session, now, lastWorkAt): 5 s while it boots, wraps up, runs a turn,
 // or did work in the last minute (a turn end can start a queued message); else IDLE_MS.

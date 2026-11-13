@@ -11,7 +11,7 @@ import * as sessions from './sessions.js';
 import * as inflight from './inflight.js';
 import * as live from './live.js';
 import { statusMessage } from './status.js';
-import { pollEvery, reachable, missed, replayMark, replayable, mediaDue } from './poll.js';
+import { pollEvery, reachable, missed, replayMark, replayable, mediaDue, mediaSettled } from './poll.js';
 import * as unfurl from './unfurl.js';
 import { resolveProfile, mayStart, isAdmin, mayOpenPr } from './profile.js';
 import { teamChannels, reviewRounds } from './teams.js';
@@ -855,7 +855,7 @@ async function onMessage({ message, client, replay = false }) {
     return;
   }
   if (ask && mayTap('open_pr', s.owner, message.user, allowed(message.channel, message.user), STEER_ANYONE, onTeam(s, message.user), adminOf(s, message.user), prOk(s, message.user))) {
-    await bang(s, `!pr${ask.repo ? ` ${ask.repo}` : ''}`, { user: message.user, channel: message.channel, thread_ts: message.thread_ts, ts: message.ts }, client);
+    await bang(s, `!pr${ask.repo ? ` ${ask.repo}` : ''}`, { user: message.user, channel: message.channel, thread_ts: message.thread_ts, ts: message.ts, replay }, client);
     return;
   }
   // A reply continues a session that has ended, as a tag does: paused, stopped,
@@ -1685,7 +1685,7 @@ function ensureWatch(key) {
   if (watchers.has(key)) return;
   const w = ctl.watch(key, (ev) => {
     if (ev.type === 'step') { pushStep(key, ev.text); unsent.set(key, [...(unsent.get(key) ?? []), ev.text]); liveEdit(key);
-      if (!fresh(key)?.routine && mediaDue(mediaAt.get(key), Date.now())) { mediaAt.set(key, Date.now()); deliverMedia(key); } }
+      if (!fresh(key)?.routine && mediaDue(mediaAt.get(key), Date.now())) { mediaAt.set(key, Date.now()); deliverMedia(key, true); } }
     if (ev.type === 'result') { resultAt.set(key, Date.now()); setTimeout(() => pollOne(key), 300); }
     if (ev.type === 'thinking') thinkAt.set(key, Date.now());
     if (ev.type === 'text_start') saidText(key, null);
@@ -1905,14 +1905,11 @@ async function interrupt(s, client, body) {
   sessions.patch(s.key, { interrupted: true });
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Interrupted. The work so far is kept. Tell me what to do instead.' });
 }
-// Ctrl-C for one command: the agent's running Bash command stops and the turn goes on. As far as steering goes.
+// Ctrl-C for one command: the agent's running Bash command stops and the turn goes on. Anyone allowed, as Interrupt.
 app.action('stop_tool', async ({ ack, body, action, client }) => {
   await ack();
   const s = fresh(action.value), u = body.user.id;
-  if (!s || ofRoutine(s) || !maySteer(s.owner, u, allowed(s.channel, u), STEER_ANYONE, onTeam(s, u), adminOf(s, u))) {
-    if (s && allowed(s.channel, u)) working(s, body, `Only <@${s.owner}> can do that in this session.`);
-    return;
-  }
+  if (!s || ofRoutine(s) || !allowed(s.channel, u)) return;
   working(s, body, 'Stopping the command…');
   const out = await ctl.interruptTool(s.key).catch((e) => { console.error('stop_tool', s.key, e.stderr || e.message); return ''; });
   if (!out.includes('command stopped')) { working(s, body, 'No command is running right now.'); return; }
@@ -2181,15 +2178,16 @@ async function fail(client, s, e) {
 }
 
 // Screenshots, videos and text files the agent saved, posted once each, at a step at most once a minute
-// and at the turn's end. A file the agent rewrites (same name, new size) posts again. One run at a time
+// and at the turn's end. A file the agent rewrites (same name, new size) posts again at the turn's end only:
+// mid-turn a file still being written (a growing .log) would post each minute. One run at a time
 // per session, so a step's run and the turn end's run never post the same file twice.
 const mediaRuns = new Map(), mediaAt = new Map();
-function deliverMedia(key) {
-  const p = (mediaRuns.get(key) ?? Promise.resolve()).then(() => sendMedia(key));
+function deliverMedia(key, midTurn = false) {
+  const p = (mediaRuns.get(key) ?? Promise.resolve()).then(() => sendMedia(key, midTurn));
   mediaRuns.set(key, p);
   return p.finally(() => { if (mediaRuns.get(key) === p) mediaRuns.delete(key); });
 }
-async function sendMedia(key) {
+async function sendMedia(key, midTurn = false) {
   const s = fresh(key);
   try {
     if (!(await codeAllowed(s, app.client))) return;
@@ -2200,11 +2198,11 @@ async function sendMedia(key) {
       // ctl's printed list (a newline in a name could point outside dir): read
       // dir here, and take only plain media files of a sane size. The ctl masked each text file.
       const files = readdirSync(dir, { withFileTypes: true }).filter((d) => d.isFile()).map((d) => join(dir, d.name))
-        .map((p) => { const st = lstatSync(p); return { path: p, size: st.size, kind: st.isFile() && mediaKind(basename(p), st.size) }; })
+        .map((p) => { const st = lstatSync(p); return { path: p, size: st.size, mtime: st.mtimeMs, kind: st.isFile() && mediaKind(basename(p), st.size) }; })
         .filter((f) => f.kind);
-      for (const { path, size, kind } of files) {
+      for (const { path, size, mtime, kind } of files) {
         const id = `${basename(path)}:${size}`;
-        if (sent.has(id)) continue;
+        if (sent.has(id) || (midTurn && !mediaSettled(basename(path), mtime, sent, Date.now()))) continue;
         await app.client.files.uploadV2({ channel_id: s.channel, thread_ts: s.thread_ts, filename: basename(path),
           ...(kind === 'text' ? { content: readFileSync(path, 'utf8'), snippet_type: 'text' } : { file: readFileSync(path) }) });
         sent.add(id);
