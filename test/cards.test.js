@@ -267,16 +267,17 @@ test('the status card leaves out turns when it does not know them', () => {
   const c = C.status({ key: 'k', state: 'working', minutes: 3, owner: 'U12345678' });
   assert.doesNotMatch(JSON.stringify(c.blocks), /turns/);
   assert.match(JSON.stringify(C.status({ key: 'k', state: 'working', minutes: 3, turns: 2 }).blocks), /2 turns/);
-  assert.deepEqual(c.blocks.at(-1).elements.map((b) => b.action_id), ['diff', 'interrupt', 'stop_tool', 'stop']);
+  assert.deepEqual(c.blocks.at(-1).elements.map((b) => b.action_id), ['diff', 'show_output', 'interrupt', 'stop_tool', 'stop']);
 });
 
 test('the status card offers Interrupt and Stop only while the session runs', () => {
   const ids = (live) => C.status({ key: 'k', state: 'paused', minutes: 3, live }).blocks.at(-1).elements.map((b) => b.action_id);
   assert.deepEqual(ids(false), ['diff']);
-  assert.deepEqual(ids(true), ['diff', 'interrupt', 'stop_tool', 'stop']);
-  assert.deepEqual(C.status({ key: 'k', state: 'waiting for you', minutes: 3, live: true, idle: true }).blocks.at(-1).elements.map((b) => b.action_id), ['diff', 'stop']);
+  assert.deepEqual(ids(true), ['diff', 'show_output', 'interrupt', 'stop_tool', 'stop']);
+  // Show output stays on an idle session: the last command's output is still there to read.
+  assert.deepEqual(C.status({ key: 'k', state: 'waiting for you', minutes: 3, live: true, idle: true }).blocks.at(-1).elements.map((b) => b.action_id), ['diff', 'show_output', 'stop']);
   // Stop command stops one Bash command of Claude's: a Codex session does not get it.
-  assert.deepEqual(C.status({ key: 'k', state: 'working', minutes: 3, live: true, runtime: 'codex' }).blocks.at(-1).elements.map((b) => b.action_id), ['diff', 'interrupt', 'stop']);
+  assert.deepEqual(C.status({ key: 'k', state: 'working', minutes: 3, live: true, runtime: 'codex' }).blocks.at(-1).elements.map((b) => b.action_id), ['diff', 'show_output', 'interrupt', 'stop']);
 });
 
 test('the status card of a team stack has a row for each repo: its PR or diff, and its changes', () => {
@@ -287,7 +288,7 @@ test('the status card of a team stack has a row for each repo: its PR or diff, a
   const rows = c.blocks.filter((b) => b.type === 'context').map((b) => b.elements[0].text);
   assert.deepEqual(rows, ['`fxa` · PR <https://github.com/mozilla/fxa/pull/12|#12> · open · CI passed · 3 files changed',
     '`pyfxa` · ships as a diff · 1 file changed', '`docs` · no PR yet · 0 files changed', '<@U12345678>']);
-  assert.deepEqual(c.blocks.at(-1).elements.map((b) => b.action_id), ['diff', 'interrupt', 'stop_tool', 'stop']);
+  assert.deepEqual(c.blocks.at(-1).elements.map((b) => b.action_id), ['diff', 'show_output', 'interrupt', 'stop_tool', 'stop']);
 });
 
 test('the end card leaves out minutes it does not know', () => {

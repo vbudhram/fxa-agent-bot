@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fromAdmin, ADMIN, threadStarter, endWord, render, operatorProblem, operatorNext, summaryLine, closestCommand, watchUrl, threadLine, maskSecrets, maskUpload, slackArgs, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, slackLinks, threadFile, emptyTurn, EMPTY_FALLBACK, fromOther, othersLines, laterMessage, rateLimitLine } from '../src/render.js';
+import { fromAdmin, ADMIN, threadStarter, endWord, render, operatorProblem, operatorNext, summaryLine, closestCommand, logWord, watchUrl, threadLine, maskSecrets, maskUpload, slackArgs, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, slackLinks, threadFile, emptyTurn, EMPTY_FALLBACK, fromOther, othersLines, laterMessage, rateLimitLine } from '../src/render.js';
 
 test('operator problems are named, other errors are not', () => {
   assert.equal(operatorProblem('ERROR: (gcloud.compute.ssh) Reauthentication failed. cannot prompt').kind, 'gcloud');
@@ -802,4 +802,9 @@ test('slackArgs: half an emoji from a cut posts as U+FFFD, not a URI malformed t
   // chat.* text stays masked; other calls are not.
   assert.equal(slackArgs('chat.postMessage', { text: 'ghp_abcdefghijklmnop1234' }).text, 'ghp_<masked>');
   assert.equal(slackArgs('conversations.info', { channel: 'ghp_abcdefghijklmnop1234' }).channel, 'ghp_abcdefghijklmnop1234');
+});
+
+test('the word of !log is the text after the command, as typed', () => {
+  assert.equal(logWord('!log  a&lt;b &amp; c&gt;\nmore'), 'a<b & c>');
+  assert.equal(logWord('!log'), '');
 });

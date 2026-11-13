@@ -228,7 +228,8 @@ function _status(d) {
     // Interrupt and Stop only while it runs (live): on a paused or PR-open session they do nothing.
     // An idle session (no turn open) has nothing to interrupt, so it keeps only Stop.
     // Stop command ends only the running Bash command; Codex has no such command to stop.
-    ...actions([btn('Diff', 'diff', d.key), ...(d.live === false ? [] : [...(d.idle ? [] : [btn('Interrupt', 'interrupt', d.key),
+    // Show output posts the end of the agent's output from the runner, so it too needs a live session.
+    ...actions([btn('Diff', 'diff', d.key), ...(d.live === false ? [] : [btn('Show output', 'show_output', d.key), ...(d.idle ? [] : [btn('Interrupt', 'interrupt', d.key),
       ...(d.runtime === 'codex' ? [] : [btn('Stop command', 'stop_tool', d.key)])]), btn('Stop', 'stop', d.key, { style: 'danger',
       confirm: { title: pt('Stop the session?'), text: pt('The sandbox stops. The branch stays.'), confirm: pt('Stop'), deny: pt('Keep') } })])])],
     fallback: null,

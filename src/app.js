@@ -27,7 +27,7 @@ import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, roundOutcome, reviewNudge, reviewRound, reviewNote, roundAsk, pauseAsk, lastBotSaid, readyNote } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { routineStart, routineSkip, routineEnd, routineEndLine, routineReport, routineHint, routineLabel, fixStart, fixEnd, fixEndLine, fixSkip } from './render.js';
-import { render, rateLimitLine, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, toSomeoneElse, asideBlock, REBASE_PROMPT, operatorNext, fileRefs, distinctFiles, maskUpload, slackArgs, LOST_REPLY } from './render.js';
+import { render, rateLimitLine, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, logWord, toSomeoneElse, asideBlock, REBASE_PROMPT, operatorNext, fileRefs, distinctFiles, maskUpload, slackArgs, LOST_REPLY } from './render.js';
 
 const { App } = bolt;
 installErrorLog(ctl.errorsPush);
@@ -1233,6 +1233,12 @@ async function bang(s, text, m, client) {
     await note('Getting the diff…');
     const repo = treeArg(s, text);
     await postDiff(s, client, repo || undefined).catch((e) => fail(client, s, e));
+  } else if (cmd === 'log') {
+    if (ownerOnly()) return;
+    const word = logWord(text);
+    if (!word || word.length > 200) { await note('Give a word to look for: `!log <word>`, 200 characters at most.'); return; }
+    await note('Looking for that word in my output…');
+    await postOutput(s, client, m.user, word).catch((e) => fail(client, s, e));
   } else if (cmd === 'pause') {
     if (ownerOnly()) return;
     const cur = fresh(s.key);
@@ -1822,6 +1828,25 @@ async function postDiff(s, client, repo) {
   if (!d.trim()) { await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: `No changes yet${repo ? ` in ${repo}` : ''}.` }); return; }
   await client.files.uploadV2({ channel_id: s.channel, thread_ts: s.thread_ts, filename: `${repo ? repo.split('/')[1] : 'changes'}.diff`, content: d,
     snippet_type: 'diff', initial_comment: diffStat(d) });
+}
+
+ownerAction('show_output', async (s, client, action, body) => {
+  working(s, body, 'Getting the output…');
+  await postOutput(s, client, body.user.id);
+});
+// The end of the agent's output, or with a word the lines that hold it, as one snippet. The ctl masks it and writes
+// the history line. A private-repo team's output goes only to a private channel, as its diff does.
+async function postOutput(s, client, user, word) {
+  const refusal = await codeRefusal(s, client);
+  if (refusal) { await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: refusal }); return; }
+  const out = word === undefined ? await ctl.tail(s.key, user) : await ctl.logGrep(s.key, word, user);
+  // Only the section titles, or a stopped session's note: nothing to post.
+  if (!out.split('\n').some((l) => l.trim() && !l.startsWith('== ') && !/^agent-\S+ (not running|has no saved transcript)$/.test(l))) {
+    await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: word === undefined ? 'No output yet.' : 'No output line holds that word.' });
+    return;
+  }
+  await client.files.uploadV2({ channel_id: s.channel, thread_ts: s.thread_ts, filename: word === undefined ? 'output.txt' : 'output-search.txt', content: out,
+    snippet_type: 'text', initial_comment: word === undefined ? 'The end of my output.' : 'My output lines with that word.' });
 }
 
 // The rest of a long reply. Anyone who may use the bot here can open it.

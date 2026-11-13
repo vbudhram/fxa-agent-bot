@@ -175,6 +175,9 @@ export const summary = async (key) => { try { return JSON.parse((await run(['ses
 export const interrupt = (key) => run(['interrupt', key], { timeout: 60_000 });
 // Stops the agent's running Bash command (SIGINT, KILL after 10 s); the turn goes on. Claude only.
 export const interruptTool = (key) => run(['session', 'interrupt', '--tool', key], { timeout: 60_000 });
+// The agent's output, masked by the ctl. by: the Slack user it is posted for. The word goes on stdin, as all Slack text does.
+export const tail = (key, by) => run(['session', 'tail', key, '--by', by], { timeout: 60_000 });
+export const logGrep = (key, word, by) => runIn(['session', 'log', key, '--grep', '--by', by], `${word}\n`);
 // Pauses sessions idle past the ctl's threshold; returns the keys it paused.
 // The keys the controller deleted under its retention rule (session prune).
 export const prune = async () => (await run(['session', 'prune'], { timeout: 10 * 60_000 })).split('\n').filter((k) => /^agent-[a-z0-9]+$/.test(k));

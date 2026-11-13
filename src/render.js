@@ -472,7 +472,9 @@ two cannot coexist, stop with 'git rebase --abort' and say why. If yarn.lock cha
 conflicted and how you resolved it, and what you checked. '!pr' then updates the PR.`;
 // The gateway's read-only page for a thread: one link for all the thread's sessions.
 export const watchUrl = (gateway, channel, threadTs) => `${gateway.replace(/\/+$/, '')}/w/${channel}:${threadTs}`;
-export const COMMANDS = ['status', 'plan', 'interrupt', 'watch', 'desktop', 'diff', 'pr', 'push', 'rebase', 'pause', 'stop', 'new', 'restart', 'usage', 'mute', 'unmute', 'stack', 'help'];
+export const COMMANDS = ['status', 'plan', 'interrupt', 'watch', 'desktop', 'diff', 'log', 'pr', 'push', 'rebase', 'pause', 'stop', 'new', 'restart', 'usage', 'mute', 'unmute', 'stack', 'help'];
+// The word of `!log <word>`, as typed: Slack sends &, < and > as entities.
+export const logWord = (text) => text.replace(/^!\S+\s*/, '').split('\n')[0].trim().replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 export const HELP = [
   '*While I work*',
   '`!status` what I am doing, the PR, and how long setup took',
@@ -482,6 +484,7 @@ export const HELP = [
   '`!desktop` a Linux desktop with Firefox on this sandbox, just for you',
   '*When it is ready*',
   '`!diff` the changes so far',
+  '`!log <word>` the lines of my command output that hold the word, also after a pause',
   '`!pr` open the PR, or update it once there is one',
   '`!push` push the branch, with no PR',
   '`!rebase` move the work onto the latest main and recheck it; `!pr` then updates the PR',
