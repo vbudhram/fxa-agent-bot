@@ -111,6 +111,11 @@ const allowed = (channel, user) => inChannels(channel) && (USERS.includes('*') |
 // routine_pr: a review round on a routine's PR, which keeps the routine thread's rules (D24).
 const ofRoutine = (s) => Boolean(s?.routine || s?.routine_pr);
 const adminOf = (s, user) => !!s && !ofRoutine(s) && isAdmin(sessionTeam(s, fresh), user);
+// Whose own words the host may read as consent (lib/turn-words.sh): a team admin, or SLACK_OPERATOR when it is
+// set. Never the first ALLOWED_USERS id, which only gets error DMs.
+const mayConsent = (s, user) => Boolean(user) && (adminOf(s, user) || (Boolean(process.env.SLACK_OPERATOR) && user === process.env.SLACK_OPERATOR));
+// The rows of a person's own Slack message for --admin-words-file: never a tap, an aside, an edit or thread context.
+const wordsOf = (s, user, ts, text) => (mayConsent(s, user) && text ? [{ user, ts, text }] : []);
 const boss = (s, user) => user === s?.owner || adminOf(s, user);
 // The agent's copy of a person's words: the owner's as is, an admin's as an owner's but named, anyone else's labelled as context.
 const voice = (s, user, t) => (user === s?.owner ? t : adminOf(s, user) ? fromAdmin(t) : fromOther(t));
@@ -271,7 +276,7 @@ async function onMention({ event, body, client }) {
   const tagFiles = fileRefs(event.files);
   // team: the workspace the person wrote from. In an org-wide install the bot's own team (auth.test) is not it.
   // A resume keeps its owner with no await, so the reply handler's resume of the same tag sees this reservation.
-  pending.set(key, { src_ts: event.ts, prompt, request: resume_from ? requestOf(cur) : prompt, owner: resume_from ? cur.owner : await ownerOf(client, event.channel, event.thread_ts, event.user, prof.profile), team: event.team ?? body?.team_id ?? cur?.team, channel: event.channel, thread_ts, resume_from, runtime, profile: resume_from ? undefined : prof.profile, read_only: resume_from ? cur.read_only : undefined, private: resume_from ? cur.private : undefined, deadline,
+  pending.set(key, { src_ts: event.ts, words: [{ user: event.user, ts: event.ts, text: prompt }], prompt, request: resume_from ? requestOf(cur) : prompt, owner: resume_from ? cur.owner : await ownerOf(client, event.channel, event.thread_ts, event.user, prof.profile), team: event.team ?? body?.team_id ?? cur?.team, channel: event.channel, thread_ts, resume_from, runtime, profile: resume_from ? undefined : prof.profile, read_only: resume_from ? cur.read_only : undefined, private: resume_from ? cur.private : undefined, deadline,
     ...(choice?.user === event.user ? { repos: choice.repos, ...(resume_from ? {} : { is_new: true }) } : {}),
     held_files: [...(resume_from ? cur.held_files ?? [] : []), ...tagFiles], own_files: tagFiles.length > 0 });
   if (event.files?.length > tagFiles.length)
@@ -596,7 +601,8 @@ async function launch(key, client, since = Date.now(), retry = false) {
     }
     inbox = inboxes.get(key);
     if (routine) await ctl.routineTask({ key, profile: s.profile, run: s.routine.run, thread: s.channel === NO_CHANNEL ? undefined : `${s.channel}:${s.thread_ts}`, link });
-    else await ctl.task({ key, owner: s.owner, prompt: s.prompt + (inbox?.note ?? ''), inboxDir: inbox?.note ? inbox.dir : undefined, resumeFrom: s.resume_from, fresh: s.fresh, thread: `${s.channel}:${s.thread_ts}`, isNew: s.is_new, runtime: s.resume_from ? undefined : s.runtime, profile: s.profile, link, who, queuedS, findings: s.findings, repos: s.repos, checkout: s.checkout });
+    else await ctl.task({ key, owner: s.owner, prompt: s.prompt + (inbox?.note ?? ''), inboxDir: inbox?.note ? inbox.dir : undefined, resumeFrom: s.resume_from, fresh: s.fresh, thread: `${s.channel}:${s.thread_ts}`, isNew: s.is_new, runtime: s.resume_from ? undefined : s.runtime, profile: s.profile, link, who, queuedS, findings: s.findings, repos: s.repos, checkout: s.checkout,
+      words: (s.words ?? []).filter((w) => mayConsent(s, w.user)) });
     dropInbox(key, inbox); // task copied them
   } catch (e) {
     if (!/cap \d+ \(FXA_SESSION_MAX\)/.test(e.stderr ?? '')) dropInbox(key, inbox);
@@ -866,7 +872,7 @@ async function onMessage({ message, client, replay = false }) {
   if (resumable && steers && !s.stop_failed) {
     addAck(s.key, message.ts);
     const t = text || 'See the attached files.';
-    await resumePaused(s, voice(s, message.user, t), client, { held_files: fileRefs(message.files) });
+    await resumePaused(s, voice(s, message.user, t), client, { held_files: fileRefs(message.files), words: [{ user: message.user, ts: message.ts, text: message.text ?? '' }] });
     return;
   }
   // The PR merged or closed: the work is done, and a reply is not a new task.
@@ -921,7 +927,7 @@ async function onMessage({ message, client, replay = false }) {
     if (note === null) return;
     text = `${text || 'See the attached files.'}${note}`;
   }
-  await steerAndAck(s, voice(s, message.user, text), client, message.user, message.ts);
+  await steerAndAck(s, voice(s, message.user, text), client, message.user, message.ts, message.text ?? '');
 }
 app.message(onMessage);
 
@@ -1323,8 +1329,8 @@ async function resumePaused(s, text, client, extra = {}) {
   // A start is under way here (a tag, or another resume): this joins it, as a reply does (joinStarting), not dropped.
   const p0 = [...pending.values()].find((p) => p.channel === s.channel && p.thread_ts === s.thread_ts);
   if (p0) {
-    const { held_files, ...rest } = extra;
-    Object.assign(p0, rest, { prompt: `${p0.prompt}\n\n${text}`, acks: [...new Set([...(p0.acks ?? []), ...ackList(fresh(s.key))])],
+    const { held_files, words, ...rest } = extra;
+    Object.assign(p0, rest, { prompt: `${p0.prompt}\n\n${text}`, words: [...(p0.words ?? []), ...(words ?? [])], acks: [...new Set([...(p0.acks ?? []), ...ackList(fresh(s.key))])],
       held_files: [...(p0.held_files ?? []), ...(held_files ?? [])] });
     return;
   }
@@ -1434,7 +1440,8 @@ setTimeout(prune, 60_000);
 // The timeline opens first, so the reply is visible in under a second while
 // steer spends ~2 s over ssh starting the turn. A turn already running keeps
 // its own timeline, and startStatus leaves it alone.
-async function steerAndAck(s, text, client, userId, ts) {
+// own: the person's own message text, only from a message event (never a tap): the words the host may read.
+async function steerAndAck(s, text, client, userId, ts, own = '') {
   // A bare "^" while a turn runs, with no new message above it, points at what that turn already
   // answers: it joins the turn's acks, and gets no second reply of its own.
   const cur0 = fresh(s.key);
@@ -1453,12 +1460,12 @@ async function steerAndAck(s, text, client, userId, ts) {
   if (['paused', 'stopped', 'failed'].includes(ended?.state)) {
     // Only the thread's current session, and not one whose runner may still be up.
     if (sessions.get(ended.channel, ended.thread_ts)?.key !== ended.key || ended.stop_failed) return;
-    addAck(s.key, ts); await resumePaused(ended, text, client); return;
+    addAck(s.key, ts); await resumePaused(ended, text, client, { words: own ? [{ user: userId, ts, text: own }] : [] }); return;
   }
   const busyBefore = Boolean(fresh(s.key)?.status_ts);
   if (!busyBefore) await startStatus(s, 'Working').catch((e) => console.error('status', s.key, e.data?.error ?? e.message));
   try {
-    const out = await ctl.steer(s.key, text, userId ? await whoIs(client, userId) : null);
+    const out = await ctl.steer(s.key, text, userId ? await whoIs(client, userId) : null, wordsOf(s, userId, ts, own));
     if (userId) await retireQuestion(s.key); // a person's reply answers any open question
     const queued = out.includes('queued');
     addAck(s.key, ts, queued);
