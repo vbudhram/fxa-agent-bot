@@ -581,6 +581,10 @@ export const slackArgs = (method, args) => {
   return walk(args);
 };
 
+// How the bot posts a file the agent saved: 'text' as a snippet (up to 2 MB, as the ctl caps it), 'file' as media
+// (up to 50 MB), or false. .har is no type: it holds cookies and auth headers.
+export const mediaKind = (name, size) => /^[A-Za-z0-9._-]{1,120}\.(log|txt|csv|json)$/.test(name) ? size <= 2 * 1024 * 1024 && 'text'
+  : /^[A-Za-z0-9._-]{1,120}\.(png|jpe?g|gif|webp|mp4|webm|patch|diff)$/.test(name) && size <= 50 * 1024 * 1024 && 'file';
 // An upload's text (a Diff's content, an agent's .patch or .diff file, the comment, the name and title) through maskSecrets.
 // Media bytes stay as they are. The Diff is for reading: Apply and Open PR work from the branch.
 export const maskUpload = (args) => ({ ...args,

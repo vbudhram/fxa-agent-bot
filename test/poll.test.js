@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pollEvery, IDLE_MS, reachable, missed, REPLAY_S, replayable, REPLAY_IDLE_S } from '../src/poll.js';
+import { pollEvery, IDLE_MS, reachable, missed, REPLAY_S, replayable, REPLAY_IDLE_S, mediaDue } from '../src/poll.js';
+
+test('mediaDue: a step posts media at most once a minute', () => {
+  assert.equal(mediaDue(undefined, 1_000), true);
+  assert.equal(mediaDue(1_000, 60_999), false);
+  assert.equal(mediaDue(1_000, 61_000), true);
+});
 
 test('a session waiting for its person polls slowly; one with work polls every 5 s', () => {
   const now = 1_000_000;

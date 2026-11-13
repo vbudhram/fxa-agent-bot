@@ -2,7 +2,7 @@ import bolt from '@slack/bolt';
 import { basename } from 'node:path';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { statSync, readFileSync, readdirSync, lstatSync, writeFileSync, appendFileSync } from 'node:fs';
+import { readFileSync, readdirSync, lstatSync, writeFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as ctl from './ctl.js';
 import { quickFirst, askId, answerBlocks, findingsOf, stepRows, doneLine, stepCount, rowTitle, ON_IT, FIRST_ROW, seamless } from './answer.js';
@@ -11,7 +11,7 @@ import * as sessions from './sessions.js';
 import * as inflight from './inflight.js';
 import * as live from './live.js';
 import { statusMessage } from './status.js';
-import { pollEvery, reachable, missed, replayMark, replayable } from './poll.js';
+import { pollEvery, reachable, missed, replayMark, replayable, mediaDue } from './poll.js';
 import * as unfurl from './unfurl.js';
 import { resolveProfile, mayStart, isAdmin, mayOpenPr } from './profile.js';
 import { teamChannels, reviewRounds } from './teams.js';
@@ -27,7 +27,7 @@ import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, roundOutcome, reviewNudge, reviewRound, reviewNote, roundAsk, pauseAsk, lastBotSaid, readyNote } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { routineStart, routineSkip, routineEnd, routineEndLine, routineReport, routineHint, routineLabel, fixStart, fixEnd, fixEndLine, fixSkip } from './render.js';
-import { render, rateLimitLine, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, logWord, toSomeoneElse, asideBlock, REBASE_PROMPT, operatorNext, fileRefs, distinctFiles, maskUpload, slackArgs, LOST_REPLY } from './render.js';
+import { render, rateLimitLine, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, logWord, toSomeoneElse, asideBlock, REBASE_PROMPT, operatorNext, fileRefs, distinctFiles, maskUpload, slackArgs, LOST_REPLY, mediaKind } from './render.js';
 
 const { App } = bolt;
 installErrorLog(ctl.errorsPush);
@@ -1669,7 +1669,8 @@ const withLive = (key, summary) => { const lt = liveTurn.get(key), x = lt ? live
 function ensureWatch(key) {
   if (watchers.has(key)) return;
   const w = ctl.watch(key, (ev) => {
-    if (ev.type === 'step') { pushStep(key, ev.text); unsent.set(key, [...(unsent.get(key) ?? []), ev.text]); liveEdit(key); }
+    if (ev.type === 'step') { pushStep(key, ev.text); unsent.set(key, [...(unsent.get(key) ?? []), ev.text]); liveEdit(key);
+      if (!fresh(key)?.routine && mediaDue(mediaAt.get(key), Date.now())) { mediaAt.set(key, Date.now()); deliverMedia(key); } }
     if (ev.type === 'result') { resultAt.set(key, Date.now()); setTimeout(() => pollOne(key), 300); }
     if (ev.type === 'thinking') thinkAt.set(key, Date.now());
     if (ev.type === 'text_start') saidText(key, null);
@@ -2147,9 +2148,16 @@ async function fail(client, s, e) {
   if (text) await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text });
 }
 
-// Screenshots and videos the agent saved during the turn, posted once each. A
-// file the agent rewrites (same name, new size) posts again.
-async function deliverMedia(key) {
+// Screenshots, videos and text files the agent saved, posted once each, at a step at most once a minute
+// and at the turn's end. A file the agent rewrites (same name, new size) posts again. One run at a time
+// per session, so a step's run and the turn end's run never post the same file twice.
+const mediaRuns = new Map(), mediaAt = new Map();
+function deliverMedia(key) {
+  const p = (mediaRuns.get(key) ?? Promise.resolve()).then(() => sendMedia(key));
+  mediaRuns.set(key, p);
+  return p.finally(() => { if (mediaRuns.get(key) === p) mediaRuns.delete(key); });
+}
+async function sendMedia(key) {
   const s = fresh(key);
   try {
     if (!(await codeAllowed(s, app.client))) return;
@@ -2158,15 +2166,15 @@ async function deliverMedia(key) {
     try {
       // The files come from the sandbox, which the agent controls. Never trust
       // ctl's printed list (a newline in a name could point outside dir): read
-      // dir here, and take only plain media files of a sane size.
-      const files = readdirSync(dir, { withFileTypes: true })
-        .filter((d) => d.isFile() && /^[A-Za-z0-9._-]{1,120}\.(png|jpe?g|gif|webp|mp4|webm|patch|diff)$/.test(d.name))
-        .map((d) => join(dir, d.name))
-        .filter((p) => { const st = lstatSync(p); return st.isFile() && st.size <= 50 * 1024 * 1024; });
-      for (const path of files) {
-        const id = `${basename(path)}:${statSync(path).size}`;
+      // dir here, and take only plain media files of a sane size. The ctl masked each text file.
+      const files = readdirSync(dir, { withFileTypes: true }).filter((d) => d.isFile()).map((d) => join(dir, d.name))
+        .map((p) => { const st = lstatSync(p); return { path: p, size: st.size, kind: st.isFile() && mediaKind(basename(p), st.size) }; })
+        .filter((f) => f.kind);
+      for (const { path, size, kind } of files) {
+        const id = `${basename(path)}:${size}`;
         if (sent.has(id)) continue;
-        await app.client.files.uploadV2({ channel_id: s.channel, thread_ts: s.thread_ts, filename: basename(path), file: readFileSync(path) });
+        await app.client.files.uploadV2({ channel_id: s.channel, thread_ts: s.thread_ts, filename: basename(path),
+          ...(kind === 'text' ? { content: readFileSync(path, 'utf8'), snippet_type: 'text' } : { file: readFileSync(path) }) });
         sent.add(id);
       }
     } finally { await ctl.cleanup(dir); }

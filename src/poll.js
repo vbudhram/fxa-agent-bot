@@ -1,6 +1,9 @@
 // How often to poll a session. One waiting for its person changes only when
 // they reply, and the bot starts that turn itself, so it polls slowly.
 export const IDLE_MS = 60_000;
+// The agent's media posts at a step at most once a minute; the turn's end posts the rest at once.
+export const MEDIA_MID_MS = 60_000;
+export const mediaDue = (lastAt, now) => lastAt === undefined || now - lastAt >= MEDIA_MID_MS;
 
 // pollEvery(session, now, lastWorkAt): 5 s while it boots, wraps up, runs a turn,
 // or did work in the last minute (a turn end can start a queued message); else IDLE_MS.

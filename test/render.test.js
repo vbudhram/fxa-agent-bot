@@ -1,6 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fromAdmin, ADMIN, threadStarter, endWord, render, operatorProblem, operatorNext, summaryLine, closestCommand, logWord, watchUrl, threadLine, maskSecrets, maskUpload, slackArgs, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, slackLinks, threadFile, emptyTurn, EMPTY_FALLBACK, fromOther, othersLines, laterMessage, rateLimitLine } from '../src/render.js';
+import { fromAdmin, ADMIN, threadStarter, endWord, render, operatorProblem, operatorNext, summaryLine, closestCommand, logWord, watchUrl, threadLine, maskSecrets, maskUpload, slackArgs, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, slackLinks, threadFile, emptyTurn, EMPTY_FALLBACK, fromOther, othersLines, laterMessage, rateLimitLine, mediaKind } from '../src/render.js';
+
+test('mediaKind: text files post as snippets up to 2 MB, media up to 50 MB, .har and others never', () => {
+  for (const n of ['run.log', 'notes.txt', 'users.csv', 'result.json']) assert.equal(mediaKind(n, 10), 'text');
+  assert.equal(mediaKind('big.log', 2 * 1024 * 1024 + 1), false);
+  assert.equal(mediaKind('shot.png', 3 * 1024 * 1024), 'file');
+  assert.equal(mediaKind('shot.png', 50 * 1024 * 1024 + 1), false);
+  for (const n of ['trace.har', 'page.html', 'a b.txt', '.env']) assert.equal(mediaKind(n, 10), false);
+});
 
 test('operator problems are named, other errors are not', () => {
   assert.equal(operatorProblem('ERROR: (gcloud.compute.ssh) Reauthentication failed. cannot prompt').kind, 'gcloud');
