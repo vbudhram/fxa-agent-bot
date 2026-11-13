@@ -512,7 +512,7 @@ export const HELP = [
   '`!desktop` a Linux desktop with Firefox on this sandbox, just for you',
   '*When it is ready*',
   '`!diff` the changes so far',
-  '`!log <word>` the lines of my command output that hold the word, also after a pause',
+  '`!log <word>` the lines of my finished command output that hold the word, also after a pause; "Show output" shows a command that still runs',
   '`!sh <command>` run one command on the sandbox between my turns, 100 seconds at most; I see its output with your next message',
   '`!pr` open the PR, or update it once there is one',
   '`!push` push the branch, with no PR',
