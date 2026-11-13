@@ -655,6 +655,10 @@ test('a token in the first line is masked in the notification text too, not only
   assert.ok(!/abcdefghij|ZZZZyyyy/.test(r.text));
 });
 
+test('maskSecrets masks an OpenAI-style key, but not a word that holds sk-', () => {
+  assert.equal(maskSecrets('a sk-proj-AAAAbbbbCCCCddddEEEEffff b sk-ant-api03-ABCDEFGHIJKL c risk-assessment-for-the-new-thing'),
+    'a sk-proj-<masked> b sk-ant-api03-<masked> c risk-assessment-for-the-new-thing');
+});
 test('maskSecrets leaves names that only contain a token prefix', () => {
   assert.equal(maskSecrets('see ghp_tokens_helper_test.js and highs_and_lows_report and xfxl_abcdefghij'), 'see ghp_tokens_helper_test.js and highs_and_lows_report and xfxl_abcdefghij');
   assert.equal(maskSecrets('(fxl_abcdefghijklmnop)'), '(fxl_<masked>)');
@@ -848,4 +852,6 @@ test('a host action card shows the target and the literal body, and only Deny wh
   assert.deepEqual(h.blocks.at(-1).elements.map((b) => b.action_id), ['confirm_deny']);
   assert.match(h.blocks[0].text.text, /No person started that turn/);
   assert.equal(h.blocks.some((b) => b.type === 'rich_text'), false);
+  const long = render('agent-x', { ...ev, ask: `comment ${'x'.repeat(300)}` });
+  assert.deepEqual(long.blocks.at(-1).elements.map((b) => b.action_id), ['confirm_deny']);
 });

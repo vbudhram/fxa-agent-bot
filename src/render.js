@@ -396,7 +396,9 @@ export function render(key, ev) {
     // A host: line from a turn that no team admin started (ctl _asks_card). A team admin's Allow runs it once. The body is
     // literal text (rich_text), so no markup in it can hide a link or ping anyone. hidden: a private team's public channel.
     case 'confirm': {
+      // The tap is the consent, so it may allow only a line the card shows whole.
       const v = JSON.stringify({ key, n: ev.nonce, s: ev.sha }), ask = esc(ev.ask).replace(/`/g, '').slice(0, 300);
+      const deny = ev.hidden || String(ev.ask).length > 300;
       const by = ev.who && ev.who !== 'host' ? `${esc(ev.who)} is not a team admin` : 'No person started that turn';
       return {
         text: `The agent asks the host to run ${plain(ask)}. Only a team admin can allow it.`,
@@ -404,8 +406,9 @@ export function render(key, ev) {
           { type: 'section', text: { type: 'mrkdwn', text: `The agent asks the host to run \`${ask}\` on *${esc(ev.target)}*. ${by}, so only a team admin can allow it. It counts as Deny when a person's next turn ends.` } },
           ...(ev.body ? [{ type: 'rich_text', elements: [{ type: 'rich_text_preformatted', elements: [{ type: 'text', text: ev.body }] }] }] : []),
           ...(ev.hidden ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: 'This team has a private repo, so I show the comment only in a private channel, and it cannot be allowed here.' }] }] : []),
+          ...(!ev.hidden && deny ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: 'The line is too long to show here in full, so it cannot be allowed.' }] }] : []),
           { type: 'actions', elements: [
-            ...(ev.hidden ? [] : [{ type: 'button', style: 'primary', text: { type: 'plain_text', text: 'Allow' }, action_id: 'confirm_allow', value: v }]),
+            ...(deny ? [] : [{ type: 'button', style: 'primary', text: { type: 'plain_text', text: 'Allow' }, action_id: 'confirm_allow', value: v }]),
             { type: 'button', style: 'danger', text: { type: 'plain_text', text: 'Deny' }, action_id: 'confirm_deny', value: v }] },
         ],
       };
@@ -593,8 +596,8 @@ export function errorDigest(rows) {
 // file or variable name such as ghp_tokens_helper_test.js is not one; Slack and Anthropic keys have hyphens.
 // Any character may come before the prefix: JSON output escapes a newline as \n, a letter.
 export const maskSecrets = (t, mark = '<masked>') => String(t).replace(
-  /(?:(sk-ant-[a-z0-9]+-|xox[abpr]-|xapp-)[A-Za-z0-9_-]{8,}|(fxl_|fxm_|ghs_|ghp_|gho_|github_pat_)[A-Za-z0-9]{12,}[A-Za-z0-9_]*)/g,
-  (_, a, b) => `${a ?? b}${mark}`);
+  /(?:(sk-ant-[a-z0-9]+-|xox[abpr]-|xapp-)[A-Za-z0-9_-]{8,}|(fxl_|fxm_|ghs_|ghp_|gho_|github_pat_)[A-Za-z0-9]{12,}[A-Za-z0-9_]*|\b(sk-(?:proj-)?)(?!ant-)[A-Za-z0-9_-]{20,})/g,
+  (_, a, b, c) => `${a ?? b ?? c}${mark}`);
 
 export const LOST_REPLY = 'My answer did not post: Slack refused it. Reply here and I will answer again.';
 
