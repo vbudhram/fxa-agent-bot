@@ -173,6 +173,8 @@ export const desktop = async (key, email) => {
 };
 export const summary = async (key) => { try { return JSON.parse((await run(['session', 'summary', key])).trim() || 'null'); } catch { return null; } };
 export const interrupt = (key) => run(['interrupt', key], { timeout: 60_000 });
+// Stops the agent's running Bash command (SIGINT, KILL after 10 s); the turn goes on. Claude only.
+export const interruptTool = (key) => run(['session', 'interrupt', '--tool', key], { timeout: 60_000 });
 // Pauses sessions idle past the ctl's threshold; returns the keys it paused.
 // The keys the controller deleted under its retention rule (session prune).
 export const prune = async () => (await run(['session', 'prune'], { timeout: 10 * 60_000 })).split('\n').filter((k) => /^agent-[a-z0-9]+$/.test(k));

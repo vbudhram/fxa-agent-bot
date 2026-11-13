@@ -1203,7 +1203,7 @@ async function bang(s, text, m, client) {
       pr: prOf(cur.prs?.[t.slug]?.pr_url, cur.prs?.[t.slug]?.pr_seen) })) : null;
     // Active with no turn open: the session waits for the person, so it says so and offers no Interrupt.
     const idle = cur.state === 'active' && !cur.status_ts;
-    const c = cards.status({ key: cur.key, state: idle ? 'waiting for you' : STATE_WORD[cur.state] ?? cur.state, minutes: mins, owner: cur.owner, now: cur.last_act, live: LIVE.includes(cur.state), idle,
+    const c = cards.status({ key: cur.key, state: idle ? 'waiting for you' : STATE_WORD[cur.state] ?? cur.state, minutes: mins, owner: cur.owner, now: cur.last_act, live: LIVE.includes(cur.state), idle, runtime: cur.runtime,
       pr: trees ? null : prOf(cur.pr_url, cur.pr_seen), trees });
     const extra = notes.length ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: notes.join(' ') }] }] : [];
     await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: c.text, blocks: [...c.blocks.slice(0, -1), ...extra, c.blocks.at(-1)] });
@@ -1864,6 +1864,19 @@ async function interrupt(s, client, body) {
   sessions.patch(s.key, { interrupted: true });
   await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Interrupted. The work so far is kept. Tell me what to do instead.' });
 }
+// Ctrl-C for one command: the agent's running Bash command stops and the turn goes on. As far as steering goes.
+app.action('stop_tool', async ({ ack, body, action, client }) => {
+  await ack();
+  const s = fresh(action.value), u = body.user.id;
+  if (!s || ofRoutine(s) || !maySteer(s.owner, u, allowed(s.channel, u), STEER_ANYONE, onTeam(s, u), adminOf(s, u))) {
+    if (s && allowed(s.channel, u)) working(s, body, `Only <@${s.owner}> can do that in this session.`);
+    return;
+  }
+  working(s, body, 'Stopping the command…');
+  const out = await ctl.interruptTool(s.key).catch((e) => { console.error('stop_tool', s.key, e.stderr || e.message); return ''; });
+  if (!out.includes('command stopped')) { working(s, body, 'No command is running right now.'); return; }
+  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Stopped the running command. The turn goes on.' });
+});
 const wrapping = new Set();
 // The row each wrap took buttons from, so a refused ship can put them back.
 const unwrap = new Map();
