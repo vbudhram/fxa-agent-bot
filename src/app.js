@@ -27,7 +27,7 @@ import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, roundOutcome, reviewNudge, reviewRound, reviewNote, roundAsk, pauseAsk, lastBotSaid, readyNote } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { routineStart, routineSkip, routineEnd, routineEndLine, routineReport, routineHint, routineLabel, fixStart, fixEnd, fixEndLine, fixSkip } from './render.js';
-import { render, rateLimitLine, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, logWord, toSomeoneElse, asideBlock, REBASE_PROMPT, operatorNext, fileRefs, distinctFiles, maskUpload, slackArgs, LOST_REPLY, mediaKind } from './render.js';
+import { render, rateLimitLine, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, logWord, shCmd, replayNote, toSomeoneElse, asideBlock, REBASE_PROMPT, operatorNext, fileRefs, distinctFiles, maskUpload, slackArgs, LOST_REPLY, mediaKind } from './render.js';
 
 const { App } = bolt;
 installErrorLog(ctl.errorsPush);
@@ -816,7 +816,7 @@ async function onMessage({ message, client, replay = false }) {
   if (!s.last_ts || message.ts > s.last_ts) sessions.patch(s.key, { last_ts: message.ts });
   let text = strip(message.text);
   if (!text && !message.files?.length) return;
-  if (text.startsWith('!')) { await bang(s, text, { user: message.user, channel: message.channel, thread_ts: message.thread_ts, ts: message.ts }, client); return; }
+  if (text.startsWith('!')) { await bang(s, text, { user: message.user, channel: message.channel, thread_ts: message.thread_ts, ts: message.ts, replay }, client); return; }
   // A message to someone else (it tags a person, not the bot) gets no reply; the
   // agent sees it with the next message it does get.
   if (toSomeoneElse(message.text, botUserId)) { CROWDED.add(`${s.channel}:${s.thread_ts}`); keepAside(s, message); return; }
@@ -1174,6 +1174,7 @@ async function bang(s, text, m, client) {
   let cmd = text.slice(1).split(/\s+/)[0].toLowerCase();
   const note = (t) => client.chat.postEphemeral({ channel: m.channel, thread_ts: m.thread_ts, user: m.user, text: t }).catch((e) => console.error('note', e.data?.error ?? e.message));
   if (!allowed(m.channel, m.user)) { await note("Sorry, you're not on the list of people who can use the agent here."); return; }
+  if (m.replay) { await note(replayNote(cmd)); return; }
   // Mute goes as far as steering does: anyone allowed, or only the owner under STEER=owner.
   const steerOnly = () => { if (s && !boss(s, m.user) && (!STEER_ANYONE || !onTeam(s, m.user))) { note(`Only <@${s.owner}> can do that in this session.`); return true; } return false; };
   const ownerOnly = () => { if (s && !boss(s, m.user)) { note(`Only <@${s.owner}> can do that in this session.`); return true; } return false; };
@@ -1239,6 +1240,20 @@ async function bang(s, text, m, client) {
     if (!word || word.length > 200) { await note('Give a word to look for: `!log <word>`, 200 characters at most.'); return; }
     await note('Looking for that word in my output…');
     await postOutput(s, client, m.user, word).catch((e) => fail(client, s, e));
+  } else if (cmd === 'sh') {
+    // One command on the runner with no model turn: the owner and team admins, between turns. The ctl also refuses
+    // a non-admin on a team with runtime secrets. An edit never gets here (steerEdit drops ! text), nor a replay.
+    if (ownerOnly() || !readyToShip()) return;
+    const c = shCmd(text);
+    if (!c || c.length > 2000) { await note('Give a command: `!sh <command>`, 2000 characters at most.'); return; }
+    const refusal = await codeRefusal(s, client);
+    if (refusal) { await note(refusal); return; }
+    await note('Running it, for 100 seconds at most…');
+    const out = await ctl.sh(s.key, c, m.user, adminOf(s, m.user))
+      .catch((e) => (e.stdout?.trim() ? e.stdout : (console.error('sh', s.key, e.stderr || e.message), 'refused: the host did not answer. The bot log has the error.')));
+    if (out.startsWith('refused: ')) { await note(`I did not run it: ${out.slice(9).split('\n')[0].trim().replace(/\.$/, '')}.`); return; }
+    await client.files.uploadV2({ channel_id: s.channel, thread_ts: s.thread_ts, filename: 'command.txt', content: `$ ${c}\n${out.split('\n').slice(1).join('\n')}`,
+      snippet_type: 'text', initial_comment: `<@${m.user}> ran a command: ${out.split('\n')[0].trim()}. I see the output with the next message.` });
   } else if (cmd === 'pause') {
     if (ownerOnly()) return;
     const cur = fresh(s.key);

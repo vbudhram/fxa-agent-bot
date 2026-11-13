@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fromAdmin, ADMIN, threadStarter, endWord, render, operatorProblem, operatorNext, summaryLine, closestCommand, logWord, watchUrl, threadLine, maskSecrets, maskUpload, slackArgs, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, slackLinks, threadFile, emptyTurn, EMPTY_FALLBACK, fromOther, othersLines, laterMessage, rateLimitLine, mediaKind } from '../src/render.js';
+import { fromAdmin, ADMIN, threadStarter, endWord, render, operatorProblem, operatorNext, summaryLine, closestCommand, logWord, shCmd, replayNote, watchUrl, threadLine, maskSecrets, maskUpload, slackArgs, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, slackLinks, threadFile, emptyTurn, EMPTY_FALLBACK, fromOther, othersLines, laterMessage, rateLimitLine, mediaKind } from '../src/render.js';
 
 test('mediaKind: text files post as snippets up to 2 MB, media up to 50 MB, .har and others never', () => {
   for (const n of ['run.log', 'notes.txt', 'users.csv', 'result.json']) assert.equal(mediaKind(n, 10), 'text');
@@ -820,6 +820,20 @@ test('slackArgs: half an emoji from a cut posts as U+FFFD, not a URI malformed t
 test('the word of !log is the text after the command, as typed', () => {
   assert.equal(logWord('!log  a&lt;b &amp; c&gt;\nmore'), 'a<b & c>');
   assert.equal(logWord('!log'), '');
+});
+
+test('the command of !sh is the text after it, as typed, with Slack code and links taken off', () => {
+  assert.equal(shCmd('!sh git log -1 &gt; /tmp/x &amp;&amp; cat &lt;/tmp/x'), 'git log -1 > /tmp/x && cat </tmp/x');
+  assert.equal(shCmd('!sh `yarn test foo`'), 'yarn test foo');
+  assert.equal(shCmd('!sh ```\nls\npwd\n```'), 'ls\npwd');
+  assert.equal(shCmd('!sh curl <https://example.com/a|example.com/a>'), 'curl https://example.com/a');
+  assert.equal(shCmd('!sh echo &lt;https://x&gt;'), 'echo <https://x>', 'a < the person typed is not a link');
+  assert.equal(shCmd('!sh'), '');
+});
+
+test('a replayed ! command does not run, and the note says to send it again', () => {
+  assert.match(replayNote('stop'), /did not run it.*`!stop`|`!stop`.*did not run it/);
+  assert.match(replayNote('sh'), /Send it again/);
 });
 
 test('a host action card shows the target and the literal body, and only Deny where the body may not show', () => {

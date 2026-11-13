@@ -491,9 +491,15 @@ two cannot coexist, stop with 'git rebase --abort' and say why. If yarn.lock cha
 conflicted and how you resolved it, and what you checked. '!pr' then updates the PR.`;
 // The gateway's read-only page for a thread: one link for all the thread's sessions.
 export const watchUrl = (gateway, channel, threadTs) => `${gateway.replace(/\/+$/, '')}/w/${channel}:${threadTs}`;
-export const COMMANDS = ['status', 'plan', 'interrupt', 'watch', 'desktop', 'diff', 'log', 'pr', 'push', 'rebase', 'pause', 'stop', 'new', 'restart', 'usage', 'mute', 'unmute', 'stack', 'help'];
+export const COMMANDS = ['status', 'plan', 'interrupt', 'watch', 'desktop', 'diff', 'log', 'sh', 'pr', 'push', 'rebase', 'pause', 'stop', 'new', 'restart', 'usage', 'mute', 'unmute', 'stack', 'help'];
 // The word of `!log <word>`, as typed: Slack sends &, < and > as entities.
 export const logWord = (text) => text.replace(/^!\S+\s*/, '').split('\n')[0].trim().replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+// The command of `!sh <command>`, as typed: Slack wraps code in backticks and links in <...>, and sends &, < and > as
+// entities. The links go first, so a < the person typed (&lt;) never reads as one.
+export const shCmd = (text) => text.replace(/^!\S+\s*/, '').trim().replace(/^```\n?([\s\S]*?)\n?```$/, '$1').replace(/^`([^`\n]+)`$/, '$1')
+  .replace(/<((?:https?|mailto):[^|>]+)(?:\|[^>]*)?>/g, '$1').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').trim();
+// A ! command that a restart replays: it came while the bot was down, so it may be stale, and it does not run.
+export const replayNote = (cmd) => `I was offline when you sent \`!${cmd}\`, so I did not run it. Send it again if you still want it.`;
 export const HELP = [
   '*While I work*',
   '`!status` what I am doing, the PR, and how long setup took',
@@ -504,6 +510,7 @@ export const HELP = [
   '*When it is ready*',
   '`!diff` the changes so far',
   '`!log <word>` the lines of my command output that hold the word, also after a pause',
+  '`!sh <command>` run one command on the sandbox between my turns, 100 seconds at most; I see its output with your next message',
   '`!pr` open the PR, or update it once there is one',
   '`!push` push the branch, with no PR',
   '`!rebase` move the work onto the latest main and recheck it; `!pr` then updates the PR',

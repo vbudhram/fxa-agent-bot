@@ -181,6 +181,9 @@ export const interruptTool = (key) => run(['session', 'interrupt', '--tool', key
 // The agent's output, masked by the ctl. by: the Slack user it is posted for. The word goes on stdin, as all Slack text does.
 export const tail = (key, by) => run(['session', 'tail', key, '--by', by], { timeout: 60_000 });
 export const logGrep = (key, word, by) => runIn(['session', 'log', key, '--grep', '--by', by], `${word}\n`);
+// !sh: one command as the agent, on stdin. --admin only for a team admin. "exit <n> in <s>s" and the masked output,
+// or (exit 1) "refused: <why>".
+export const sh = (key, cmd, by, admin) => runIn(['session', 'sh', key, '--by', by, ...(admin ? ['--admin'] : [])], `${cmd}\n`, 3 * 60_000);
 // Pauses sessions idle past the ctl's threshold; returns the keys it paused.
 // The keys the controller deleted under its retention rule (session prune).
 export const prune = async () => (await run(['session', 'prune'], { timeout: 10 * 60_000 })).split('\n').filter((k) => /^agent-[a-z0-9]+$/.test(k));
