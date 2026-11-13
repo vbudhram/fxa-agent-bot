@@ -23,6 +23,11 @@ test('operator problems are named, other errors are not', () => {
   assert.match(operatorNext('gcloud'), /service account/);
 });
 
+test('a background job that ended posts one line, which says if the agent reads its log', () => {
+  assert.equal(render('agent-x', { type: 'job_done', name: 'functional', turn: true }).text, 'The background job `functional` ended. I am reading its log.');
+  assert.match(render('agent-x', { type: 'job_done', name: 'a`b', turn: false }).text, /`ab` ended\. Reply to have me read its log\.$/);
+});
+
 test('an operator error renders the plain message and its kind', () => {
   const msg = render('agent-x', { type: 'error', text: 'Reauthentication failed' });
   assert.equal(msg.operator, 'gcloud');

@@ -393,6 +393,8 @@ export function render(key, ev) {
       return { text: `${head}${noteLines(ev.notes)}` };
     }
     case 'target': return { text: ev.text || (ev.ok ? 'Switched.' : 'I did not switch.') };
+    // A run.sh --bg job ended. turn: the host sent the agent its log; else the cap for this message was reached.
+    case 'job_done': return { text: `The background job \`${esc(ev.name).replace(/`/g, '')}\` ended. ${ev.turn ? 'I am reading its log.' : 'Reply to have me read its log.'}` };
     case 'pushed': return { text: `Pushed \`${esc(ev.branch).replace(/`/g, '')}\`${repoOf(ev)}.${gh(ev.url) ? ` <${gh(ev.url)}|Open a PR from it> when you are ready, or keep steering here.` : ' Keep steering here, or open a PR from it on GitHub.'}${noteLines(ev.notes)}` };
     case 'error': {
       const op = operatorProblem(ev.text);
