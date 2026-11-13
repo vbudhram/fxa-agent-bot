@@ -392,6 +392,7 @@ export function render(key, ev) {
       // The session's totals are in the stop message and !usage, not here.
       return { text: `${head}${noteLines(ev.notes)}` };
     }
+    case 'target': return { text: ev.text || (ev.ok ? 'Switched.' : 'I did not switch.') };
     case 'pushed': return { text: `Pushed \`${esc(ev.branch).replace(/`/g, '')}\`${repoOf(ev)}.${gh(ev.url) ? ` <${gh(ev.url)}|Open a PR from it> when you are ready, or keep steering here.` : ' Keep steering here, or open a PR from it on GitHub.'}${noteLines(ev.notes)}` };
     case 'error': {
       const op = operatorProblem(ev.text);

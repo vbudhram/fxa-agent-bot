@@ -1,0 +1,13 @@
+{
+  "source": "synthetic: the agent opens a PR, then a team admin moves the work to PR 2738 (host: target)",
+  "sessions": [{ "turns": [
+    { "steps": ["Editing packages/fxa-settings/src/index.tsx"], "diff": [{ "file": "packages/fxa-settings/src/index.tsx", "added": 3, "removed": 1 }],
+      "end": { "status": "ready", "text": "The offset fix is done, and the tests pass." } },
+    { "steps": ["Reading the PR list"],
+      "events": [{ "type": "target", "ok": true, "text": "This work is now on https://github.com/mozilla/fxa/pull/2738, as a team admin asked.",
+        "url": "https://github.com/mozilla/fxa/pull/2738", "branch": "stor-55", "from": "agent-fake", "current": 1 }],
+      "end": { "status": "needs-input", "text": "Moving to PR 2738 now." } },
+    { "steps": ["Running git cherry-pick e253814"], "diff": [{ "file": "packages/fxa-settings/src/index.tsx", "added": 3, "removed": 1 }],
+      "end": { "status": "ready", "text": "The offset-limit-0 commit is on stor-55, and the tests pass." } }
+  ] }]
+}

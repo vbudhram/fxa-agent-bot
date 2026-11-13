@@ -18,7 +18,7 @@ import { teamChannels, reviewRounds } from './teams.js';
 import { ROUTINES_ENV, TICK_MS, NO_CHANNEL, inFlightGuard, muted, mutedReply, pollChannels, pollUsers } from './routines.js';
 import { ingest } from './db.js';
 import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs,
-  shipRepos, afterShip, shipAsk, asksForPr, treeFor, namedRepos, PR_FIELDS, prCardFor } from './stack.js';
+  shipRepos, afterShip, shipAsk, asksForPr, treeFor, namedRepos, PR_FIELDS, prCardFor, targetSwitch, otherOpen, targetsText } from './stack.js';
 import { asksForJira, JIRA_YES, draftCard, filedCard, changedCard, editModal, readEdit } from './jira-draft.js';
 import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateAllows, loadMembers, maySteer, mayTap, SHIP_ACTIONS, PR_ACTIONS, askedShip, askerPatch, shipHeld } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, fromAdmin, ADMIN, LINE_BREAK, laterMessage, slackLinks, threadFile,
@@ -1035,6 +1035,13 @@ async function deliverHeld(key) {
 async function stackCmd(s, text, m, client, note) {
   const p = parseStack(text);
   if (p.error) { await note(p.error); return; }
+  // A live one-repo session here: a team admin's checkout adds the PR as a target (the host checks it).
+  const live = s && fresh(s.key);
+  if (p.sub === 'checkout' && live?.state === 'active' && !live.trees?.length && adminOf(live, m.user)) {
+    const rest = text.replace(/^!stack\s+checkout\s+\S+/i, '').trim();
+    await steerAndAck(live, `Work on ${p.url}.${rest ? ` ${rest}` : ''}`, client, m.user, m.ts, `work on ${p.url}`);
+    return;
+  }
   if (s && LIVE.includes(fresh(s.key)?.state)) { await note('This thread has a running session. Use a new thread, or `!stop` first: the next session here then starts with your pick.'); return; }
   // Someone else's pick would start a session that replaces the owner's, as their tag must not (onMention).
   // A team admin may check out a PR here: the new session keeps the thread's owner (checkout).
@@ -2407,6 +2414,8 @@ async function pollOne(key) {
         sessions.patch(key, prPatch(fresh(key), r, { pr_url: ev.url, pr_follow_since: prView(fresh(key), r)?.pr_follow_since ?? Date.now(), pr_pushed_at: Date.now(), pr_follow_done: false }));
         if (r) sessions.patch(key, { pr_url: ev.url });
       }
+      // A team admin switched the thread to another target: the follower now reads its PR, the others wait parked.
+      if (ev.type === 'target' && ev.ok) await onTarget(key, ev).catch((e) => console.error('target', key, e.message));
       // The repos of a stack, for !pr <repo> and the buttons.
       if (ev.type === 'turn_end' && Array.isArray(ev.trees)) sessions.patch(key, { trees: ev.trees.map(({ name, slug, out, changes }) => ({ name, slug, out, changes })) });
       // The newest reply this turn could know of: a resume sends the thread's messages after it (resumePaused).
@@ -2538,6 +2547,8 @@ setInterval(() => {
 // the sandbox, once no turn is running. Not a stack's: its other repos may still be at work.
 async function endIfPrDone(s) {
   if (!s || s.repo || !s.pr_ended || !['active', 'pr_open'].includes(s.state) || s.status_ts || busy.has(s.key) || sessions.get(s.channel, s.thread_ts)?.key !== s.key) return false;
+  // The thread has other open targets: only this one ends, and the session stays.
+  if (otherOpen(s).length) { await endTarget(s.key, s.pr_url, s.pr_ended); sessions.patch(s.key, { end_pending: false }); return true; }
   const ok = await stopSession(s.key);
   if (ok) await postEnd(s.key, `${prEndedNote({ ...s.pr_seen, state: s.pr_ended })} Tag me here to start fresh from main.`, s.state === 'active');
   else if (!s.muted) await say(s, prEndedNote({ ...s.pr_seen, state: s.pr_ended }, ok)).catch(() => {});
@@ -2601,10 +2612,50 @@ async function followPrs() {
       if (['MERGED', 'CLOSED'].includes(cur.state) && await endIfPrDone(fresh(s.key))) continue; // in this pass, not the next one 30 s on
       if (cur.state === 'OPEN') await autoRound(prView(fresh(s.key), s.repo), prev, cur).catch((e) => console.error('auto round', s.key, e.message));
     }
+    // A thread's other targets: only their merge or close is news, read at the slower pace.
+    for (const s of sessions.all().filter(here).filter((x) => otherOpen(x).length)) {
+      for (const t of otherOpen(s).filter((x) => x.url)) {
+        const lf = `${s.key}|${t.url}`;
+        if (Date.now() - (lastFollow.get(lf) ?? 0) < 4 * FOLLOW_EVERY_MS) continue;
+        lastFollow.set(lf, Date.now());
+        const cur = await ctl.prStatus(s.key, null, t.url);
+        if (['MERGED', 'CLOSED'].includes(cur?.state)) await endTarget(s.key, t.url, cur.state).catch((e) => lost(s, e, 'target end'));
+      }
+    }
   } finally { following = false; }
 }
 const lastFollow = new Map();
 setInterval(followPrs, FOLLOW_EVERY_MS);
+// The thread's targets card: posted at the first switch, edited when a target switches or ends.
+async function postTargets(key) {
+  const s = fresh(key);
+  if (!s || (s.targets?.length ?? 0) < 2 || s.muted) return;
+  const text = targetsText(s);
+  if (s.targets_card_ts) { await app.client.chat.update({ channel: s.channel, ts: s.targets_card_ts, text }); return; }
+  const r = await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text });
+  sessions.patch(key, { targets_card_ts: r.ts });
+}
+async function onTarget(key, ev) {
+  sessions.patch(key, targetSwitch(fresh(key), ev));
+  await postTargets(key);
+  // The branch's writer was another thread: it stops following the PR, and it is told.
+  const m = /^thread:([^:]+):(.+)$/.exec(ev.took_from ?? ''), s = fresh(key);
+  if (!m || (m[1] === s.channel && m[2] === s.thread_ts)) return;
+  const old = sessions.get(m[1], m[2]);
+  if (old && ev.url && old.pr_url === ev.url) sessions.patch(old.key, { pr_follow_done: true });
+  const link = await app.client.chat.getPermalink({ channel: s.channel, message_ts: s.thread_ts }).then((r) => r.permalink, () => null);
+  await app.client.chat.postMessage({ channel: m[1], thread_ts: m[2], text: `A team admin moved \`${String(ev.branch).replace(/`/g, '')}\` to ${link || 'another thread'}. This thread no longer pushes to it.` }).catch(() => {});
+}
+// One target's PR merged or closed: the controller ends it, and the card says so.
+async function endTarget(key, url, state) {
+  const s = fresh(key);
+  if (!s?.targets?.length || !url) return;
+  sessions.patch(key, { targets: s.targets.map((t) => (t.url === url ? { ...t, state } : t)) });
+  await ctl.targetEnd(key, url, state).catch((e) => console.error('target-end', key, e.message));
+  await postTargets(key);
+  const left = fresh(key).targets.some((t) => t.state === 'open');
+  if (!fresh(key)?.muted) await say(s, `<${url}|PR ${url.match(/\d+$/)?.[0] ?? ''}> was ${state === 'MERGED' ? 'merged' : 'closed'}.${left ? ' The other work in this thread goes on.' : ''}`);
+}
 // The PR's card: its link message with the state line under it, edited when the line
 // changes. A session with no card (older, or one continued from another) gets one, once.
 async function updatePrCard(s, cur) {

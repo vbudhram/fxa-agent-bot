@@ -163,7 +163,9 @@ export const ste = (text) => new Promise((resolve) => {
   c.stdin.on('error', () => {});
   c.stdin.end(String(text ?? ''));
 });
-export const prStatus = async (key, repo) => { try { return JSON.parse((await run(['session', 'pr-status', key, ...(repo ? ['--repo', repo] : [])], { timeout: 60_000 })).trim() || 'null'); } catch { return null; } };
+export const prStatus = async (key, repo, url) => { try { return JSON.parse((await run(['session', 'pr-status', key, ...(url ? [url] : []), ...(repo ? ['--repo', repo] : [])], { timeout: 60_000 })).trim() || 'null'); } catch { return null; } };
+// A thread target's PR merged or closed: the controller ends that target (lib/targets.sh).
+export const targetEnd = (key, url, state) => run(['session', 'target-end', key, url, state], { timeout: 30_000 });
 // The desktop's gateway link when the ctl has one (FXA_DESKTOP_GATEWAY), else null.
 export const desktop = async (key, email) => {
   const out = await run(['session', 'desktop', key, ...(email ? [email] : [])], { timeout: 300_000 });

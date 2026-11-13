@@ -215,3 +215,30 @@ export function carryPrs(prs, moved) {
   if (!prs) return undefined;
   return Object.fromEntries(Object.entries(prs).map(([r, p]) => [r, moved ? { ...p, pr_card_ts: null, pr_card_head: null, pr_card_text: null } : { ...p }]));
 }
+
+// Thread targets (the controller's lib/targets.sh): a one-repo thread holds several PRs or branches.
+// The follower reads the current one through the top-level PR fields, as before; each other target
+// keeps its PR fields parked in .targets[i].pr until a switch makes it current again.
+export function targetSwitch(s, ev) {
+  const park = Object.fromEntries(PR_FIELDS.map((f) => [f, s?.[f] ?? null]));
+  const list = (s?.targets?.length ? s.targets : [{ url: s?.pr_url ?? null, branch: ev.from ?? null, state: 'open' }]).map((t) => ({ ...t }));
+  const was = s?.target_cur ?? 0;
+  if (list[was]) { list[was].pr = park; if (park.pr_ended) list[was].state = park.pr_ended; }
+  let i = list.findIndex((t) => (ev.url ? t.url === ev.url : t.branch === ev.branch));
+  if (i < 0) { list.push({ url: ev.url || null, branch: ev.branch ?? null, state: 'open' }); i = list.length - 1; }
+  const back = list[i].pr ?? {};
+  delete list[i].pr;
+  return { ...Object.fromEntries(PR_FIELDS.map((f) => [f, back[f] ?? null])), pr_url: ev.url || null,
+    ...(ev.url && !back.pr_follow_since ? { pr_follow_since: Date.now() } : {}), targets: list, target_cur: i };
+}
+
+// The targets that are still open, other than the current one.
+export const otherOpen = (s) => (s?.targets ?? []).filter((t, i) => i !== (s.target_cur ?? 0) && t.state === 'open');
+
+// The thread's targets card: one line for each, the current one marked.
+export function targetsText(s) {
+  const prNo = (u) => u?.match(/\/pull\/(\d+)$/)?.[1];
+  const line = (t, i) => `• ${t.url ? `<${t.url}|PR ${prNo(t.url) ?? t.url}>` : 'no PR yet'}${t.branch ? ` \`${String(t.branch).replace(/`/g, '')}\`` : ''} · ${
+    i === (s.target_cur ?? 0) && t.state === 'open' ? 'current' : t.state === 'open' ? 'open' : `ended (${String(t.state).toLowerCase()})`}`;
+  return `*This thread's work*\n${(s.targets ?? []).map(line).join('\n')}`;
+}

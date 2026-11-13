@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseStack, teamAlias, stackHelp, STACK_ADD, stackRepos, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, treeRows, valueRepo, prView, prPatch, followTargets, carryPrs,
-  shipRepos, afterShip, shipAsk, treeFor, namedRepos, shipHint } from '../src/stack.js';
+  shipRepos, afterShip, shipAsk, treeFor, namedRepos, shipHint, targetSwitch, otherOpen, targetsText } from '../src/stack.js';
 
 test('parseStack: pick, a team, a checkout, a bad link', () => {
   assert.deepEqual(parseStack('!stack'), { sub: 'pick' });
@@ -199,4 +199,23 @@ test('shipHint names the Open N PRs button, and leaves one repo alone', () => {
   assert.equal(shipHint('Done.\n\nTap Open PR below.', 2), 'Done.\n\nReply `open PR`, or tap Open 2 PRs.');
   assert.equal(shipHint('When ready, tap the Open PR button.', 3), 'When ready, reply `open PR`, or tap Open 3 PRs.');
   assert.equal(shipHint('Tap Open PR below.', 1), 'Tap Open PR below.');
+});
+
+test('targetSwitch: the old PR parks, the new one is current, and a switch back restores the old card', () => {
+  const p50 = 'https://github.com/mozilla/syncstorage-rs/pull/2750', p38 = 'https://github.com/mozilla/syncstorage-rs/pull/2738';
+  const s0 = { pr_url: p50, pr_card_ts: '1.1', pr_seen: { state: 'CLOSED' }, pr_ended: 'CLOSED' };
+  const s1 = { ...s0, ...targetSwitch(s0, { url: p38, branch: 'stor-55', from: 'agent-46e5fc' }) };
+  assert.equal(s1.pr_url, p38);
+  assert.equal(s1.pr_card_ts, null, 'the new PR gets its own card');
+  assert.equal(s1.pr_ended, null, "the old PR's end does not end the new one");
+  assert.equal(s1.target_cur, 1);
+  assert.deepEqual(s1.targets.map((t) => [t.branch, t.state]), [['agent-46e5fc', 'CLOSED'], ['stor-55', 'open']]);
+  assert.deepEqual(otherOpen(s1), [], 'a closed target is not followed');
+  assert.match(targetsText(s1), /PR 2738> `stor-55` · current/);
+  assert.match(targetsText(s1), /PR 2750> `agent-46e5fc` · ended \(closed\)/);
+  const s2 = { ...s1, ...targetSwitch(s1, { url: p50, branch: 'agent-46e5fc' }) };
+  assert.equal(s2.pr_card_ts, '1.1', 'a switch back finds its card again');
+  assert.equal(s2.target_cur, 0);
+  assert.equal(s2.targets.length, 2);
+  assert.equal(otherOpen({ ...s2, targets: s2.targets.map((t) => ({ ...t, state: 'open' })) }).length, 1);
 });
