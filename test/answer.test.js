@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { quickFirst, askId, answerBlocks, findingsOf, stepRows, rowTitle, doneLine, FIRST_ROW, seamless } from '../src/answer.js';
+import { quickFirst, askId, answerBlocks, findingsOf, handoffProfile, stepRows, rowTitle, doneLine, FIRST_ROW, seamless } from '../src/answer.js';
 
 test('a sentence about the mode never reaches the thread', () => {
   const slip = "Ready. What do you want to test? Give me a file or PR.\n\nIf you want new tests written or existing ones run, I can't do that from here. Tell me which and I'll hand it off.";
@@ -39,6 +39,17 @@ test('the reply says nothing about how it was made', () => {
 
 test('the session gets the findings and the reply so far', () => {
   assert.equal(findingsOf({ answer: 'At index.tsx:73.', upgrade: { findings: 'index.tsx:73-81' } }), 'index.tsx:73-81\n\nIts reply so far:\nAt index.tsx:73.');
+});
+
+test('an Android hand-off starts the Android team, only for a person who may start it there', () => {
+  const up = { upgrade: { findings: 'x', android: true } }, yes = () => true, no = () => false;
+  assert.equal(handoffProfile({}, up, yes), 'fxa-android');
+  assert.equal(handoffProfile({ profile: 'fxa' }, up, yes), 'fxa-android');
+  assert.equal(handoffProfile({ profile: 'fxa' }, up, no), 'fxa');
+  assert.equal(handoffProfile({}, { upgrade: { findings: 'x' } }, yes), undefined);
+  assert.equal(handoffProfile({ profile: 'monitor' }, up, yes), 'monitor');
+  assert.equal(handoffProfile({ resume_from: 'agent-1' }, up, yes), undefined);
+  assert.equal(handoffProfile({}, { upgrade: { android: 'true' } }, yes), undefined);
 });
 
 test('steps become the row a sandbox turn shows: a row per stage, a count within it', () => {

@@ -32,6 +32,12 @@ export const answerBlocks = (res) => [md(res.answer)];
 // What the session gets from the quick look: the findings, then the reply so far.
 export const findingsOf = (res) => [res.upgrade?.findings, res.answer && `Its reply so far:\n${res.answer}`].filter(Boolean).join('\n\n');
 
+// The team a quick look's hand-off starts: the Android team (Firefox source, emulator, Fenix) when the look asked
+// for Android and the person may start it there, else the thread's own. A resume or another team keeps its own.
+export const ANDROID_TEAM = process.env.ANDROID_PROFILE || 'fxa-android';
+export const handoffProfile = (p, res, may) =>
+  (res?.upgrade?.android === true && !p.resume_from && (!p.profile || p.profile === 'fxa') && may(ANDROID_TEAM) ? ANDROID_TEAM : p.profile);
+
 // The card and the first status row, the same for both paths.
 export const ON_IT = 'On it! The status below shows each step and how long it took.';
 export const FIRST_ROW = 'Working on it';

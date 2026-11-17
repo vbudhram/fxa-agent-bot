@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { readFileSync, readdirSync, lstatSync, writeFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as ctl from './ctl.js';
-import { quickFirst, askId, answerBlocks, findingsOf, stepRows, doneLine, stepCount, rowTitle, ON_IT, FIRST_ROW, seamless } from './answer.js';
+import { quickFirst, askId, answerBlocks, findingsOf, handoffProfile, stepRows, doneLine, stepCount, rowTitle, ON_IT, FIRST_ROW, seamless } from './answer.js';
 import { installErrorLog, slackRetry } from './errors.js';
 import * as sessions from './sessions.js';
 import * as inflight from './inflight.js';
@@ -338,7 +338,7 @@ async function begin(key, client) {
       return;
     }
     if (!(p = pending.get(key))) return;
-    if (r?.findings) pending.set(key, p = { ...p, findings: r.findings });
+    if (r?.findings) pending.set(key, p = { ...p, findings: r.findings, profile: r.profile ?? p.profile });
   }
   const { timer, card_ts, deadline, late, src_ts, ...rest } = p;
   if (late?.length) {
@@ -509,7 +509,7 @@ async function quickWith(key, p, client, status) {
     return null;
   }
   if (!pending.has(key)) { await status.done('Stopped'); return 'answered'; }
-  if (res?.upgrade) { await status.done(HANDOFF); return { findings: findingsOf(res) }; }
+  if (res?.upgrade) { await status.done(HANDOFF); return { findings: findingsOf(res), profile: handoffProfile(p, res, (t) => mayStart(t, p.words?.[0]?.user)) }; }
   if (!res?.answer || res.error) { await status.done(HANDOFF); console.error('quick_answer', key, 'no answer; starting a session'); return null; }
   // Nothing left once the slips are out: the agent declined instead of asking for the work, so do the work.
   const answer = seamless(res.answer);
