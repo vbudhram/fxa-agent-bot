@@ -704,6 +704,22 @@ test('the Diff message counts files from a plain unified diff too', async () => 
   assert.equal(diffStat('diff --git a/x b/x\n--- a/x\n+++ b/x\n-a\n+b\ndiff --git a/y b/y\n--- a/y\n+++ b/y\n+c\n'), '2 files changed, +2 −1');
 });
 
+test('investigation texts: a posted run gives one link line, and every other end names no report in Slack', async () => {
+  const { invStart, invEnd, invEndLine } = await import('../src/render.js');
+  const v = { key: 'FXA-123', url: 'https://example.atlassian.net/browse/FXA-123' }, n = `<${v.url}|FXA-123>`;
+  assert.equal(invStart({ investigate: v }), `Investigation of ${n} started.`);
+  assert.equal(invEnd('report', { ...v, posted: true }), `Investigation posted on ${n}`);
+  assert.equal(invEndLine('report', { ...v, posted: true }), `Investigation of ${n}: posted.`);
+  assert.equal(invEnd('failed', { ...v, posted: false }), `The investigation of ${n} failed, and nothing was posted on the ticket. A team admin can see why in History.`);
+  assert.equal(invEndLine('failed', v), `Investigation of ${n}: failed.`);
+  assert.equal(invEndLine('store', v), `Investigation of ${n}: not recorded.`);
+  // A url that is not the key's browse link shows the key only; a bad key shows neither.
+  assert.equal(invStart({ investigate: { key: 'FXA-123', url: 'https://evil.example/browse/FXA-9' } }), 'Investigation of FXA-123 started.');
+  assert.equal(invStart({ investigate: { key: 'FXA-1', url: 'https://x.example/browse/FXA-1|<!channel>' } }), 'Investigation of FXA-1 started.');
+  assert.equal(invStart({ investigate: { key: '<!channel>', url: v.url } }), 'Investigation of the ticket started.');
+  for (const s of ['report', 'failed', 'stopped', 'store', 'odd']) assert.doesNotMatch(invEnd(s, v), /^Investigation posted|report is in this thread|undefined/, s);
+});
+
 test('dependency fix texts: the start names the trigger, and each end code gives one fixed text with its next step', async () => {
   const { fixStart, fixEnd, fixEndLine, fixSkip, routineHint } = await import('../src/render.js');
   const url = 'https://github.com/mozilla/fxa/pull/90001', n = `<${url}|#90001>`, sha = '0123456789abcdef0123456789abcdef01234567';

@@ -26,7 +26,7 @@ import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel
 import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, roundOutcome, reviewNudge, reviewRound, reviewNote, roundAsk, pauseAsk, lastBotSaid, readyNote } from './render.js';
 import { randomBytes } from 'node:crypto';
-import { routineStart, routineSkip, routineEnd, routineEndLine, routineReport, routineHint, routineLabel, fixStart, fixEnd, fixEndLine, fixSkip } from './render.js';
+import { routineStart, routineSkip, routineEnd, routineEndLine, routineReport, routineHint, routineLabel, fixStart, fixEnd, fixEndLine, fixSkip, invStart, invEnd, invEndLine } from './render.js';
 import { render, rateLimitLine, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, logWord, shCmd, replayNote, toSomeoneElse, asideBlock, REBASE_PROMPT, operatorNext, fileRefs, distinctFiles, maskUpload, slackArgs, LOST_REPLY, mediaKind } from './render.js';
 
 const { App } = bolt;
@@ -3088,19 +3088,21 @@ async function endRoutine(key, end) {
   const at = { channel: s.channel, thread_ts: r.start_ts };
   // A dependency fix run shows ctl's state and fix code, also when this call changed nothing, and never a stderr line.
   const fix = r.fix && { state: a ? a.state : 'store', fix: { ...r.fix, ...a?.fix } };
+  // An investigation's report is the Jira comment ctl posts: the thread gets only ctl's fixed line.
+  const inv = r.investigate && { state: a ? a.state : 'store', v: { ...r.investigate, ...a?.investigate, posted: a?.changed === true && a.investigate?.posted === true } };
   // posted: the report is really in the thread, so the end text may say so (a blank report or a failed post is not).
   let posted = false;
   // ctl's own report wins when it gives one: a security review's ticket keys, in place of the findings.
   const report = a?.changed === true && typeof a.report === 'string' ? a.report : end.report;
-  if (report?.trim() && post) {
+  if (report?.trim() && post && !inv) {
     const rep = routineReport(report);
     posted = await (rep.snippet ? app.client.filesUploadV2({ channel_id: s.channel, thread_ts: r.start_ts, content: rep.text, filename: 'report.md', title: `${r.name} report` })
       : app.client.chat.postMessage({ ...at, text: rep.text })).then(() => true, (e) => { console.error('routine', key, `report post: ${e.data?.error ?? e.message}`); return false; });
   }
   // A later tag's hint follows what the thread shows: a report only when one posted, a PR only when the end names one.
   if (fresh(key)?.routine) sessions.patch(key, { routine: { ...fresh(key).routine, hint: posted ? (r.mode === 'tickets' ? 'tickets' : 'report') : shown.state === 'ok' ? 'pr' : 'run' } });
-  const text = fix ? fixEnd(fix.state, fix.fix, { post: a?.changed ? a.post : undefined, posted }) : routineEnd(r, { ...shown, post, posted, blank: !report?.trim(), next: a?.next });
-  await app.client.chat.update({ channel: s.channel, ts: r.start_ts, text: fix ? fixEndLine(fix.state, fix.fix) : routineEndLine(r, shown) }).catch((e) => console.error('routine', key, `start edit: ${e.data?.error ?? e.message}`));
+  const text = inv ? invEnd(inv.state, inv.v) : fix ? fixEnd(fix.state, fix.fix, { post: a?.changed ? a.post : undefined, posted }) : routineEnd(r, { ...shown, post, posted, blank: !report?.trim(), next: a?.next });
+  await app.client.chat.update({ channel: s.channel, ts: r.start_ts, text: inv ? invEndLine(inv.state, inv.v) : fix ? fixEndLine(fix.state, fix.fix) : routineEndLine(r, shown) }).catch((e) => console.error('routine', key, `start edit: ${e.data?.error ?? e.message}`));
   await app.client.chat.postMessage({ ...at, text, ...(fix ? { reply_broadcast: true } : {}) }).catch((e) => console.error('routine', key, `end post: ${e.data?.error ?? e.message}`));
 }
 // A routine run's events, as a state machine (D12, D19). Report mode never ships. A pr mode ships only a ready turn
@@ -3133,12 +3135,12 @@ async function routineEvent(key, ev) {
 async function startRoutine(r) {
   // No channel (D32): the same path, in NO_CHANNEL, where every Slack call does nothing.
   r = { ...r, channel: r.channel || NO_CHANNEL };
-  const start = await app.client.chat.postMessage({ channel: r.channel, text: r.fix ? fixStart(r) : routineStart(r) }).catch((e) => ({ error: e.data?.error ?? e.message }));
+  const start = await app.client.chat.postMessage({ channel: r.channel, text: r.investigate ? invStart(r) : r.fix ? fixStart(r) : routineStart(r) }).catch((e) => ({ error: e.data?.error ?? e.message }));
   if (!start.ts) return refuseRoutine(r, `the start message did not post in ${r.channel}: ${start.error}`);
   const key = sessions.newKey();
   // owner: the run's sentinel (D26), so nobody has owner buttons; the session's live status goes in this thread.
   sessions.put({ key, channel: r.channel, thread_ts: start.ts, owner: `routine:${r.team}/${r.routine}`, profile: r.team, source: 'routine', private: Boolean(r.private),
-    routine: { run: r.run, routine: r.routine, team: r.team, name: r.name, mode: r.mode, start_ts: start.ts, ...(r.fix ? { fix: r.fix } : {}) }, prompt: '', cursor: 0, state: 'queued', started_at: Date.now() });
+    routine: { run: r.run, routine: r.routine, team: r.team, name: r.name, mode: r.mode, start_ts: start.ts, ...(r.fix ? { fix: r.fix } : {}), ...(r.investigate ? { investigate: r.investigate } : {}) }, prompt: '', cursor: 0, state: 'queued', started_at: Date.now() });
   await launch(key, app.client);
 }
 // Watch streams run in their own process groups; end them with the bot.

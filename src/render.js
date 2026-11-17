@@ -864,6 +864,22 @@ export function fixEndLine(state, f) {
     : { report: 'no fix found', nochange: 'no fix found', stopped: 'stopped', skipped: 'not started', store: 'not recorded' }[state] ?? 'failed';
   return `Dependency fix for ${prRef(f)}: ${word}.`;
 }
+// An investigation run (on jira-label): fixed texts from ctl's answer, never agent text; the report is the Jira comment ctl posts.
+const invRef = (v) => {
+  const k = /^[A-Z][A-Z0-9]*-[0-9]+$/.test(String(v?.key ?? '')) ? v.key : '';
+  if (!k) return 'the ticket';
+  return /^https:\/\/[^\s|<>]+\/browse\/[A-Z][A-Z0-9]*-[0-9]+$/.test(String(v.url ?? '')) && v.url.endsWith(`/browse/${k}`) ? `<${v.url}|${k}>` : k;
+};
+export const invStart = (r) => `Investigation of ${invRef(r.investigate)} started.`;
+// state: ctl's, or 'store' when done did not answer. posted: ctl posted the comment on the ticket.
+export function invEnd(state, v) {
+  const n = invRef(v);
+  if (v?.posted === true) return `Investigation posted on ${n}`;
+  if (state === 'stopped') return `The investigation of ${n} was stopped. Nothing was posted on the ticket.`;
+  if (state === 'store') return `I could not record the result of the investigation of ${n}, so I post nothing from it.`;
+  return `The investigation of ${n} failed, and nothing was posted on the ticket. A team admin can see why in History.`;
+}
+export const invEndLine = (state, v) => `Investigation of ${invRef(v)}: ${v?.posted === true ? 'posted' : { stopped: 'stopped', store: 'not recorded' }[state] ?? 'failed'}.`;
 // A report as posted: mentions made inert; over the limit it goes as a file (snippet: true).
 export const ROUTINE_SNIPPET_AT = 2900;
 export const routineReport = (text) => { const t = defuse(text).trim(); return { text: t, snippet: t.length > ROUTINE_SNIPPET_AT }; };
