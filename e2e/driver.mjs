@@ -201,7 +201,7 @@ export async function runScenario(app, view, scenario) {
       if (w !== 'none') await settled(); // 'none': the next step goes at once, as a second person pressing at the same moment
       for (let s = snap.seq + 1; s <= Math.max(0, ...view.msgs.map((m) => m.seq)); s++) stepSeq[s] = i;
       const started = ctlLines().slice(snap.ctl).filter((l) => l.argv[0] === 'task');
-      if (started.length > 1) failures.push(`step ${i + 1}: ${started.length} sessions started by one step`);
+      if (started.length > (step.starts ?? 1)) failures.push(`step ${i + 1}: ${started.length} sessions started by one step`);
       const bad = step.expect ? stepChecks(step.expect, { view, snap, ctl: ctlLines(), roots, target: (on) => target(on, person, t), botLog: () => (existsSync(join(out, 'bot.log')) ? readFileSync(join(out, 'bot.log'), 'utf8') : '') }) : [];
       if (bad.length && step.known) xfail.push(`step ${i + 1} (${step.known}): ${bad.join('; ')}`);
       else if (bad.length) failures.push(...bad.map((b) => `step ${i + 1}: expected ${b}`));

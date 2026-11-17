@@ -1,0 +1,1 @@
+[{"run": 141, "routine": 31, "team": "fxa", "channel": "C_TEST", "name": "Investigate Jira tickets", "mode": "report", "template": "investigate", "repos": ["mozilla/fxa"], "branch": null, "private": false, "since": null, "trigger": "jira-label", "investigate": {"key": "FXA-123", "url": "https://example.atlassian.net/browse/FXA-123", "from": "@first"}}]

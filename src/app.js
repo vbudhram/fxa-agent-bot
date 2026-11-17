@@ -3104,6 +3104,10 @@ async function endRoutine(key, end) {
   const text = inv ? invEnd(inv.state, inv.v) : fix ? fixEnd(fix.state, fix.fix, { post: a?.changed ? a.post : undefined, posted }) : routineEnd(r, { ...shown, post, posted, blank: !report?.trim(), next: a?.next });
   await app.client.chat.update({ channel: s.channel, ts: r.start_ts, text: inv ? invEndLine(inv.state, inv.v) : fix ? fixEndLine(fix.state, fix.fix) : routineEndLine(r, shown) }).catch((e) => console.error('routine', key, `start edit: ${e.data?.error ?? e.message}`));
   await app.client.chat.postMessage({ ...at, text, ...(fix ? { reply_broadcast: true } : {}) }).catch((e) => console.error('routine', key, `end post: ${e.data?.error ?? e.message}`));
+  // A Slack session's 'host: investigate' (ctl's heads.investigate.from): its thread gets the same fixed line.
+  const from = inv && /^agent-[a-z0-9]+$/.test(String(r.investigate.from ?? '')) && fresh(r.investigate.from);
+  if (from?.channel && from.thread_ts) await app.client.chat.postMessage({ channel: from.channel, thread_ts: from.thread_ts, text })
+    .catch((e) => console.error('routine', key, `asker post: ${e.data?.error ?? e.message}`));
 }
 // A routine run's events, as a state machine (D12, D19). Report mode never ships. A pr mode ships only a ready turn
 // with changes, then waits for the PR (ok) or the wrap-up's error (failed). A ready turn with no change in a pr mode

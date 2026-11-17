@@ -63,7 +63,7 @@ export function globalChecks({ view, botLog, stepOf }) {
   // A post that says only "Done · 12s", "Worked for 10s · 2 steps" or "Wrapped up for the PR · ..." tells nobody anything (seen in real threads).
   fail('no_empty_post', bot.filter((m) => /^\s*((Done ·|Worked for) [\dm h]+s?( · \d+ steps?)?|Wrapped up for the (PR|push)\b.*)\s*$/.test(String(m.text ?? '').trim())).map((m) => `#${m.seq}: ${m.text}`));
   fail('no_pings', bot.filter((m) => /<!(here|channel|everyone)>|<!subteam\^/.test(said(m))).map((m) => `#${m.seq}`));
-  const twice = (list) => Object.values(Object.groupBy(list, (m) => `${stepOf(m.seq)}|${m.to ?? ''}|${said(m).trim()}`)).filter((g) => g.length > 1).map((g) => `#${g.map((m) => m.seq).join(', #')}: ${said(g[0]).slice(0, 80)}`);
+  const twice = (list) => Object.values(Object.groupBy(list, (m) => `${stepOf(m.seq)}|${m.to ?? ''}|${m.thread_ts ?? m.ts}|${said(m).trim()}`)).filter((g) => g.length > 1).map((g) => `#${g.map((m) => m.seq).join(', #')}: ${said(g[0]).slice(0, 80)}`);
   fail('no_double_post', twice(bot.filter((m) => !m.to)));
   fail('no_double_ephemeral', twice(bot.filter((m) => m.to)));
   fail('bot_errors', botLog.split('\n').filter((l) => /^E .*(TypeError|ReferenceError|SyntaxError|Cannot read|is not a function|event handler threw)/.test(l)).map((l) => l.slice(0, 160)));
