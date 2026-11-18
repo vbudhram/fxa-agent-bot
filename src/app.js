@@ -24,7 +24,7 @@ import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateA
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, fromAdmin, ADMIN, LINE_BREAK, laterMessage, slackLinks, threadFile,
   emptyTurn, EMPTY_RETRY, EMPTY_FALLBACK, sinceTurn } from './render.js';
 import * as cards from './cards.js';
-import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, spokeSincePush, roundOutcome, reviewNudge, reviewRound, reviewNote, roundAsk, pauseAsk, lastBotSaid, readyNote } from './render.js';
+import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, spokeSincePush, roundOutcome, reviewNudge, reviewRound, reviewNote, roundAsk, pauseAsk, lastBotSaid, readyNote, prBodyNote } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { routineStart, routineSkip, routineEnd, routineEndLine, routineReport, routineHint, routineLabel, fixStart, fixEnd, fixEndLine, fixSkip, invStart, invEnd, invEndLine } from './render.js';
 import { render, rateLimitLine, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, logWord, shCmd, replayNote, toSomeoneElse, asideBlock, REBASE_PROMPT, operatorNext, fileRefs, distinctFiles, maskUpload, slackArgs, LOST_REPLY, mediaKind, mediaUpload, PAUSE_ASK } from './render.js';
@@ -2566,6 +2566,11 @@ async function pollOne(key) {
         const ask = roundAsk(ev, fresh(key).round_by);
         sessions.patch(key, { round_by: null });
         if (ask && !fresh(key).muted) await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: ask }).catch((e) => console.error('round ask', key, e.data?.error ?? e.message));
+      }
+      // The agent wrote a new PR description: the host checks and writes it, with no push.
+      if (ev.pr_body && fresh(key) && !fresh(key).muted) {
+        const note = await ctl.prBody(key).then((out) => prBodyNote(true, out), (e) => prBodyNote(false, e.stderr || e.message));
+        await say(fresh(key), note).catch((e) => console.error('pr body', key, e.data?.error ?? e.message));
       }
       if (ev.jira_draft && fresh(key)) await jiraTurn(key).catch((e) => console.error('jira draft', key, e.data?.error ?? e.message));
       else if ((ev.type === 'turn_end' || ev.type === 'question') && fresh(key)) {

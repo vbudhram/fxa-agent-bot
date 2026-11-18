@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fromAdmin, ADMIN, threadStarter, endWord, render, operatorProblem, operatorNext, summaryLine, closestCommand, logWord, shCmd, replayNote, watchUrl, threadLine, maskSecrets, maskUpload, slackArgs, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, slackLinks, threadFile, emptyTurn, EMPTY_FALLBACK, fromOther, othersLines, laterMessage, rateLimitLine, mediaKind, mediaUpload, spokeSincePush, PAUSE_ASK } from '../src/render.js';
+import { fromAdmin, ADMIN, threadStarter, endWord, render, operatorProblem, operatorNext, summaryLine, closestCommand, logWord, shCmd, replayNote, watchUrl, threadLine, maskSecrets, maskUpload, slackArgs, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, slackLinks, threadFile, emptyTurn, EMPTY_FALLBACK, fromOther, othersLines, laterMessage, rateLimitLine, mediaKind, mediaUpload, spokeSincePush, PAUSE_ASK, prBodyNote } from '../src/render.js';
 
 test('mediaKind: text files post as snippets up to 2 MB, media up to 50 MB, .har and others never', () => {
   for (const n of ['run.log', 'notes.txt', 'users.csv', 'result.json']) assert.equal(mediaKind(n, 10), 'text');
@@ -913,4 +913,14 @@ test('a host action card shows the target and the literal body, and only Deny wh
 test('a target event shows ctl text with no ping and no hidden link', () => {
   const t = render('agent-x', { type: 'target', ok: false, text: 'I did not switch: "<!channel> <https://evil.example|PR 5>" is not a PR or a branch.' }).text;
   assert.doesNotMatch(t, /<!channel>|\|PR 5>/);
+});
+
+test('prBodyNote: a pr-body turn says what the host did, and a refusal gives its reason', async () => {
+  assert.equal(prBodyNote(true, 'Updated the PR description: https://github.com/mozilla/fxa/pull/7\n'), 'Updated the PR description: https://github.com/mozilla/fxa/pull/7');
+  assert.equal(prBodyNote(false, 'ERROR: refusing to ship: personal or internal data in the PR: pr_body line 1: email\n       GitHub is public.'),
+    ':warning: I could not update the PR description: refusing to ship: personal or internal data in the PR: pr_body line 1: email');
+  assert.equal(prBodyNote(false, ''), ':warning: I could not update the PR description.');
+  const { readFileSync } = await import('node:fs');
+  const app = readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
+  assert.match(app, /if \(ev\.pr_body && fresh\(key\)[^\n]*\n[^\n]*ctl\.prBody\(key\)/);
 });

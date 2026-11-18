@@ -152,6 +152,7 @@ export const jiraUndo = (key, ticket, name) => run(['session', 'jira-undo', key,
 export const jiraEdit = (key, ticket, edit) => runIn(['session', 'jira-edit', key, ticket], JSON.stringify(edit));
 export const jiraQueue = (key, ticket) => run(['session', 'jira-queue', key, ticket], { timeout: 60_000 });
 export const prReady = (key, repo) => run(['session', 'pr-ready', key, ...(repo ? ['--repo', repo] : [])], { timeout: 60_000 });
+export const prBody = (key) => run(['session', 'pr-body', key], { timeout: 60_000 });
 // The STE lint the handoff check runs, on a reply's text: its problem lines, [] on any failure.
 const STE = join(dirname(CTL), 'skills/fxa-vm-handoff/ste.sh');
 export const ste = (text) => new Promise((resolve) => {

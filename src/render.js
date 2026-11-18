@@ -634,6 +634,12 @@ export const maskUpload = (args) => ({ ...args,
   ...(Buffer.isBuffer(args.file) && /\.(patch|diff)$/.test(args.filename ?? '') && { file: Buffer.from(maskSecrets(args.file.toString('utf8'))) }),
   ...(Array.isArray(args.file_uploads) && { file_uploads: args.file_uploads.map(maskUpload) }) });
 // The agent's files from one look, as one upload with one comment: an upload per file posted an empty message each.
+// prBodyNote <ok> <ctl stdout or stderr>   The thread line after a 'pr-body: ready' turn; a refusal gives ctl's first line, its reason.
+export const prBodyNote = (ok, out) => {
+  const line = String(out ?? '').trim().split('\n')[0].replace(/^ERROR: /, '').slice(0, 300);
+  return ok ? (line || 'Updated the PR description.') : `:warning: I could not update the PR description${line ? `: ${line}` : '.'}`;
+};
+
 export const mediaUpload = (channel_id, thread_ts, files) => ({ channel_id, thread_ts, initial_comment: 'Files from this turn',
   file_uploads: files.map(({ filename, kind, data }) => (kind === 'text' ? { filename, content: data.toString('utf8'), snippet_type: 'text' } : { filename, file: data })) });
 
