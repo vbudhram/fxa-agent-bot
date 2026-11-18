@@ -878,3 +878,8 @@ test('a host action card shows the target and the literal body, and only Deny wh
     assert.deepEqual(render('agent-x', { ...ev, ask }).blocks.at(-1).elements.map((b) => b.action_id), ['confirm_deny'], ask);
 });
 
+
+test('a target event shows ctl text with no ping and no hidden link', () => {
+  const t = render('agent-x', { type: 'target', ok: false, text: 'I did not switch: "<!channel> <https://evil.example|PR 5>" is not a PR or a branch.' }).text;
+  assert.doesNotMatch(t, /<!channel>|\|PR 5>/);
+});
