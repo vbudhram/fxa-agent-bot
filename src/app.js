@@ -24,7 +24,7 @@ import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateA
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, fromAdmin, ADMIN, LINE_BREAK, laterMessage, slackLinks, threadFile,
   emptyTurn, EMPTY_RETRY, EMPTY_FALLBACK, sinceTurn } from './render.js';
 import * as cards from './cards.js';
-import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, roundOutcome, reviewNudge, reviewRound, reviewNote, roundAsk, pauseAsk, lastBotSaid, readyNote } from './render.js';
+import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, spokeSincePush, roundOutcome, reviewNudge, reviewRound, reviewNote, roundAsk, pauseAsk, lastBotSaid, readyNote } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { routineStart, routineSkip, routineEnd, routineEndLine, routineReport, routineHint, routineLabel, fixStart, fixEnd, fixEndLine, fixSkip, invStart, invEnd, invEndLine } from './render.js';
 import { render, rateLimitLine, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, logWord, shCmd, replayNote, toSomeoneElse, asideBlock, REBASE_PROMPT, operatorNext, fileRefs, distinctFiles, maskUpload, slackArgs, LOST_REPLY, mediaKind, mediaUpload } from './render.js';
@@ -2989,6 +2989,8 @@ async function autoRound(s, prev, cur) {
     // A failure outside the change (a 5xx, a lost runner) gets one rerun first, not a round; it counts no round.
     const rerun = await ctl.ciRerun(s.key, s.repo);
     if (rerun) { pp(seen); await postMsg(s.key, { text: `CI failed outside the change, so I reran the failed jobs once: \`${rerun.replace(/[`<>&*_~]/g, '').slice(0, 400)}\`` }); return; }
+    // No round on top of a talk about it: this failure stays seen, so it does not fire later either.
+    if (spokeSincePush(s, Date.now())) { pp(seen); return; }
     job = { note: (why) => ciNote(cur, why), text: ciRound(cur, randomBytes(6).toString('hex')) };
   }
   if (!job) { if (seen) pp(seen); return; }

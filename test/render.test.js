@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fromAdmin, ADMIN, threadStarter, endWord, render, operatorProblem, operatorNext, summaryLine, closestCommand, logWord, shCmd, replayNote, watchUrl, threadLine, maskSecrets, maskUpload, slackArgs, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, slackLinks, threadFile, emptyTurn, EMPTY_FALLBACK, fromOther, othersLines, laterMessage, rateLimitLine, mediaKind, mediaUpload } from '../src/render.js';
+import { fromAdmin, ADMIN, threadStarter, endWord, render, operatorProblem, operatorNext, summaryLine, closestCommand, logWord, shCmd, replayNote, watchUrl, threadLine, maskSecrets, maskUpload, slackArgs, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, slackLinks, threadFile, emptyTurn, EMPTY_FALLBACK, fromOther, othersLines, laterMessage, rateLimitLine, mediaKind, mediaUpload, spokeSincePush } from '../src/render.js';
 
 test('mediaKind: text files post as snippets up to 2 MB, media up to 50 MB, .har and others never', () => {
   for (const n of ['run.log', 'notes.txt', 'users.csv', 'result.json']) assert.equal(mediaKind(n, 10), 'text');
@@ -688,6 +688,18 @@ test('maskUpload masks a text upload and leaves media as it is', () => {
   assert.equal(maskUpload({ filename: 'shot.png', file: png }).file, png);
   assert.deepEqual(maskUpload({ filename: `${tok}.png`, title: `shot ${tok}`, file: png }),
     { filename: 'ghp__masked.png', title: 'shot ghp_<masked>', file: png });
+});
+
+test('no automatic CI round while a person talks after the push; it stays seen', async () => {
+  const now = 10_000_000, push = now - 30 * 60_000;
+  assert.ok(spokeSincePush({ pr_pushed_at: push, last_person_at: now - 2 * 60_000 }, now));
+  assert.ok(spokeSincePush({ pr_pushed_at: push, off_list_at: now - 60_000 }, now));
+  assert.ok(!spokeSincePush({ pr_pushed_at: push, last_person_at: now - 11 * 60_000 }, now), 'an old message');
+  assert.ok(!spokeSincePush({ pr_pushed_at: now - 60_000, last_person_at: now - 2 * 60_000 }, now), 'a message before the push');
+  assert.ok(!spokeSincePush({ pr_pushed_at: push }, now));
+  const { readFileSync } = await import('node:fs');
+  const app = readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
+  assert.match(app, /seen = \{ ci_seen: ciKey \};[\s\S]{0,600}if \(spokeSincePush\(s, Date\.now\(\)\)\) \{ pp\(seen\); return; \}/);
 });
 
 test("a turn's files go up as one upload with a comment, masked file by file", () => {

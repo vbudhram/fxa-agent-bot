@@ -147,6 +147,9 @@ Reply in at most 4 lines. End with 'status: ready' if you asked nothing, else 's
 <<<COPILOT-${nonce}>>>
 ${comments.map((c) => `[id ${c.id}] ${c.path}:${c.line}\n${String(c.body).replaceAll(nonce, '')}`).join('\n\n')}
 <<</COPILOT-${nonce}>>>`;
+// A person wrote after the last push, under 10 minutes ago: the agent may have just talked the failure over with them.
+// last_person_at is the owner's steer and off_list_at another person's; a teammate allowed to ship sets neither.
+export const spokeSincePush = (s, now) => { const at = Math.max(s.last_person_at ?? 0, s.off_list_at ?? 0); return at > (s.pr_pushed_at ?? 0) && now - at < 10 * 60_000; };
 // The agent's turn for a CI failure. The links are the failing checks; the host attaches what it can read of CircleCI's.
 // Check names and links come from whoever posts the status: one line each, capped, fenced, never instructions.
 const ciValue = (v, nonce) => String(v).replace(/[\r\n]+/g, ' ').replaceAll(nonce, '').slice(0, 100);
