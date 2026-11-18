@@ -397,8 +397,10 @@ export function render(key, ev) {
     // literal text (rich_text), so no markup in it can hide a link or ping anyone. hidden: a private team's public channel.
     case 'confirm': {
       // The tap is the consent, so it may allow only a line the card shows whole.
-      const v = JSON.stringify({ key, n: ev.nonce, s: ev.sha }), ask = esc(ev.ask).replace(/`/g, '').slice(0, 300);
-      const deny = ev.hidden || String(ev.ask).length > 300;
+      // Deny when the shown line differs from the one that runs: cut, a backtick taken out, or a <...> form defused.
+      const raw = String(ev.ask ?? ''), shown = esc(raw).replace(/`/g, ''), ask = shown.slice(0, 300);
+      const v = JSON.stringify({ key, n: ev.nonce, s: ev.sha });
+      const deny = ev.hidden || shown.length > 300 || raw.includes('`') || defuse(raw) !== raw;
       // ctl _asks_card: no team admin's own words in that turn named the action and its target.
       const by = ev.who && ev.who !== 'host' ? `No team admin's own message named it (asked in ${esc(ev.who)}'s turn)` : 'No person started that turn';
       return {
