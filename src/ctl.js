@@ -38,14 +38,14 @@ const MCP = process.env.MCP_CONNECTORS;
 // repos: a team stack's picked repos (owner/name); checkout: an open PR to start on.
 // words: rows {user, ts, text} of a team admin's own message (--admin-words-file, lib/turn-words.sh).
 const wordsFile = (words) => (words?.length ? words.map((w) => JSON.stringify(w)).join('\n') + '\n' : '');
-export const task = ({ key, owner, prompt, resumeFrom, fresh, thread, isNew, runtime, profile, link, who, queuedS, findings, inboxDir, repos, checkout, words }) => withFile(prompt, (f) =>
+export const task = ({ key, owner, prompt, resumeFrom, fresh, thread, isNew, runtime, profile, link, who, queuedS, findings, inboxDir, repos, checkout, words, asker }) => withFile(prompt, (f) =>
   withFile(wordsFile(words), (wf) => withFile(findings ?? '', (ff) => run([...(profile ? ['--pipeline', profile] : []), 'task', '--source', 'slack', '--id', key, '--owner', owner, '--prompt-file', f,
     ...(thread ? ['--thread', thread, ...(isNew ? ['--new'] : [])] : []),
     ...(resumeFrom ? ['--resume-from', resumeFrom, ...(fresh ? ['--fresh'] : [])] : []), ...(runtime ? ['--runtime', runtime] : []),
     ...(repos?.length ? ['--repos', repos.join(',')] : []), ...(checkout ? ['--checkout', checkout] : []),
     ...(link ? ['--link', link] : []), ...(queuedS ? ['--queued-s', String(queuedS)] : []), ...(findings ? ['--findings-file', ff] : []), ...(inboxDir ? ['--inbox-dir', inboxDir] : []),
     ...(MCP !== undefined ? ['--mcp', MCP.replace(/\s+/g, '')] : []), ...(words?.length ? ['--admin-words-file', wf] : []),
-    ...(who?.name ? ['--owner-name', who.name] : []), ...(who?.image ? ['--owner-image', who.image] : [])]))));
+    ...(who?.name ? ['--owner-name', who.name] : []), ...(who?.image ? ['--owner-image', who.image] : []), ...(asker ? ['--asker-name', asker] : [])]))));
 
 // Routines (epic i168). A routine run takes its prompt, repos and owner from its claimed row, so the task
 // call passes only where it runs; ctl refuses any other option for --source routine.

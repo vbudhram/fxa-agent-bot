@@ -56,7 +56,7 @@ function _pr(d) {
   const ciLine = d.ci === 'fail' ? `CI failed on ${(d.failing ?? []).slice(0, 2).map(pill).join(', ') || 'a check'}${d.checks ? ` · ${num(d.checks) - num(d.failed)} of ${d.checks} passed` : ''}`
     : d.ci === 'pass' ? `✓ CI passed${d.checks ? ` · ${d.checks} checks` : ''}` : d.ci === 'pending' ? `CI running${d.running ? ` · ${d.running} checks left` : ''}` : 'No CI result yet';
   const rev = changers.length ? `Changes requested by ${changers.slice(0, 3).join(', ')}` : approvers.length ? `Approved by ${approvers.slice(0, 3).join(', ')}` : 'No review yet';
-  const jiraLine = d.jira ? `Jira ${link(jiraUrl(d.jira), d.jira)}` : 'No Jira ticket';
+  const jiraLine = d.jira ? `Jira ${link(jiraUrl(d.jira), d.jira)}` : '';
   // The large fixes the bot pushed on its own, against the team's cap, once one ran: a tap is needed after the cap.
   const rounds = num(d.rounds) > 0 && `Large fixes on my own: ${num(d.rounds)} of ${num(d.rounds_max)}`;
   // State buttons in order: conflict, review changes, draft with green CI, no Jira.

@@ -297,7 +297,8 @@ async function onMention({ event, body, client }) {
     const aliases = Object.fromEntries((info?.repos ?? []).filter((r) => r.aliases?.length).map((r) => [r.slug, r.aliases]));
     // The card names a private team's repos, so it waits for the channel check in begin() there.
     if (info && (card || repos) && (info.private === false || await codeAllowed({ private: true, channel: event.channel }, client)))
-      await client.chat.postMessage({ channel: event.channel, thread_ts, ...teamCard(info, repos ?? (picked ? choice.repos : null)) }).catch(() => {});
+      // Only the person who tagged needs the setup; others in the thread do not.
+      await client.chat.postEphemeral({ channel: event.channel, user: event.user, thread_ts, ...teamCard(info, repos ?? (picked ? choice.repos : null)) }).catch(() => {});
     if (pending.has(key)) pending.set(key, { ...pending.get(key), ...(repos ? { repos } : {}), ...(Object.keys(aliases).length ? { aliases } : {}) });
   };
   // Another team's session: say which repos it can touch, and how, before it starts.
@@ -581,7 +582,9 @@ async function launch(key, client, since = Date.now(), retry = false) {
       throw Object.assign(new Error('in line'), { stderr: 'an earlier request waits in line: cap 0 (FXA_SESSION_MAX)' });
     }
     // Together, not one after the other: both are on the path to the first status.
-    const [link, who] = await Promise.all([linkP, routine ? null : whoIs(app.client, s.owner)]);
+    // A resume keeps the thread's owner; the person whose tag started it is the turn's asker.
+    const writer = s.words?.[0]?.user, byOther = !routine && writer && writer !== s.owner;
+    const [link, who, asker] = await Promise.all([linkP, routine ? null : whoIs(app.client, s.owner), byOther ? whoIs(app.client, writer) : null]);
     // A request that waited at the cap reports the wait, for the dashboard's load card.
     const queuedS = s.queued_note ? Math.round((Date.now() - since) / 1000) : undefined;
     // Files from the tag, or from a queued or paused session, ship with the boot: the first turn has them.
@@ -602,7 +605,7 @@ async function launch(key, client, since = Date.now(), retry = false) {
     inbox = inboxes.get(key);
     if (routine) await ctl.routineTask({ key, profile: s.profile, run: s.routine.run, thread: s.channel === NO_CHANNEL ? undefined : `${s.channel}:${s.thread_ts}`, link });
     else await ctl.task({ key, owner: s.owner, prompt: s.prompt + (inbox?.note ?? ''), inboxDir: inbox?.note ? inbox.dir : undefined, resumeFrom: s.resume_from, fresh: s.fresh, thread: `${s.channel}:${s.thread_ts}`, isNew: s.is_new, runtime: s.resume_from ? undefined : s.runtime, profile: s.profile, link, who, queuedS, findings: s.findings, repos: s.repos, checkout: s.checkout,
-      words: (s.words ?? []).filter((w) => mayConsent(s, w.user)) });
+      words: (s.words ?? []).filter((w) => mayConsent(s, w.user)), asker: asker?.name });
     dropInbox(key, inbox); // task copied them
   } catch (e) {
     if (!/cap \d+ \(FXA_SESSION_MAX\)/.test(e.stderr ?? '')) dropInbox(key, inbox);
