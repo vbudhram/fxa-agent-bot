@@ -392,7 +392,8 @@ export function render(key, ev) {
       // The session's totals are in the stop message and !usage, not here.
       return { text: `${head}${noteLines(ev.notes)}` };
     }
-    case 'target': return { text: ev.text || (ev.ok ? 'Switched.' : 'I did not switch.') };
+    // ctl's refusal repeats the agent's ref, so the text is agent text.
+    case 'target': return { text: esc(ev.text) || (ev.ok ? 'Switched.' : 'I did not switch.') };
     // A host: line that no team admin's own words allowed (ctl _asks_card). A team admin's Allow runs it once. The body is
     // literal text (rich_text), so no markup in it can hide a link or ping anyone. hidden: a private team's public channel.
     case 'confirm': {
