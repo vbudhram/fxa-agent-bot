@@ -816,8 +816,8 @@ async function onMessage({ message, client, replay = false }) {
   if (!s.last_ts || message.ts > s.last_ts) sessions.patch(s.key, { last_ts: message.ts });
   let text = strip(message.text);
   if (!text && !message.files?.length) return;
-  // Only the owner's (as !pause), and only while it runs: a reply to a paused session still resumes it.
-  if (PAUSE_ASK.test(text) && boss(s, message.user) && fresh(s.key)?.state === 'active') text = '!pause';
+  // Only the owner's, and only while it runs: mid-turn it interrupts (!pause refuses then), else it pauses.
+  if (PAUSE_ASK.test(text) && boss(s, message.user) && fresh(s.key)?.state === 'active') text = fresh(s.key).status_ts ? '!interrupt' : '!pause';
   if (text.startsWith('!')) { await bang(s, text, { user: message.user, channel: message.channel, thread_ts: message.thread_ts, ts: message.ts, replay }, client); return; }
   // A message to someone else (it tags a person, not the bot) gets no reply; the
   // agent sees it with the next message it does get.

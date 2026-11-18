@@ -697,7 +697,7 @@ test('a whole reply of pause, stop or hold is !pause; a longer one steers', asyn
     assert.ok(!PAUSE_ASK.test(t), t);
   const { readFileSync } = await import('node:fs');
   const app = readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
-  assert.match(app, /if \(PAUSE_ASK\.test\(text\) && boss\(s, message\.user\) && fresh\(s\.key\)\?\.state === 'active'\) text = '!pause';\n\s*if \(text\.startsWith\('!'\)\) \{ await bang\(s, text/);
+  assert.match(app, /if \(PAUSE_ASK\.test\(text\) && boss\(s, message\.user\) && fresh\(s\.key\)\?\.state === 'active'\) text = fresh\(s\.key\)\.status_ts \? '!interrupt' : '!pause';\n\s*if \(text\.startsWith\('!'\)\) \{ await bang\(s, text/);
 });
 
 test('no automatic CI round while a person talks after the push; it stays seen', async () => {
