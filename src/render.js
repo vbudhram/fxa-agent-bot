@@ -904,9 +904,23 @@ export const ROUTINE_SNIPPET_AT = 2900;
 export const routineReport = (text) => { const t = defuse(text).trim(); return { text: t, snippet: t.length > ROUTINE_SNIPPET_AT }; };
 // report_as message: the report replaces the run's start message, as a person's daily post; Slack shows up to 40,000 characters.
 export const ROUTINE_MESSAGE_AT = 12000;
+// The label comes from the URL itself, so a short link cannot hide where it goes (defuse drops any agent label).
+const LINK_LABELS = [
+  [/^https:\/\/[\w-]+\.atlassian\.net\/browse\/([A-Z][A-Z0-9]*-\d+)$/, (m) => m[1]],
+  [/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/(\d+)$/, (m) => `#${m[1]}`],
+  [/^https:\/\/[\w-]+\.sentry\.io\/issues\/([\w-]+)\/?$/, (m) => m[1]],
+  [/^https:\/\/app\.circleci\.com\/pipelines\/github\/[\w.-]+\/[\w.-]+\/(\d+)$/, (m) => `pipeline ${m[1]}`],
+  [/^https:\/\/bugzilla\.mozilla\.org\/show_bug\.cgi\?id=(\d+)$/, (m) => `bug ${m[1]}`],
+  [/^https:\/\/yardstick\.mozilla\.org\//, () => 'dashboard'],
+];
+const shortLinks = (t) => t.replace(/<?(https:\/\/[^\s<>|`]+)>?/g, (all, url) => {
+  const tail = url.match(/[).,;:!?]+$/)?.[0] ?? '', u = url.slice(0, url.length - tail.length);
+  for (const [re, label] of LINK_LABELS) { const m = u.match(re); if (m) return `<${u}|${label(m)}>${tail}`; }
+  return all;
+});
 export const routineReportPlan = (r, text) => {
   const rep = routineReport(text), message = r.report_as === 'message' && rep.text.length <= ROUTINE_MESSAGE_AT;
-  return { ...rep, message, snippet: !message && rep.snippet };
+  return { ...rep, text: message ? shortLinks(rep.text) : rep.text, message, snippet: !message && rep.snippet };
 };
 // The Slack client's rate_limited event gives { url, body }; the method is the URL's last part.
 export const rateLimitLine = (sec, info) => `slack rate limited: ${info?.method || String(info?.url ?? '').split('/').pop() || 'a call'} waits ${sec}s`;

@@ -134,6 +134,20 @@ test('report_as message: the report is the start message up to its limit, else i
   assert.match(routineEnd(R, { state: 'report', post: true, posted: true, above: true }), /^Code review: the report is the message above\. No code changed\./);
 });
 
+test('report_as message: a known link gets a short label taken from its URL; an agent label is dropped', () => {
+  const t = routineReportPlan({ report_as: 'message' }, [
+    '• https://mozilla-hub.atlassian.net/browse/FXA-15069 — x (<https://github.com/mozilla/fxa/pull/21772>).',
+    '• https://mozilla.sentry.io/issues/FXA-CONTENT-1MF6, https://app.circleci.com/pipelines/github/mozilla/fxa/75198',
+    '• https://bugzilla.mozilla.org/show_bug.cgi?id=1999 https://yardstick.mozilla.org/d/abc/?orgId=1&viewPanel=2',
+    '• <https://evil.example/x|FXA-1> https://example.com/other'].join('\n')).text.split('\n');
+  assert.equal(t[0], '• <https://mozilla-hub.atlassian.net/browse/FXA-15069|FXA-15069> — x (<https://github.com/mozilla/fxa/pull/21772|#21772>).');
+  assert.equal(t[1], '• <https://mozilla.sentry.io/issues/FXA-CONTENT-1MF6|FXA-CONTENT-1MF6>, <https://app.circleci.com/pipelines/github/mozilla/fxa/75198|pipeline 75198>');
+  assert.equal(t[2], '• <https://bugzilla.mozilla.org/show_bug.cgi?id=1999|bug 1999> <https://yardstick.mozilla.org/d/abc/?orgId=1&viewPanel=2|dashboard>');
+  assert.equal(t[3], '• <https://evil.example/x> https://example.com/other');
+  // A thread report keeps its URLs as written.
+  assert.equal(routineReportPlan({}, 'https://github.com/mozilla/fxa/pull/1').text, 'https://github.com/mozilla/fxa/pull/1');
+});
+
 test('a routine thread says a report is there only when one posted, and its hint follows how the run ended', () => {
   assert.match(routineEnd(R, { state: 'report', post: true, posted: false }), /^Code review: the run ended with no report I could post here\..*History/);
   assert.doesNotMatch(routineEnd(R, { state: 'report', post: true, posted: false }), /the report is in this thread/);
