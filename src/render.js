@@ -918,9 +918,20 @@ const shortLinks = (t) => t.replace(/<?(https:\/\/[^\s<>|`]+)>?/g, (all, url) =>
   for (const [re, label] of LINK_LABELS) { const m = u.match(re); if (m) return `<${u}|${label(m)}>${tail}`; }
   return all;
 });
-export const routineReportPlan = (r, text) => {
+// A bold first line becomes the header; each paragraph a section; foot (host facts only) a context line. undefined
+// when Slack's limits (50 blocks, 3,000 chars a section) do not hold: the post is then the text alone.
+const reportBlocks = (text, foot) => {
+  const parts = text.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean), title = parts[0]?.match(/^\*([^*\n]{1,140})\*$/);
+  const blocks = [...(title ? [{ type: 'header', text: { type: 'plain_text', text: title[1], emoji: true } }] : []),
+    ...parts.slice(title ? 1 : 0).map((p) => ({ type: 'section', text: { type: 'mrkdwn', text: p } })),
+    ...(foot ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: foot }] }] : [])];
+  return blocks.length <= 50 && blocks.every((x) => x.type !== 'section' || x.text.text.length <= 3000) ? blocks : undefined;
+};
+export const routineFoot = (ms, next) => `Ran ${Math.max(1, Math.round(ms / 60_000))} min${next ? ` · Next run ${dateToken(next)}` : ''}`;
+export const routineReportPlan = (r, text, foot) => {
   const rep = routineReport(text), message = r.report_as === 'message' && rep.text.length <= ROUTINE_MESSAGE_AT;
-  return { ...rep, text: message ? shortLinks(rep.text) : rep.text, message, snippet: !message && rep.snippet };
+  const t = message ? shortLinks(rep.text) : rep.text;
+  return { ...rep, text: t, message, snippet: !message && rep.snippet, blocks: message ? reportBlocks(t, foot) : undefined };
 };
 // The Slack client's rate_limited event gives { url, body }; the method is the URL's last part.
 export const rateLimitLine = (sec, info) => `slack rate limited: ${info?.method || String(info?.url ?? '').split('/').pop() || 'a call'} waits ${sec}s`;

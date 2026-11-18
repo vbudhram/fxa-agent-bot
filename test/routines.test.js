@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { routineStart, routineEnd, routineEndLine, routineSkip, routineHint, routineReport, routineReportPlan, ROUTINE_MESSAGE_AT, dateToken } from '../src/render.js';
+import { routineStart, routineEnd, routineEndLine, routineSkip, routineHint, routineReport, routineReportPlan, routineFoot, ROUTINE_MESSAGE_AT, dateToken } from '../src/render.js';
 import { botChannels, pollChannels, workspaceUsers } from '../src/routines.js';
 
 const R = { name: 'Code review', team: 'fxa', template: 'code-review', repos: ['mozilla/fxa'], branch: 'main', mode: 'pr+notes', since: 1792414800 };
@@ -144,6 +144,15 @@ test('report_as message: a known link gets a short label taken from its URL; an 
   assert.equal(t[1], '• <https://mozilla.sentry.io/issues/FXA-CONTENT-1MF6|FXA-CONTENT-1MF6>, <https://app.circleci.com/pipelines/github/mozilla/fxa/75198|pipeline 75198>');
   assert.equal(t[2], '• <https://bugzilla.mozilla.org/show_bug.cgi?id=1999|bug 1999> <https://yardstick.mozilla.org/d/abc/?orgId=1&viewPanel=2|dashboard>');
   assert.equal(t[3], '• <https://evil.example/x> https://example.com/other');
+  // A message report gets a header, a section per paragraph and the host's footer; the text stays the fallback.
+  const b = routineReportPlan({ report_as: 'message' }, '*FxA triage report · Wed*\n\n:jira: *Jira*\n• a\n\n:circleci: *CircleCI* · ok', 'Ran 4 min').blocks;
+  assert.deepEqual(b.map((x) => x.type), ['header', 'section', 'section', 'context']);
+  assert.equal(b[0].text.text, 'FxA triage report · Wed');
+  assert.equal(b[1].text.text, ':jira: *Jira*\n• a');
+  assert.equal(b[3].elements[0].text, 'Ran 4 min');
+  assert.match(routineFoot(238_000, 1795096800), /^Ran 4 min · Next run <!date\^1795096800\^/);
+  assert.equal(routineReportPlan({ report_as: 'message' }, 'x\n\n' + 'y'.repeat(3001)).blocks, undefined);
+  assert.equal(routineReportPlan({}, '*T*\n\nx').blocks, undefined);
   // A thread report keeps its URLs as written.
   assert.equal(routineReportPlan({}, 'https://github.com/mozilla/fxa/pull/1').text, 'https://github.com/mozilla/fxa/pull/1');
 });
