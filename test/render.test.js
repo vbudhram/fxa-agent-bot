@@ -857,7 +857,7 @@ test('a replayed ! command does not run, and the note says to send it again', ()
 });
 
 test('a host action card shows the target and the literal body, and only Deny where the body may not show', () => {
-  const ev = { type: 'confirm', nonce: 'a'.repeat(32), sha: 'b'.repeat(64), ask: 'comment `x`', target: 'mozilla/fxa#5 (PR by alice)', body: 'Hi <@U1> [x](https://evil)', who: 'Bo' };
+  const ev = { type: 'confirm', nonce: 'a'.repeat(32), sha: 'b'.repeat(64), ask: 'comment x', target: 'mozilla/fxa#5 (PR by alice)', body: 'Hi <@U1> [x](https://evil)', who: 'Bo' };
   const c = render('agent-x', ev);
   assert.match(c.blocks[0].text.text, /run `comment x` on \*mozilla\/fxa#5 \(PR by alice\)\*\. No team admin's own message named it \(asked in Bo's turn\)/);
   assert.deepEqual(c.blocks[1], { type: 'rich_text', elements: [{ type: 'rich_text_preformatted', elements: [{ type: 'text', text: 'Hi <@U1> [x](https://evil)' }] }] });
@@ -870,4 +870,11 @@ test('a host action card shows the target and the literal body, and only Deny wh
   assert.equal(h.blocks.some((b) => b.type === 'rich_text'), false);
   const long = render('agent-x', { ...ev, ask: `comment ${'x'.repeat(300)}` });
   assert.deepEqual(long.blocks.at(-1).elements.map((b) => b.action_id), ['confirm_deny']);
+  // Under 300 raw, but each & grows on the card: the cut would hide the tail.
+  const amp = render('agent-x', { ...ev, ask: `comment 1 ${'&&'.repeat(10)}${' x'.repeat(130)} && tail` });
+  assert.deepEqual(amp.blocks.at(-1).elements.map((b) => b.action_id), ['confirm_deny']);
+  // The card would show a different line than the one that runs.
+  for (const ask of ['comment `x`', 'comment <!channel> 5', 'comment <https://a.example|PR 5>'])
+    assert.deepEqual(render('agent-x', { ...ev, ask }).blocks.at(-1).elements.map((b) => b.action_id), ['confirm_deny'], ask);
 });
+
