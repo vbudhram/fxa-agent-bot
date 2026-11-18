@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fromAdmin, ADMIN, threadStarter, endWord, render, operatorProblem, operatorNext, summaryLine, closestCommand, logWord, shCmd, replayNote, watchUrl, threadLine, maskSecrets, maskUpload, slackArgs, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, slackLinks, threadFile, emptyTurn, EMPTY_FALLBACK, fromOther, othersLines, laterMessage, rateLimitLine, mediaKind, mediaUpload, spokeSincePush } from '../src/render.js';
+import { fromAdmin, ADMIN, threadStarter, endWord, render, operatorProblem, operatorNext, summaryLine, closestCommand, logWord, shCmd, replayNote, watchUrl, threadLine, maskSecrets, maskUpload, slackArgs, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, slackLinks, threadFile, emptyTurn, EMPTY_FALLBACK, fromOther, othersLines, laterMessage, rateLimitLine, mediaKind, mediaUpload, spokeSincePush, PAUSE_ASK } from '../src/render.js';
 
 test('mediaKind: text files post as snippets up to 2 MB, media up to 50 MB, .har and others never', () => {
   for (const n of ['run.log', 'notes.txt', 'users.csv', 'result.json']) assert.equal(mediaKind(n, 10), 'text');
@@ -688,6 +688,16 @@ test('maskUpload masks a text upload and leaves media as it is', () => {
   assert.equal(maskUpload({ filename: 'shot.png', file: png }).file, png);
   assert.deepEqual(maskUpload({ filename: `${tok}.png`, title: `shot ${tok}`, file: png }),
     { filename: 'ghp__masked.png', title: 'shot ghp_<masked>', file: png });
+});
+
+test('a whole reply of pause, stop or hold is !pause; a longer one steers', async () => {
+  for (const t of ['pause', 'Stop', 'stop.', 'HOLD!', 'pause for now', 'stop please', 'hold for now, please.', 'please pause', 'Pause for now!'])
+    assert.ok(PAUSE_ASK.test(t), t);
+  for (const t of ['stop doing X and do Y', 'stop the server', 'pause the tests', "don't stop", 'hold on', 'stop?', 'pausefor now', 'why did you stop', ''])
+    assert.ok(!PAUSE_ASK.test(t), t);
+  const { readFileSync } = await import('node:fs');
+  const app = readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
+  assert.match(app, /if \(PAUSE_ASK\.test\(text\) && boss\(s, message\.user\) && fresh\(s\.key\)\?\.state === 'active'\) text = '!pause';\n\s*if \(text\.startsWith\('!'\)\) \{ await bang\(s, text/);
 });
 
 test('no automatic CI round while a person talks after the push; it stays seen', async () => {

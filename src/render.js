@@ -539,6 +539,8 @@ export const HELP = [
   'A reply in the thread steers me. Once others join the thread, tag me so I know a reply is for me. After a pause, a reply or a tag picks the work up again; after a stop, a tag does. Once the PR merges or closes, a tag starts something new.',
 ].join('\n');
 
+// A whole reply that only asks to pause ("stop.", "pause for now please") is !pause; "stop doing X" still steers.
+export const PAUSE_ASK = /^(?:please\s+)?(?:pause|stop|hold)(?:[\s,]+(?:for now|please))*[\s.!]*$/i;
 // "Did you mean": the closest command, when it is close.
 export function closestCommand(cmd) {
   const dist = (a, b) => {

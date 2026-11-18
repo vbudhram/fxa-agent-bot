@@ -27,7 +27,7 @@ import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, spokeSincePush, roundOutcome, reviewNudge, reviewRound, reviewNote, roundAsk, pauseAsk, lastBotSaid, readyNote } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { routineStart, routineSkip, routineEnd, routineEndLine, routineReport, routineHint, routineLabel, fixStart, fixEnd, fixEndLine, fixSkip, invStart, invEnd, invEndLine } from './render.js';
-import { render, rateLimitLine, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, logWord, shCmd, replayNote, toSomeoneElse, asideBlock, REBASE_PROMPT, operatorNext, fileRefs, distinctFiles, maskUpload, slackArgs, LOST_REPLY, mediaKind, mediaUpload } from './render.js';
+import { render, rateLimitLine, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, logWord, shCmd, replayNote, toSomeoneElse, asideBlock, REBASE_PROMPT, operatorNext, fileRefs, distinctFiles, maskUpload, slackArgs, LOST_REPLY, mediaKind, mediaUpload, PAUSE_ASK } from './render.js';
 
 const { App } = bolt;
 installErrorLog(ctl.errorsPush);
@@ -816,6 +816,8 @@ async function onMessage({ message, client, replay = false }) {
   if (!s.last_ts || message.ts > s.last_ts) sessions.patch(s.key, { last_ts: message.ts });
   let text = strip(message.text);
   if (!text && !message.files?.length) return;
+  // Only the owner's (as !pause), and only while it runs: a reply to a paused session still resumes it.
+  if (PAUSE_ASK.test(text) && boss(s, message.user) && fresh(s.key)?.state === 'active') text = '!pause';
   if (text.startsWith('!')) { await bang(s, text, { user: message.user, channel: message.channel, thread_ts: message.thread_ts, ts: message.ts, replay }, client); return; }
   // A message to someone else (it tags a person, not the bot) gets no reply; the
   // agent sees it with the next message it does get.
