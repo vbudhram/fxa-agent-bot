@@ -29,3 +29,11 @@ test('slackRetry stops at once on an error from the bot data, and lets network a
   assert.doesNotThrow(() => slackRetry(wrap(new Error('A rate limit was exceeded (url: x, retry-after: 3)'))));
   assert.doesNotThrow(() => slackRetry(Object.assign(new Error('An HTTP protocol error occurred'), { code: 'slack_webapi_http_error' })));
 });
+
+test('a ctl failure with no stderr records the exit and the stdout tail, not the argv', () => {
+  const e = Object.assign(new Error('Command failed: /x/ctl task --owner-name bob'), { cmd: '/x/ctl', code: 1, stderr: '', stdout: 'starting\nERROR: no slot\n' });
+  const m = toRecord(['session start', 'agent-abc123', e]).message;
+  assert.match(m, /exit 1/); assert.match(m, /no slot/); assert.doesNotMatch(m, /owner-name/);
+  const k = Object.assign(new Error('Command failed: /x/ctl task'), { cmd: '/x/ctl', killed: true, signal: 'SIGTERM', stderr: '', stdout: '' });
+  assert.match(toRecord(['session start', k]).message, /timed out: no output/);
+});
