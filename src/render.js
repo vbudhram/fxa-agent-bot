@@ -183,8 +183,9 @@ export function prChanges(prev, cur, { ciByRound = false, endByStop = false, jir
     const infraOnly = cur.failing.length && cur.failing.every((n) => cur.infra.includes(n));
     out.push(`CI failed: ${esc(cur.failing.join(', '))}.${infraOnly ? ' That is a known failure in the repo\'s CI setup, not in the change.' : ''}${checks}`);
   } else if (cur.ci !== was.ci && cur.ci === 'pass') {
-    // A draft's green CI shows on the PR card, with its Mark ready button: no post (reviewNudge comes after a day).
-    out.push(cur.draft ? `CI passed.${link('The PR')} is a draft, so nobody can merge it yet.` : `CI passed.${link('Review and approve the PR')}`);
+    // A post, not the card: the thread's PR card has only Open (cards.prFromStatus), so this is the one Mark ready.
+    out.push(cur.draft ? { text: `CI passed.${link('The PR')} is a draft, so nobody can merge it yet. Mark it ready, and GitHub asks the code owners for review.`, buttons: [READY] }
+      : `CI passed.${link('Review and approve the PR')}`);
   }
   if (cur.state === 'OPEN' && cur.mergeable === 'CONFLICTING' && was.mergeable !== 'CONFLICTING') {
     out.push({ text: `The PR has merge conflicts with main.${link('The PR')} Tap to have me rebase it onto main.`, buttons: [['Rebase onto main', 'rebase_pr']] });

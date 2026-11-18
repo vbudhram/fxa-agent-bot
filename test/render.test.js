@@ -63,9 +63,8 @@ test('PR follow-up posts only what changed', async () => {
   assert.deepEqual(prChanges({ ci: 'running', reviews: [] }, { url, ci: 'pass', reviews: [] }), [`CI passed. <${url}|Review and approve the PR>`]);
   assert.deepEqual(prChanges({ ci: 'running', reviews: [] }, { ci: 'pass', reviews: [] }), ['CI passed.']);
   const [draft] = prChanges({ ci: 'running', reviews: [] }, { url, ci: 'pass', draft: true, reviews: [] });
-  // A plain string: it updates the PR card (which has Mark ready), and is not a new post.
-  assert.equal(typeof draft, 'string');
-  assert.match(draft, /is a draft/);
+  assert.deepEqual(draft.buttons, [['Mark ready for review', 'pr_ready']]);
+  assert.match(draft.text, /is a draft/);
   const open = { url, state: 'OPEN', ci: 'running', reviews: [] };
   const [conflict] = prChanges(open, { ...open, mergeable: 'CONFLICTING' });
   assert.deepEqual(conflict.buttons, [['Rebase onto main', 'rebase_pr']]);
