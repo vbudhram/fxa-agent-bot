@@ -19,7 +19,7 @@ import { ROUTINES_ENV, TICK_MS, NO_CHANNEL, inFlightGuard, muted, mutedReply, po
 import { ingest } from './db.js';
 import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs,
   shipRepos, afterShip, shipAsk, asksForPr, treeFor, namedRepos, PR_FIELDS, prCardFor, targetSwitch, otherOpen, targetsText } from './stack.js';
-import { asksForJira, JIRA_YES, draftCard, filedCard, changedCard, editModal, readEdit } from './jira-draft.js';
+import { asksForJira, JIRA_YES, draftCard, filedCard, changedCard, editModal, readEdit, filedSteer } from './jira-draft.js';
 import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateAllows, loadMembers, maySteer, mayTap, mayConfirm, SHIP_ACTIONS, PR_ACTIONS, askedShip, askerPatch, shipHeld } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, fromAdmin, ADMIN, LINE_BREAK, laterMessage, slackLinks, threadFile,
   emptyTurn, EMPTY_RETRY, EMPTY_FALLBACK, sinceTurn } from './render.js';
@@ -2845,6 +2845,8 @@ async function fileDraft(s, d, by, fixme, priv, cardTs) {
   sessions.patch(s.key, { jira_card: null, jira_filed: { ...(fresh(s.key)?.jira_filed ?? {}), [ticket]: { f, d, ts } } });
   // Undo works for 10 minutes on the controller too; the button goes when it would only be refused.
   setTimeout(() => { const x = fresh(s.key)?.jira_filed?.[ticket]; if (x && !x.undone) app.client.chat.update({ channel: s.channel, ts, ...filedCard({ ...x.f, undo: false }) }).catch(() => {}); }, 10 * 60_000).unref?.();
+  const tell = filedSteer(d, ticket, fresh(s.key)?.state);
+  if (tell) await steerAndAck(fresh(s.key), tell, app.client, null, null).catch((e) => console.error('jira steer', s.key, e.stderr || e.message));
 }
 // The card's buttons still work; only a typed "yes" stops filing it.
 function jiraYesOff(key) { const c = fresh(key)?.jira_card; if (c?.yes) sessions.patch(key, { jira_card: { ...c, yes: false } }); }

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { asksForJira, JIRA_YES, draftCard, filedCard, changedCard, editModal, readEdit } from '../src/jira-draft.js';
+import { asksForJira, JIRA_YES, draftCard, filedCard, changedCard, editModal, readEdit, filedSteer } from '../src/jira-draft.js';
 import { mayTap } from '../src/access.js';
 
 const ids = (c) => c.blocks.filter((b) => b.type === 'actions').flatMap((b) => b.elements.map((e) => e.action_id));
@@ -82,4 +82,13 @@ test('the Jira buttons go as far as steering does', () => {
     assert.ok(!mayTap(a, 'UO', 'UT', true, false, true), `${a}: not under STEER=owner`);
     assert.ok(!mayTap(a, 'UO', 'UX', false, true, true), `${a}: not someone the channel refuses`);
   }
+});
+
+test('a new ticket tells the live session its key; a change, an ended session or a quick answer does not', async () => {
+  assert.equal(filedSteer({ project: 'FXA' }, 'FXA-77', 'active'), 'The bot filed FXA-77. Do any part of the request that needed the key; otherwise reply in one line.');
+  assert.equal(filedSteer({ op: 'change', key: 'FXA-9' }, 'FXA-9', 'active'), null);
+  for (const st of ['paused', 'stopped', 'failed', 'pr_open', 'answered', undefined]) assert.equal(filedSteer({ project: 'FXA' }, 'FXA-77', st), null, String(st));
+  const { readFileSync } = await import('node:fs');
+  const app = readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
+  assert.match(app, /filedSteer\(d, ticket, fresh\(s\.key\)\?\.state\)/);
 });

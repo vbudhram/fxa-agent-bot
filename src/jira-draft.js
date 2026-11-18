@@ -106,3 +106,7 @@ export function editModal(d, meta) {
 export const readEdit = (values) => ({ type: values.type?.v?.selected_option?.value ?? 'Task',
   summary: values.summary?.v?.value ?? '', description: values.description?.v?.value ?? '',
   labels: String(values.labels?.v?.value ?? '').split(/[,\s]+/).filter(Boolean) });
+
+// A new ticket's key goes to the live session: a request like "file it and link it in the PR" needs the key to finish.
+export const filedSteer = (d, ticket, state) => (d?.op !== 'change' && ticket && state === 'active'
+  ? `The bot filed ${ticket}. Do any part of the request that needed the key; otherwise reply in one line.` : null);
