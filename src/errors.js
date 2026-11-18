@@ -26,8 +26,10 @@ export function signature(where, message) {
 }
 
 // The console.error calls read `where, key?, detail...`; turn one into a record.
+// A ctl call that failed with no stderr: its message is the argv, which names the owner, so say how it ended.
+const ctlEnd = (a) => `ctl ${a.killed ? 'timed out' : a.signal ? `killed by ${a.signal}` : `exit ${a.code}`}: ${String(a.stdout ?? '').trim().split('\n').at(-1) || 'no output'}`;
 export function toRecord(args, now = new Date()) {
-  const parts = args.map((a) => (typeof a === 'string' ? a : a?.stderr || a?.data?.error || a?.message || JSON.stringify(a)));
+  const parts = args.map((a) => (typeof a === 'string' ? a : a?.stderr || a?.data?.error || (a?.cmd ? ctlEnd(a) : a?.message) || JSON.stringify(a)));
   let [where = 'bot', ...rest] = parts;
   let key = rest.find((a) => KEY.test(a) && a.match(KEY)[0] === a) ?? null;
   if (!key && KEY.test(where) && where.match(KEY)[0] === where) { key = where; where = 'bot action'; }
