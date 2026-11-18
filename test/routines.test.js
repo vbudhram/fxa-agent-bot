@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { routineStart, routineEnd, routineEndLine, routineSkip, routineHint, routineReport, dateToken } from '../src/render.js';
+import { routineStart, routineEnd, routineEndLine, routineSkip, routineHint, routineReport, routineReportPlan, ROUTINE_MESSAGE_AT, dateToken } from '../src/render.js';
 import { botChannels, pollChannels, workspaceUsers } from '../src/routines.js';
 
 const R = { name: 'Code review', team: 'fxa', template: 'code-review', repos: ['mozilla/fxa'], branch: 'main', mode: 'pr+notes', since: 1792414800 };
@@ -120,6 +120,18 @@ test('a routine with no channel has its Slack calls muted (D32)', async () => {
   const a = mutedReply(), b = mutedReply();
   assert.match(a.ts, /^\d+\.\d{6}$/);
   assert.notEqual(a.ts, b.ts);
+});
+
+test('report_as message: the report is the start message up to its limit, else it goes to the thread as before', () => {
+  const daily = 'FxA triage report\n' + 'x'.repeat(4000);
+  assert.deepEqual([routineReportPlan({ report_as: 'message' }, daily).message, routineReportPlan({ report_as: 'message' }, daily).snippet], [true, false]);
+  assert.deepEqual([routineReportPlan({}, daily).message, routineReportPlan({}, daily).snippet], [false, true]);
+  assert.deepEqual([routineReportPlan({ report_as: 'thread' }, 'short').message, routineReportPlan({ report_as: 'thread' }, 'short').snippet], [false, false]);
+  const long = routineReportPlan({ report_as: 'message' }, 'y'.repeat(ROUTINE_MESSAGE_AT + 1));
+  assert.deepEqual([long.message, long.snippet], [false, true]);
+  // The same defuse as a thread report: no mention reaches the channel post.
+  assert.doesNotMatch(routineReportPlan({ report_as: 'message' }, 'for <!channel> and <!here>').text, /<!channel>|<!here>/);
+  assert.match(routineEnd(R, { state: 'report', post: true, posted: true, above: true }), /^Code review: the report is the message above\. No code changed\./);
 });
 
 test('a routine thread says a report is there only when one posted, and its hint follows how the run ended', () => {

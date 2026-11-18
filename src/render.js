@@ -821,6 +821,7 @@ export function routineEnd(r, end) {
     : end.blank ? `${n}: the run ended with no report. No code changed.${next}`
     : end.posted === false ? `${n}: the run ended with no report I could post here. A team admin can read it in the dashboard ${historyLink(r.team, r.routine)}.${next}`
     : r.mode === 'tickets' ? `${n}: the findings are filed as Jira tickets, listed in this thread. No code changed.${next}`
+    : end.above ? `${n}: the report is the message above. No code changed.${next}`
     : `${n}: the report is in this thread. No code changed.${next}`;
   if (end.state === 'nochange') return `${n}: no issue to fix.${next}`;
   // done did not answer: nothing is recorded, so nothing of the run is posted.
@@ -901,5 +902,11 @@ export const invEndLine = (state, v) => `Investigation of ${invRef(v)}: ${v?.pos
 // A report as posted: mentions made inert; over the limit it goes as a file (snippet: true).
 export const ROUTINE_SNIPPET_AT = 2900;
 export const routineReport = (text) => { const t = defuse(text).trim(); return { text: t, snippet: t.length > ROUTINE_SNIPPET_AT }; };
+// report_as message: the report replaces the run's start message, as a person's daily post; Slack shows up to 40,000 characters.
+export const ROUTINE_MESSAGE_AT = 12000;
+export const routineReportPlan = (r, text) => {
+  const rep = routineReport(text), message = r.report_as === 'message' && rep.text.length <= ROUTINE_MESSAGE_AT;
+  return { ...rep, message, snippet: !message && rep.snippet };
+};
 // The Slack client's rate_limited event gives { url, body }; the method is the URL's last part.
 export const rateLimitLine = (sec, info) => `slack rate limited: ${info?.method || String(info?.url ?? '').split('/').pop() || 'a call'} waits ${sec}s`;

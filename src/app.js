@@ -26,7 +26,7 @@ import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel
 import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, spokeSincePush, roundOutcome, reviewNudge, reviewRound, reviewNote, roundAsk, pauseAsk, lastBotSaid, readyNote, prBodyNote } from './render.js';
 import { randomBytes } from 'node:crypto';
-import { routineStart, routineSkip, routineEnd, routineEndLine, routineReport, routineHint, routineLabel, fixStart, fixEnd, fixEndLine, fixSkip, invStart, invEnd, invEndLine } from './render.js';
+import { routineStart, routineSkip, routineEnd, routineEndLine, routineReportPlan, routineHint, routineLabel, fixStart, fixEnd, fixEndLine, fixSkip, invStart, invEnd, invEndLine } from './render.js';
 import { render, rateLimitLine, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, logWord, shCmd, replayNote, toSomeoneElse, asideBlock, REBASE_PROMPT, operatorNext, fileRefs, distinctFiles, maskUpload, slackArgs, LOST_REPLY, mediaKind, mediaUpload, PAUSE_ASK } from './render.js';
 
 const { App } = bolt;
@@ -3115,18 +3115,21 @@ async function endRoutine(key, end) {
   // An investigation's report is the Jira comment ctl posts: the thread gets only ctl's fixed line.
   const inv = r.investigate && { state: a ? a.state : 'store', v: { ...r.investigate, ...a?.investigate, posted: a?.changed === true && a.investigate?.posted === true } };
   // posted: the report is really in the thread, so the end text may say so (a blank report or a failed post is not).
-  let posted = false;
+  let posted = false, above = false;
   // ctl's own report wins when it gives one: a security review's ticket keys, in place of the findings.
   const report = a?.changed === true && typeof a.report === 'string' ? a.report : end.report;
   if (report?.trim() && post && !inv) {
-    const rep = routineReport(report);
-    posted = await (rep.snippet ? app.client.filesUploadV2({ channel_id: s.channel, thread_ts: r.start_ts, content: rep.text, filename: 'report.md', title: `${r.name} report` })
+    const rep = routineReportPlan(r, report);
+    posted = await (rep.message ? app.client.chat.update({ channel: s.channel, ts: r.start_ts, text: rep.text })
+      : rep.snippet ? app.client.filesUploadV2({ channel_id: s.channel, thread_ts: r.start_ts, content: rep.text, filename: 'report.md', title: `${r.name} report` })
       : app.client.chat.postMessage({ ...at, text: rep.text })).then(() => true, (e) => { console.error('routine', key, `report post: ${e.data?.error ?? e.message}`); return false; });
+    above = posted && rep.message;
   }
   // A later tag's hint follows what the thread shows: a report only when one posted, a PR only when the end names one.
   if (fresh(key)?.routine) sessions.patch(key, { routine: { ...fresh(key).routine, hint: posted ? (r.mode === 'tickets' ? 'tickets' : 'report') : shown.state === 'ok' ? 'pr' : 'run' } });
-  const text = inv ? invEnd(inv.state, inv.v) : fix ? fixEnd(fix.state, fix.fix, { post: a?.changed ? a.post : undefined, posted }) : routineEnd(r, { ...shown, post, posted, blank: !report?.trim(), next: a?.next });
-  await app.client.chat.update({ channel: s.channel, ts: r.start_ts, text: inv ? invEndLine(inv.state, inv.v) : fix ? fixEndLine(fix.state, fix.fix) : routineEndLine(r, shown) }).catch((e) => console.error('routine', key, `start edit: ${e.data?.error ?? e.message}`));
+  const text = inv ? invEnd(inv.state, inv.v) : fix ? fixEnd(fix.state, fix.fix, { post: a?.changed ? a.post : undefined, posted }) : routineEnd(r, { ...shown, post, posted, above, blank: !report?.trim(), next: a?.next });
+  // The start message is the report now: only the thread gets the end text.
+  if (!above) await app.client.chat.update({ channel: s.channel, ts: r.start_ts, text: inv ? invEndLine(inv.state, inv.v) : fix ? fixEndLine(fix.state, fix.fix) : routineEndLine(r, shown) }).catch((e) => console.error('routine', key, `start edit: ${e.data?.error ?? e.message}`));
   await app.client.chat.postMessage({ ...at, text, ...(fix ? { reply_broadcast: true } : {}) }).catch((e) => console.error('routine', key, `end post: ${e.data?.error ?? e.message}`));
   // A Slack session's 'host: investigate' (ctl's heads.investigate.from): its thread gets the same fixed line.
   const from = inv && /^agent-[a-z0-9]+$/.test(String(r.investigate.from ?? '')) && fresh(r.investigate.from);
@@ -3168,7 +3171,7 @@ async function startRoutine(r) {
   const key = sessions.newKey();
   // owner: the run's sentinel (D26), so nobody has owner buttons; the session's live status goes in this thread.
   sessions.put({ key, channel: r.channel, thread_ts: start.ts, owner: `routine:${r.team}/${r.routine}`, profile: r.team, source: 'routine', private: Boolean(r.private),
-    routine: { run: r.run, routine: r.routine, team: r.team, name: r.name, mode: r.mode, start_ts: start.ts, ...(r.fix ? { fix: r.fix } : {}), ...(r.investigate ? { investigate: r.investigate } : {}) }, prompt: '', cursor: 0, state: 'queued', started_at: Date.now() });
+    routine: { run: r.run, routine: r.routine, team: r.team, name: r.name, mode: r.mode, start_ts: start.ts, ...(r.report_as === 'message' ? { report_as: 'message' } : {}), ...(r.fix ? { fix: r.fix } : {}), ...(r.investigate ? { investigate: r.investigate } : {}) }, prompt: '', cursor: 0, state: 'queued', started_at: Date.now() });
   await launch(key, app.client);
 }
 // Watch streams run in their own process groups; end them with the bot.
