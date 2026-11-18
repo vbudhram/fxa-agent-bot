@@ -927,9 +927,45 @@ const reportBlocks = (text, foot) => {
     ...(foot ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: foot }] }] : [])];
   return blocks.length <= 50 && blocks.every((x) => x.type !== 'section' || x.text.text.length <= 3000) ? blocks : undefined;
 };
+// An fxa-triage block in the report (the triage routine's data) as a card: the host picks each source's emoji, name and
+// order; a link only for a URL LINK_LABELS knows, with its label; the agent's strings are defused and capped. null when
+// the block is missing or not valid, so the report posts as text.
+const TRIAGE = [['jira', ':jira:', 'Jira'], ['dependabot', ':dependabot:', 'Dependabot'], ['prs', ':github:', 'PRs'], ['sentry', ':sentry2:', 'Sentry'],
+  ['circleci', ':circleci:', 'CircleCI'], ['grafana', ':grafana-intensifies:', 'Grafana'], ['bugzilla', ':bugzilla-2023:', 'Bugzilla']];
+const cap = (v, n) => defuse(typeof v === 'string' ? v : '').replace(/\s+/g, ' ').trim().slice(0, n);
+const labelOf = (u) => { for (const [re, label] of LINK_LABELS) { const m = String(u).match(re); if (m) return label(m); } return null; };
+const triageCard = (text, title, foot) => {
+  const m = [...text.matchAll(/```fxa-triage\n([\s\S]*?)```/g)].pop();
+  let d; try { d = JSON.parse(m?.[1] ?? ''); } catch { return null; }
+  const src = d?.sources;
+  if (!src || typeof src !== 'object' || Array.isArray(src)) return null;
+  const news = [], quiet = [];
+  for (const [k, e, name] of TRIAGE) {
+    const s = src[k] && typeof src[k] === 'object' ? src[k] : {};
+    const items = (Array.isArray(s.items) ? s.items : []).slice(0, 4).map((i) => ({ title: cap(i?.title, 80), detail: cap(i?.detail, 200), owner: cap(i?.owner, 40),
+      links: (Array.isArray(i?.urls) ? i.urls : []).slice(0, 4).map((u) => [String(u), labelOf(u)]).filter(([, l]) => l) })).filter((i) => i.title);
+    if (items.length) news.push({ e, name, items });
+    else quiet.push(`${e}  *${name}*\n${s.not_checked ? `_Not checked: ${esc(cap(s.not_checked, 80))}_` : cap(s.status, 80) ? esc(cap(s.status, 80)) : '_Not checked_'}`);
+  }
+  const date = cap(d.date, 40), md = (t) => ({ type: 'mrkdwn', text: t });
+  const rt = (i) => ({ type: 'rich_text_section', elements: [
+    ...i.links.flatMap(([url, t], n) => [...(n ? [{ type: 'text', text: ' ' }] : []), { type: 'link', url, text: t, style: { bold: true } }]),
+    { type: 'text', text: `${i.links.length ? '  ' : ''}${i.title}`, style: { bold: true } }, ...(i.detail ? [{ type: 'text', text: `  ${i.detail}` }] : []),
+    ...(i.owner ? [{ type: 'text', text: `  ${i.owner}`, style: { italic: true } }] : [])] });
+  const blocks = [{ type: 'header', text: { type: 'plain_text', text: String(title || 'Report').slice(0, 150), emoji: true } },
+    ...(date ? [{ type: 'context', elements: [md(`*${esc(date)}*`)] }] : []), { type: 'divider' },
+    ...news.flatMap((s) => [{ type: 'section', text: md(`${s.e}  *${s.name}*`) }, { type: 'rich_text', elements: [{ type: 'rich_text_list', style: 'bullet', elements: s.items.map(rt) }] }]),
+    ...(quiet.length ? [{ type: 'divider' }, { type: 'section', fields: quiet.map(md) }] : []), ...(foot ? [{ type: 'context', elements: [md(foot)] }] : [])];
+  // The text is the fallback and the notification: the same content as mrkdwn.
+  const line = (i) => `• ${i.links.map(([u, t]) => `<${u}|${t}> `).join('')}*${esc(i.title)}*${i.detail ? ` ${esc(i.detail)}` : ''}${i.owner ? ` _${esc(i.owner)}_` : ''}`;
+  return { blocks, text: [`*${esc(String(title || 'Report'))}${date ? ` · ${esc(date)}` : ''}*`, ...news.map((s) => `${s.e} *${s.name}*\n${s.items.map(line).join('\n')}`),
+    quiet.map((q) => q.replace('\n', ' · ')).join('\n')].filter(Boolean).join('\n\n') };
+};
 export const routineFoot = (ms, next) => `Ran ${Math.max(1, Math.round(ms / 60_000))} min${next ? ` · Next run ${dateToken(next)}` : ''}`;
 export const routineReportPlan = (r, text, foot) => {
   const rep = routineReport(text), message = r.report_as === 'message' && rep.text.length <= ROUTINE_MESSAGE_AT;
+  const card = message && triageCard(rep.text, r.name, foot);
+  if (card) return { ...rep, ...card, message, snippet: false };
   const t = message ? shortLinks(rep.text) : rep.text;
   return { ...rep, text: t, message, snippet: !message && rep.snippet, blocks: message ? reportBlocks(t, foot) : undefined };
 };

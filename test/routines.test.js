@@ -153,6 +153,22 @@ test('report_as message: a known link gets a short label taken from its URL; an 
   assert.match(routineFoot(238_000, 1795096800), /^Ran 4 min · Next run <!date\^1795096800\^/);
   assert.equal(routineReportPlan({ report_as: 'message' }, 'x\n\n' + 'y'.repeat(3001)).blocks, undefined);
   assert.equal(routineReportPlan({}, '*T*\n\nx').blocks, undefined);
+  // A report with an fxa-triage block is a card: the sources in a fixed order, a link only for a known URL, quiet ones in a grid.
+  const card = routineReportPlan({ report_as: 'message', name: 'FxA triage report' }, 'notes\n```fxa-triage\n' + JSON.stringify({ date: 'Wednesday, 18 Nov', sources: {
+    sentry: { items: [{ urls: ['https://mozilla.sentry.io/issues/FXA-CONTENT-1MF6'], title: 'A burst of 500s', detail: 'It stopped. <!channel>' }] },
+    jira: { items: [{ urls: ['https://mozilla-hub.atlassian.net/browse/FXA-1', 'https://evil.example/x'], title: 'Hold WAF', detail: '65% fail.', owner: 'Amri' }] },
+    circleci: { status: 'Nightly passed' }, grafana: { not_checked: 'no access' } } }) + '\n```', 'Ran 4 min');
+  assert.deepEqual(card.blocks.map((x) => x.type), ['header', 'context', 'divider', 'section', 'rich_text', 'section', 'rich_text', 'divider', 'section', 'context']);
+  assert.equal(card.blocks[1].elements[0].text, '*Wednesday, 18 Nov*');
+  assert.equal(card.blocks[3].text.text, ':jira:  *Jira*');
+  const jira = card.blocks[4].elements[0].elements[0].elements;
+  assert.deepEqual(jira.filter((x) => x.type === 'link').map((x) => x.text), ['FXA-1']);
+  assert.equal(jira.at(-1).text, '  Amri');
+  assert.doesNotMatch(JSON.stringify(card.blocks), /<!channel>|evil\.example/);
+  assert.deepEqual(card.blocks[8].fields.map((f) => f.text.split('\n')[1]), ['_Not checked_', '_Not checked_', 'Nightly passed', '_Not checked: no access_', '_Not checked_']);
+  assert.match(card.text, /^\*FxA triage report · Wednesday, 18 Nov\*\n\n:jira: \*Jira\*\n• <https:\/\/mozilla-hub\.atlassian\.net\/browse\/FXA-1\|FXA-1> \*Hold WAF\*/);
+  // A bad block, or none, keeps the text post.
+  assert.equal(routineReportPlan({ report_as: 'message' }, '```fxa-triage\n{bad\n```').blocks?.[0]?.type, 'section');
   // A thread report keeps its URLs as written.
   assert.equal(routineReportPlan({}, 'https://github.com/mozilla/fxa/pull/1').text, 'https://github.com/mozilla/fxa/pull/1');
 });
