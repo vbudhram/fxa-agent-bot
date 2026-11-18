@@ -27,7 +27,7 @@ import * as cards from './cards.js';
 import { forBotFromOthers, tippedInThread, othersIn, isCopilot, copilotNote, copilotRound, ciRound, roundOutcome, reviewNudge, reviewRound, reviewNote, roundAsk, pauseAsk, lastBotSaid, readyNote } from './render.js';
 import { randomBytes } from 'node:crypto';
 import { routineStart, routineSkip, routineEnd, routineEndLine, routineReport, routineHint, routineLabel, fixStart, fixEnd, fixEndLine, fixSkip, invStart, invEnd, invEndLine } from './render.js';
-import { render, rateLimitLine, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, logWord, shCmd, replayNote, toSomeoneElse, asideBlock, REBASE_PROMPT, operatorNext, fileRefs, distinctFiles, maskUpload, slackArgs, LOST_REPLY, mediaKind } from './render.js';
+import { render, rateLimitLine, startCard, md, buttons, RUNTIMES, operatorProblem, diffStat, summaryLine, prChanges, settleMergeable, prEndedNote, ciNote, homeView, planLines, errorDigest, errorsToDm, HELP, closestCommand, logWord, shCmd, replayNote, toSomeoneElse, asideBlock, REBASE_PROMPT, operatorNext, fileRefs, distinctFiles, maskUpload, slackArgs, LOST_REPLY, mediaKind, mediaUpload } from './render.js';
 
 const { App } = bolt;
 installErrorLog(ctl.errorsPush);
@@ -2212,15 +2212,16 @@ async function sendMedia(key, midTurn = false) {
       const files = readdirSync(dir, { withFileTypes: true }).filter((d) => d.isFile()).map((d) => join(dir, d.name))
         .map((p) => { const st = lstatSync(p); return { path: p, size: st.size, mtime: st.mtimeMs, kind: st.isFile() && mediaKind(basename(p), st.size) }; })
         .filter((f) => f.kind);
-      for (const { path, size, mtime, kind } of files) {
-        const id = `${basename(path)}:${size}`;
-        if (sent.has(id) || (midTurn && !mediaSettled(basename(path), mtime, sent, Date.now()))) continue;
-        await app.client.files.uploadV2({ channel_id: s.channel, thread_ts: s.thread_ts, filename: basename(path),
-          ...(kind === 'text' ? { content: readFileSync(path, 'utf8'), snippet_type: 'text' } : { file: readFileSync(path) }) });
-        sent.add(id);
+      const due = files.map((f) => ({ ...f, id: `${basename(f.path)}:${f.size}` }))
+        .filter((f) => !sent.has(f.id) && !(midTurn && !mediaSettled(basename(f.path), f.mtime, sent, Date.now())));
+      // Slack takes 10 files in one upload; each chunk counts as sent only once it is up.
+      for (let i = 0; i < due.length; i += 10) {
+        const chunk = due.slice(i, i + 10);
+        await app.client.files.uploadV2(mediaUpload(s.channel, s.thread_ts, chunk.map((f) => ({ filename: basename(f.path), kind: f.kind, data: readFileSync(f.path) }))));
+        for (const f of chunk) sent.add(f.id);
+        if (fresh(key)) sessions.patch(key, { media_sent: [...sent] });
       }
     } finally { await ctl.cleanup(dir); }
-    if (fresh(key)) sessions.patch(key, { media_sent: [...sent] });
   } catch (e) { console.error('media', key, e.data?.error ?? e.stderr ?? e.message); }
 }
 

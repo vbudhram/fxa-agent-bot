@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fromAdmin, ADMIN, threadStarter, endWord, render, operatorProblem, operatorNext, summaryLine, closestCommand, logWord, shCmd, replayNote, watchUrl, threadLine, maskSecrets, maskUpload, slackArgs, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, slackLinks, threadFile, emptyTurn, EMPTY_FALLBACK, fromOther, othersLines, laterMessage, rateLimitLine, mediaKind } from '../src/render.js';
+import { fromAdmin, ADMIN, threadStarter, endWord, render, operatorProblem, operatorNext, summaryLine, closestCommand, logWord, shCmd, replayNote, watchUrl, threadLine, maskSecrets, maskUpload, slackArgs, toSomeoneElse, asideBlock, errorsToDm, appText, appLabel, lostChannel, tippedInThread, teamCard, fileRefs, distinctFiles, trimContext, slackLinks, threadFile, emptyTurn, EMPTY_FALLBACK, fromOther, othersLines, laterMessage, rateLimitLine, mediaKind, mediaUpload } from '../src/render.js';
 
 test('mediaKind: text files post as snippets up to 2 MB, media up to 50 MB, .har and others never', () => {
   for (const n of ['run.log', 'notes.txt', 'users.csv', 'result.json']) assert.equal(mediaKind(n, 10), 'text');
@@ -688,6 +688,15 @@ test('maskUpload masks a text upload and leaves media as it is', () => {
   assert.equal(maskUpload({ filename: 'shot.png', file: png }).file, png);
   assert.deepEqual(maskUpload({ filename: `${tok}.png`, title: `shot ${tok}`, file: png }),
     { filename: 'ghp__masked.png', title: 'shot ghp_<masked>', file: png });
+});
+
+test("a turn's files go up as one upload with a comment, masked file by file", () => {
+  const tok = 'ghp_0123456789abcdefABCD', png = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+  const args = mediaUpload('C1', '1.2', [{ filename: 'shot.png', kind: 'file', data: png }, { filename: 'out.log', kind: 'text', data: Buffer.from(`key=${tok}`) }]);
+  assert.deepEqual(args, { channel_id: 'C1', thread_ts: '1.2', initial_comment: 'Files from this turn',
+    file_uploads: [{ filename: 'shot.png', file: png }, { filename: 'out.log', content: `key=${tok}`, snippet_type: 'text' }] });
+  assert.equal(maskUpload(args).file_uploads[1].content, 'key=ghp_<masked>');
+  assert.equal(maskUpload({ file_uploads: [{ filename: `${tok}.png`, file: png }] }).file_uploads[0].filename, 'ghp__masked.png');
 });
 
 test('a failed ship says the work is kept and how to retry, not !restart', () => {

@@ -83,7 +83,7 @@ export function createView({ names = {} } = {}) {
       }
       // An upload shows in the thread as its comment and file name.
       case 'files.uploadV2': {
-        const m = { ts: nextTs(), channel: args.channel_id, thread_ts: args.thread_ts, bot: true, text: `${args.initial_comment ?? ''} [file: ${args.filename}]`, edits: 0, reactions: new Set(), seq: ++seq };
+        const m = { ts: nextTs(), channel: args.channel_id, thread_ts: args.thread_ts, bot: true, text: `${args.initial_comment ?? ''} [file: ${args.filename ?? args.file_uploads?.map((f) => f.filename).join(', ')}]`, edits: 0, reactions: new Set(), seq: ++seq };
         msgs.push(m); touch(m);
         return { ok: true, files: [{ ok: true, files: [{ id: `F${m.seq}`, name: args.filename }] }] };
       }

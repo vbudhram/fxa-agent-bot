@@ -626,7 +626,11 @@ export const maskUpload = (args) => ({ ...args,
   // The runner picks media file names, and Slack shows the name and the title.
   ...(typeof args.filename === 'string' && { filename: maskSecrets(args.filename, '_masked') }),
   ...(typeof args.title === 'string' && { title: maskSecrets(args.title) }),
-  ...(Buffer.isBuffer(args.file) && /\.(patch|diff)$/.test(args.filename ?? '') && { file: Buffer.from(maskSecrets(args.file.toString('utf8'))) }) });
+  ...(Buffer.isBuffer(args.file) && /\.(patch|diff)$/.test(args.filename ?? '') && { file: Buffer.from(maskSecrets(args.file.toString('utf8'))) }),
+  ...(Array.isArray(args.file_uploads) && { file_uploads: args.file_uploads.map(maskUpload) }) });
+// The agent's files from one look, as one upload with one comment: an upload per file posted an empty message each.
+export const mediaUpload = (channel_id, thread_ts, files) => ({ channel_id, thread_ts, initial_comment: 'Files from this turn',
+  file_uploads: files.map(({ filename, kind, data }) => (kind === 'text' ? { filename, content: data.toString('utf8'), snippet_type: 'text' } : { filename, file: data })) });
 
 // The tag reminder goes to each person once per thread: a resume starts a new
 // session in the same thread, and the reminder must not come back with it.
