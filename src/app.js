@@ -1988,8 +1988,18 @@ async function pushBranch(s, client, repo) {
   sessions.patch(s.key, { push_note_ts: ts });
   await ctl.finish(s.key, true, repo);
 }
+// A ship tap during a turn waits for the turn to end ready (shipAfterResume), not a raw controller refusal.
+function queueShip(s, body, what, repo) {
+  const cur = fresh(s.key);
+  if (cur?.state !== 'active' || !cur.status_ts) return false;
+  sessions.patch(s.key, { then_wrap: what, then_wrap_at: Date.now(), then_wrap_repo: repo ?? null });
+  const verb = what === 'push' ? 'push the branch' : shipWhat(cur, repo) === 'Update PR' ? 'update the PR' : 'open the PR';
+  working(s, body, `I am in the middle of a turn. I will ${verb} when this turn ends ready.`);
+  return true;
+}
 ownerAction('open_pr', async (s, client, action, body) => {
   const repo = valueRepo(action.value);
+  if (queueShip(s, body, 'pr', repo)) return;
   if (!(await wrapTap(s, client, body, `${prView(fresh(s.key), repo)?.pr_url ? 'Update PR' : 'Open PR'}${repo ? ` · ${repo}` : ''}`, repo))) return;
   await (ENDED.includes(fresh(s.key)?.state) ? resumeToShip(fresh(s.key), client, 'pr', repo) : openPr(s, client, repo))
     .catch((e) => shipFailed(client, s, e, prView(fresh(s.key), repo)?.pr_url ? 'Update PR' : 'Open PR'));
@@ -1999,6 +2009,7 @@ ownerAction('open_prs', async (s, client, action, body) => {
   const all = shipRepos(fresh(s.key)?.trees);
   if (!all.length) { working(s, body, 'No repo that ships as a PR has changes now.'); return; }
   const repo = all.length === 1 ? all[0] : all;
+  if (queueShip(s, body, 'pr', repo)) return;
   if (!(await wrapTap(s, client, body, shipWhat(fresh(s.key), repo), repo))) return;
   await (ENDED.includes(fresh(s.key)?.state) ? resumeToShip(fresh(s.key), client, 'pr', repo) : openPr(s, client, repo))
     .catch((e) => shipFailed(client, s, e, shipWhat(fresh(s.key), repo)));
@@ -2007,6 +2018,7 @@ ownerAction('push_branch', async (s, client, action, body) => {
   const repo = valueRepo(action.value);
   // An older row's Push branch, once the PR is open: it updates the PR.
   if (prOpenFor(fresh(s.key), repo)) { await tapFns.get('open_pr')(s, client, action, body); return; }
+  if (queueShip(s, body, 'push', repo)) return;
   if (!(await wrapTap(s, client, body, `Push branch${repo ? ` · ${repo}` : ''}`, repo))) return;
   await (ENDED.includes(fresh(s.key)?.state) ? resumeToShip(fresh(s.key), client, 'push', repo) : pushBranch(s, client, repo))
     .catch((e) => shipFailed(client, s, e, 'Push branch'));
