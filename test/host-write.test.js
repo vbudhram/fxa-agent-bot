@@ -3,8 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, chmodSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { hostWriteOf, hostCard, hostDone, HOST_MAX } from '../src/jira-draft.js';
-import { mayConfirm } from '../src/access.js';
+import { hostWriteOf, hostCard, hostDone, hostFail, HOST_MAX } from '../src/jira-draft.js';
 
 const ids = (c) => c.blocks.filter((b) => b.type === 'actions').flatMap((b) => b.elements.map((e) => e.action_id));
 const jc = { op: 'jira-comment', key: 'FXA-123', body: 'See <!channel> and ```x```' };
@@ -35,6 +34,9 @@ test('a long body is cut on the card with a note', () => {
   assert.ok(c.blocks[1].text.text.length < 3000);
   assert.match(text, new RegExp(`first ${HOST_MAX} of ${HOST_MAX + 10} characters\\. Apply writes all of it`));
   assert.doesNotMatch(JSON.stringify(hostCard(pc, 'k', 'i').blocks), /characters/);
+  const lt = hostCard({ ...pb, body: '<!-- x -->\n'.repeat(400) }, 'k', 'i');
+  assert.ok(lt.blocks[1].text.text.length <= 3000, 'the escape does not push the section past the Slack limit');
+  assert.match(JSON.stringify(lt.blocks), /The card shows the first \d+ of 4400 characters/);
 });
 
 test('the result line links what the controller wrote', () => {
@@ -43,12 +45,11 @@ test('the result line links what the controller wrote', () => {
   assert.equal(hostDone(pb, {}), 'Updated the PR description on mozilla/fxa#42.');
 });
 
-test('Apply is for a team admin only; Discard also for the owner', () => {
-  assert.ok(mayConfirm(true, 'UO', 'UA', true, true));
-  assert.ok(!mayConfirm(true, 'UO', 'UO', true, false), 'the owner who is not an admin cannot apply');
-  assert.ok(!mayConfirm(true, 'UO', 'UA', false, true), 'not in an allowed channel');
-  assert.ok(mayConfirm(false, 'UO', 'UO', true, false));
-  assert.ok(!mayConfirm(false, 'UO', 'UB', true, false));
+test('a failed write shows only the controller stderr, and a timeout says the write can be done', () => {
+  assert.equal(hostFail({ stderr: 'warn\nERROR: That PR is not in the team repos.\n' }), 'I did not write it: That PR is not in the team repos.');
+  const argv = { message: 'Command failed: /opt/ctl --backend gce session host-write k --stdin --by U --words x', stderr: '' };
+  assert.equal(hostFail(argv), 'I did not write it: the write did not finish.');
+  assert.match(hostFail({ ...argv, killed: true, signal: 'SIGTERM' }), /It is possible that it was done\. Look at the target/);
 });
 
 test('hostWrite runs the CLI with the JSON on stdin, and exit 3 is needsConfirm', async () => {

@@ -19,7 +19,7 @@ import { ROUTINES_ENV, TICK_MS, NO_CHANNEL, inFlightGuard, muted, mutedReply, po
 import { ingest } from './db.js';
 import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs,
   shipRepos, afterShip, shipAsk, asksForPr, treeFor, namedRepos, PR_FIELDS, prCardFor, targetSwitch, otherOpen, targetsText } from './stack.js';
-import { asksForJira, JIRA_YES, draftCard, filedCard, changedCard, editModal, readEdit, filedSteer, hostWriteOf, hostCard, hostDone } from './jira-draft.js';
+import { asksForJira, JIRA_YES, draftCard, filedCard, changedCard, editModal, readEdit, filedSteer, hostWriteOf, hostCard, hostDone, hostFail } from './jira-draft.js';
 import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateAllows, loadMembers, maySteer, mayTap, mayConfirm, SHIP_ACTIONS, PR_ACTIONS, askedShip, askerPatch, shipHeld } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, fromAdmin, ADMIN, LINE_BREAK, laterMessage, slackLinks, threadFile,
   emptyTurn, EMPTY_RETRY, EMPTY_FALLBACK, sinceTurn } from './render.js';
@@ -858,6 +858,7 @@ async function onMessage({ message, client, replay = false }) {
   // The same for a host write card, from a team admin only.
   const hc = steers && JIRA_YES.test(text) && fresh(s.key)?.host_card;
   if (hc?.yes && isAdmin(hc.profile, message.user)) {
+    sessions.patch(s.key, { host_card: null }); // before any await, so a tap or a second yes finds no card
     seen(message.channel, message.ts);
     await client.reactions.remove({ channel: message.channel, timestamp: message.ts, name: 'eyes' }).catch(() => {});
     await client.reactions.add({ channel: message.channel, timestamp: message.ts, name: 'white_check_mark' }).catch(() => {});
@@ -2953,8 +2954,9 @@ async function hostTurn(key, w, by, words, profile) {
     blocks: [{ type: 'context', elements: [{ type: 'mrkdwn', text: '~Write request~ Replaced by a newer request below.' }] }] }).catch(() => {});
   sessions.patch(key, { host_card: null });
   if (by && isAdmin(profile, by)) {
-    try { await say(s, hostDone(w, await ctl.hostWrite(key, w, by, { words }))); return; }
-    catch (e) { if (!e.needsConfirm) { await say(s, `I did not write it: ${why(e)}`); return; } }
+    let line;
+    try { line = hostDone(w, await ctl.hostWrite(key, w, by, { words })); } catch (e) { if (!e.needsConfirm) line = hostFail(e); }
+    if (line) { await say(s, line); return; }
   }
   const id = randomBytes(4).toString('hex');
   const { ts } = await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...hostCard(w, key, id, JIRA_URL) });
@@ -2965,9 +2967,9 @@ const hostClose = (s, c, line) => app.client.chat.update({ channel: s.channel, t
   blocks: [...hostCard(c.w, s.key, c.id, JIRA_URL).blocks.filter((b) => b.type !== 'actions'), { type: 'context', elements: [{ type: 'mrkdwn', text: line }] }] }).catch(() => {});
 async function applyHost(s, c, by) {
   sessions.patch(s.key, { host_card: null });
-  await hostClose(s, c, `Applied by <@${by}>`);
-  let line;
-  try { line = hostDone(c.w, await ctl.hostWrite(s.key, c.w, by, { confirmed: true })); } catch (e) { line = `I did not write it: ${why(e)}`; }
+  let line, ok = false;
+  try { line = hostDone(c.w, await ctl.hostWrite(s.key, c.w, by, { confirmed: true })); ok = true; } catch (e) { line = hostFail(e); }
+  await hostClose(s, c, ok ? `Applied by <@${by}>` : line);
   await say(s, line);
 }
 // Apply: a team admin only. Discard: the owner or a team admin.
