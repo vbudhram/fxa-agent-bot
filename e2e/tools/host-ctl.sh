@@ -1,7 +1,7 @@
 #!/bin/bash
 # The e2e fake controller (FAKE_CTL_INNER) plus a quick look's host writes, which fake-ctl.sh does not fake.
 #   FAKE_HOST_WRITE   the host_write JSON that each quick look returns
-#   FAKE_HOST_RESULT  ok (default); confirm: exit 3 unless --confirmed; any other text: a refusal with that line (exit 1)
+#   FAKE_HOST_RESULT  ok (default); confirm: exit 3 unless --confirmed or --check; any other text: a refusal with that line (exit 1)
 set -euo pipefail
 case " $* " in
   *" session host-write "*)
@@ -9,7 +9,7 @@ case " $* " in
     w="$(cat)" r="${FAKE_HOST_RESULT:-ok}"
     case "$r" in
       ok) ;;
-      confirm) case " $* " in *" --confirmed "*) ;; *) echo needs-confirm >&2; exit 3 ;; esac ;;
+      confirm) case " $* " in *" --confirmed "* | *" --check "*) ;; *) echo needs-confirm >&2; exit 3 ;; esac ;;
       *) echo "$r" >&2; exit 1 ;;
     esac
     jq -c '{ok: true, op, url: (.url // "https://jira.example.com/browse/\(.key)")}' <<< "$w" ;;

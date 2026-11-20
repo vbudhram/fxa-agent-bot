@@ -2958,6 +2958,8 @@ async function hostTurn(key, w, by, words, profile) {
     try { line = hostDone(w, await ctl.hostWrite(key, w, by, { words, profile })); } catch (e) { if (!e.needsConfirm) line = hostFail(e); }
     if (line) { await say(s, line); return; }
   }
+  // A card that an admin's tap cannot run is noise: say why now instead.
+  if (by) try { await ctl.hostWrite(key, w, by, { check: true, profile }); } catch (e) { await say(s, hostFail(e)); return; }
   const id = randomBytes(4).toString('hex');
   const { ts } = await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...hostCard(w, key, id, JIRA_URL) });
   sessions.patch(key, { host_card: { w, ts, id, profile, yes: true } });
