@@ -146,6 +146,13 @@ function runIn(args, input, timeout = 60_000) {
 export const jiraDraft = async (key, edit, as) => { const a = as && as !== key ? ['--as', as] : [];
   return JSON.parse(edit ? await runIn(['session', 'jira-draft', key, '--stdin', ...a], JSON.stringify(edit))
     : await run(['session', 'jira-draft', key, ...a], { timeout: 90_000 })); };
+// A quick look's write to Jira or GitHub (session host-write). opts: {words} or {confirmed: true}. Exit 3: the words did not
+// name the action and the target, so an admin must confirm on a card (.needsConfirm).
+export const hostWrite = async (key, write, by, opts) => {
+  try { return JSON.parse(await runIn(['session', 'host-write', key, '--stdin', '--by', by, ...(opts?.confirmed ? ['--confirmed'] : ['--words', String(opts?.words ?? '')])],
+    JSON.stringify(write), 90_000)); }
+  catch (e) { if (e.code === 3) e.needsConfirm = true; throw e; }
+};
 export const jiraFile = async (key, sha, user, name, email, fixme) => (await run(['session', 'jira-file', key, sha, user, name,
   ...(email ? [email] : []), ...(fixme ? ['--fixme'] : [])], { timeout: 90_000 })).trim();
 export const jiraUndo = (key, ticket, name) => run(['session', 'jira-undo', key, ticket, name], { timeout: 90_000 });

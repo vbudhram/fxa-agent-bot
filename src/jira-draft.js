@@ -107,6 +107,34 @@ export const readEdit = (values) => ({ type: values.type?.v?.selected_option?.va
   summary: values.summary?.v?.value ?? '', description: values.description?.v?.value ?? '',
   labels: String(values.labels?.v?.value ?? '').split(/[,\s]+/).filter(Boolean) });
 
+// A quick look's write to Jira or GitHub (host_write): a comment on a ticket or a PR, or a new PR description.
+const HOST_WHAT = { 'jira-comment': 'Jira comment', 'pr-comment': 'PR comment', 'pr-body': 'PR description' };
+const PR_URL = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)$/;
+// The write when its shape is one the controller takes, else null: a bad target never reaches a card or a link.
+export const hostWriteOf = (w) => (w && HOST_WHAT[w.op] && typeof w.body === 'string' && w.body.trim()
+  && (w.op === 'jira-comment' ? /^[A-Z][A-Z0-9]+-\d+$/.test(w.key ?? '') : PR_URL.test(w.url ?? '')) ? w : null);
+const hostTarget = (w, jiraUrl) => (w.op === 'jira-comment' ? ticketLink(w.key, jiraUrl) : `<${w.url}|${w.url.replace(PR_URL, '$1#$2')}>`);
+export const HOST_MAX = 2800;
+// The card that waits for a team admin's Apply. It shows the exact text, cut at HOST_MAX with a note.
+export function hostCard(w, key, id, jiraUrl = '') {
+  const v = `${key}|${id}`, body = w.body;
+  return {
+    text: `${HOST_WHAT[w.op]} for ${w.key ?? w.url}`,
+    blocks: [
+      { type: 'section', text: { type: 'mrkdwn', text: `:pencil2: *${HOST_WHAT[w.op]}* · ${hostTarget(w, jiraUrl)}` } },
+      { type: 'section', text: { type: 'mrkdwn', text: code(body.slice(0, HOST_MAX)) } },
+      { type: 'context', elements: [{ type: 'mrkdwn', text: [body.length > HOST_MAX ? `The card shows the first ${HOST_MAX} of ${body.length} characters. Apply writes all of it.` : '',
+        'Only a team admin can apply this.'].filter(Boolean).join(' ') }] },
+      { type: 'actions', elements: [btn('Apply', 'host_apply', v, 'primary'), btn('Discard', 'host_discard', v)] },
+    ],
+  };
+}
+// The one line after a write, with the controller's link.
+export const hostDone = (w, r) => {
+  const t = w.op === 'jira-comment' ? w.key : w.url.replace(PR_URL, '$1#$2'), link = r?.url ? `<${r.url}|${t}>` : t;
+  return w.op === 'pr-body' ? `Updated the PR description on ${link}.` : `Posted the comment on ${link}.`;
+};
+
 // A new ticket's key goes to the live session: a request like "file it and link it in the PR" needs the key to finish.
 export const filedSteer = (d, ticket, state) => (d?.op !== 'change' && ticket && state === 'active'
   ? `The bot filed ${ticket}. Do any part of the request that needed the key; otherwise reply in one line.` : null);

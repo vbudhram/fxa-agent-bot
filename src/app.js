@@ -19,7 +19,7 @@ import { ROUTINES_ENV, TICK_MS, NO_CHANNEL, inFlightGuard, muted, mutedReply, po
 import { ingest } from './db.js';
 import { parseStack, teamAlias, stackHelp, teamsFor, pickerRefusal, stackTeamCard, stackRepoCard, stackRepos, valueRepo, prView, prPatch, followTargets, carryPrs,
   shipRepos, afterShip, shipAsk, asksForPr, treeFor, namedRepos, PR_FIELDS, prCardFor, targetSwitch, otherOpen, targetsText } from './stack.js';
-import { asksForJira, JIRA_YES, draftCard, filedCard, changedCard, editModal, readEdit, filedSteer } from './jira-draft.js';
+import { asksForJira, JIRA_YES, draftCard, filedCard, changedCard, editModal, readEdit, filedSteer, hostWriteOf, hostCard, hostDone } from './jira-draft.js';
 import { codeAllowed, codeRefusal, START_PRIVATE, sessionTeam, parseGates, gateAllows, loadMembers, maySteer, mayTap, mayConfirm, SHIP_ACTIONS, PR_ACTIONS, askedShip, askerPatch, shipHeld } from './access.js';
 import { defuse, watchUrl, threadLine, threadStarter, endWord, appText, appLabel, lostChannel, teamCard, trimContext, fromOther, fromAdmin, ADMIN, LINE_BREAK, laterMessage, slackLinks, threadFile,
   emptyTurn, EMPTY_RETRY, EMPTY_FALLBACK, sinceTurn } from './render.js';
@@ -523,6 +523,9 @@ async function quickWith(key, p, client, status) {
     owner: cur?.owner ?? p.owner, team: p.team, prompt: cur?.prompt ?? p.request ?? p.prompt, runtime: 'claude', started_at: cur?.started_at ?? Date.now(), answered_at: Date.now() });
   if (res.jira_draft && fresh(key)) await jiraTurn(key, res.jira_draft).catch((e) => console.error('jira draft', key, e.data?.error ?? e.message));
   else if (fresh(key)) jiraYesOff(key);
+  const hw = hostWriteOf(res.host_write), asker = p.words?.at(-1);
+  if (hw && fresh(key)) await hostTurn(key, hw, asker?.user, asker?.text ?? '', p.profile ?? sessionTeam(fresh(key), fresh)).catch((e) => console.error('host write', key, e.data?.error ?? e.message));
+  else if (fresh(key)) hostYesOff(key);
   for (const ts of p.acks ?? []) {
     await client.reactions.remove({ channel: p.channel, timestamp: ts, name: 'eyes' }).catch(() => {});
     await client.reactions.add({ channel: p.channel, timestamp: ts, name: 'white_check_mark' }).catch(() => {});
@@ -850,6 +853,15 @@ async function onMessage({ message, client, replay = false }) {
     await client.reactions.add({ channel: message.channel, timestamp: message.ts, name: 'white_check_mark' }).catch(() => {});
     sessions.patch(s.key, { jira_card: null });
     await fileDraft(s, card.d, message.user, false, card.priv, card.ts);
+    return;
+  }
+  // The same for a host write card, from a team admin only.
+  const hc = steers && JIRA_YES.test(text) && fresh(s.key)?.host_card;
+  if (hc?.yes && isAdmin(hc.profile, message.user)) {
+    seen(message.channel, message.ts);
+    await client.reactions.remove({ channel: message.channel, timestamp: message.ts, name: 'eyes' }).catch(() => {});
+    await client.reactions.add({ channel: message.channel, timestamp: message.ts, name: 'white_check_mark' }).catch(() => {});
+    await applyHost(s, hc, message.user);
     return;
   }
   // "open PR" (or "ship it", "where is the PR?") from someone who may tap Open PR is that tap: !pr, no agent turn.
@@ -2580,6 +2592,7 @@ async function pollOne(key) {
         // A finished turn with no draft dealt with the request another way: a later draft must not file on it.
         if (ev.type === 'turn_end' && ev.status === 'ready') jiraAsks.delete(`${fresh(key).channel}:${fresh(key).thread_ts}`);
         jiraYesOff(key);
+        hostYesOff(key);
       }
       ship();
     }
@@ -2931,6 +2944,46 @@ app.view('jira_edit_submit', async ({ ack, body, view, client }) => {
   let d; try { d = await ctl.jiraDraft(s.key, edit, jk(s)); } catch (e) { await ephemeral(s, u, `I could not save the edit: ${why(e)}`); return; }
   sessions.patch(s.key, { jira_card: { ...c, d } });
   await client.chat.update({ channel: s.channel, ts: c.ts, ...draftCard(d, s.key, { privateChannel: c.priv, jiraUrl: JIRA_URL }) }).catch(() => {});
+});
+// A quick look's write to Jira or GitHub. A team admin's request in words runs it at once; anything else waits on a
+// card for an admin's Apply. The controller checks the admin, the words and the target again.
+async function hostTurn(key, w, by, words, profile) {
+  const s = fresh(key), old = s.host_card;
+  if (old?.ts) await app.client.chat.update({ channel: s.channel, ts: old.ts, text: 'Replaced by a newer request.',
+    blocks: [{ type: 'context', elements: [{ type: 'mrkdwn', text: '~Write request~ Replaced by a newer request below.' }] }] }).catch(() => {});
+  sessions.patch(key, { host_card: null });
+  if (by && isAdmin(profile, by)) {
+    try { await say(s, hostDone(w, await ctl.hostWrite(key, w, by, { words }))); return; }
+    catch (e) { if (!e.needsConfirm) { await say(s, `I did not write it: ${why(e)}`); return; } }
+  }
+  const id = randomBytes(4).toString('hex');
+  const { ts } = await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...hostCard(w, key, id, JIRA_URL) });
+  sessions.patch(key, { host_card: { w, ts, id, profile, yes: true } });
+}
+function hostYesOff(key) { const c = fresh(key)?.host_card; if (c?.yes) sessions.patch(key, { host_card: { ...c, yes: false } }); }
+const hostClose = (s, c, line) => app.client.chat.update({ channel: s.channel, ts: c.ts, text: line,
+  blocks: [...hostCard(c.w, s.key, c.id, JIRA_URL).blocks.filter((b) => b.type !== 'actions'), { type: 'context', elements: [{ type: 'mrkdwn', text: line }] }] }).catch(() => {});
+async function applyHost(s, c, by) {
+  sessions.patch(s.key, { host_card: null });
+  await hostClose(s, c, `Applied by <@${by}>`);
+  let line;
+  try { line = hostDone(c.w, await ctl.hostWrite(s.key, c.w, by, { confirmed: true })); } catch (e) { line = `I did not write it: ${why(e)}`; }
+  await say(s, line);
+}
+// Apply: a team admin only. Discard: the owner or a team admin.
+app.action(/^host_(apply|discard)$/, async ({ ack, body, action }) => {
+  await ack();
+  const [key, id] = String(action.value).split('|'), s = fresh(key), u = body.user.id, apply = action.action_id === 'host_apply';
+  if (!s || ofRoutine(s) || !allowed(s.channel, u)) return;
+  const c = fresh(key).host_card;
+  if (!c || c.id !== id) { ephemeral(s, u, 'This request is old or was done already. Use the newest card.'); return; }
+  if (!mayConfirm(apply, s.owner, u, allowed(s.channel, u), isAdmin(c.profile, u))) {
+    ephemeral(s, u, apply ? 'Only a team admin can apply this.' : `Only <@${s.owner}> or a team admin can do that.`);
+    return;
+  }
+  if (apply) { await applyHost(s, c, u); return; }
+  sessions.patch(key, { host_card: null });
+  await hostClose(s, c, `Discarded by <@${u}>`);
 });
 ownerAction('pr_ready', async (s, client, action, body) => {
   await tapped(client, s, body, 'Marking the PR ready');
