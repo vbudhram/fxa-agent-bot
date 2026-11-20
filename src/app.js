@@ -2955,7 +2955,7 @@ async function hostTurn(key, w, by, words, profile) {
   sessions.patch(key, { host_card: null });
   if (by && isAdmin(profile, by)) {
     let line;
-    try { line = hostDone(w, await ctl.hostWrite(key, w, by, { words })); } catch (e) { if (!e.needsConfirm) line = hostFail(e); }
+    try { line = hostDone(w, await ctl.hostWrite(key, w, by, { words, profile })); } catch (e) { if (!e.needsConfirm) line = hostFail(e); }
     if (line) { await say(s, line); return; }
   }
   const id = randomBytes(4).toString('hex');
@@ -2968,7 +2968,7 @@ const hostClose = (s, c, line) => app.client.chat.update({ channel: s.channel, t
 async function applyHost(s, c, by) {
   sessions.patch(s.key, { host_card: null });
   let line, ok = false;
-  try { line = hostDone(c.w, await ctl.hostWrite(s.key, c.w, by, { confirmed: true })); ok = true; } catch (e) { line = hostFail(e); }
+  try { line = hostDone(c.w, await ctl.hostWrite(s.key, c.w, by, { confirmed: true, profile: c.profile })); ok = true; } catch (e) { line = hostFail(e); }
   await hostClose(s, c, ok ? `Applied by <@${by}>` : line);
   await say(s, line);
 }

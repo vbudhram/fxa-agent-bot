@@ -61,8 +61,8 @@ test('hostWrite runs the CLI with the JSON on stdin, and exit 3 is needsConfirm'
   assert.deepEqual(await ctl.hostWrite('agent-a1', pc, 'UA', { words: 'post that on the PR' }), { ok: true, url: 'https://x.example/1', op: 'pr-comment' });
   assert.equal(readFileSync(join(dir, 'args'), 'utf8').trim(), '--backend gce session host-write agent-a1 --stdin --by UA --words post that on the PR');
   assert.deepEqual(JSON.parse(readFileSync(join(dir, 'in'), 'utf8')), pc);
-  await ctl.hostWrite('agent-a1', pc, 'UA', { confirmed: true });
-  assert.match(readFileSync(join(dir, 'args'), 'utf8'), /--by UA --confirmed$/m);
+  await ctl.hostWrite('agent-a1', pc, 'UA', { confirmed: true, profile: 'fxa-private' });
+  assert.equal(readFileSync(join(dir, 'args'), 'utf8').trim(), '--backend gce --pipeline fxa-private session host-write agent-a1 --stdin --by UA --confirmed');
   writeFileSync(join(dir, 'three'), '');
   await assert.rejects(ctl.hostWrite('agent-a1', pc, 'UA', { words: 'x' }), (e) => e.needsConfirm === true);
   writeFileSync(join(dir, 'one'), ''); unlinkSync(join(dir, 'three'));

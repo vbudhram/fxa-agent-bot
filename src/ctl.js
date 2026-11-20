@@ -149,7 +149,7 @@ export const jiraDraft = async (key, edit, as) => { const a = as && as !== key ?
 // A quick look's write to Jira or GitHub (session host-write). opts: {words} or {confirmed: true}. Exit 3: the words did not
 // name the action and the target, so an admin must confirm on a card (.needsConfirm).
 export const hostWrite = async (key, write, by, opts) => {
-  try { return JSON.parse(await runIn(['session', 'host-write', key, '--stdin', '--by', by, ...(opts?.confirmed ? ['--confirmed'] : ['--words', String(opts?.words ?? '')])],
+  try { return JSON.parse(await runIn([...(opts?.profile ? ['--pipeline', opts.profile] : []), 'session', 'host-write', key, '--stdin', '--by', by, ...(opts?.confirmed ? ['--confirmed'] : ['--words', String(opts?.words ?? '')])],
     JSON.stringify(write), 90_000)); }
   catch (e) { if (e.code === 3) e.needsConfirm = true; throw e; }
 };
