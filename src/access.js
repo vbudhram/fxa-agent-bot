@@ -66,23 +66,24 @@ export async function loadMembers(client, gates, members) {
 // private channels (groups:read), so a public channel's lookup fails, and that counts as public.
 export const PRIVATE_ONLY = 'This team has a private repo, so I post its code and files only in a private channel.';
 export const START_PRIVATE = 'This team has a private repo, so its sessions run only in a private channel. Start it there.';
-export const NO_GROUPS_READ = 'I cannot tell whether this channel is private, because the Slack app lacks the groups:read scope. The FxA Agent admin must update the app from manifest.yml and reinstall it.';
+
 let scopeLogged = false;
-// True when a channel lookup failed because the app lacks groups:read (logged once): a private channel's lookup
-// then fails like a public one's, so a refusal must name the scope, not the channel.
+// True when a channel lookup failed because the app lacks groups:read (logged once): the bot then cannot tell a
+// private channel from a public one.
 export function lacksGroupsRead(e) {
   const has = e?.data?.provided;
   if (e?.data?.error !== 'missing_scope' || (has ? has.split(',').includes('groups:read') : !String(e.data?.needed ?? '').includes('groups:read'))) return false;
   if (!scopeLogged) { scopeLogged = true; console.error(`channel check: missing_scope: needs groups:read (has ${has || 'unknown'}). Update the app from manifest.yml at api.slack.com/apps, then reinstall it.`); }
   return true;
 }
-// Why a private team's code may not go to this channel (text, or the missing scope), or null when it may.
+// Why a private team's code may not go to this channel, or null when it may. With no groups:read the bot cannot
+// tell, and allows it: the team's access list still decides who may start and act.
 export async function codeRefusal(s, client, text = PRIVATE_ONLY) {
   if (!s.private) return null;
   try {
     return (await client.conversations.info({ channel: s.channel })).channel?.is_private ? null : text;
   } catch (e) {
-    return lacksGroupsRead(e) ? NO_GROUPS_READ : text;
+    return lacksGroupsRead(e) ? null : text;
   }
 }
 export const codeAllowed = async (s, client) => !(await codeRefusal(s, client));

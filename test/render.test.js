@@ -824,9 +824,8 @@ test('lastBotSaid: the pause note waits only when the bot posted after its quest
 });
 
 test('user-facing problems name the FxA Agent admin, not the operator', async () => {
-  const { NO_GROUPS_READ } = await import('../src/access.js');
   const texts = ['Reauthentication failed', 'authentication_error', 'codex login', 'could not mint a GitHub App installation token', 'egress firewall did not apply']
-    .map((e) => operatorProblem(e).text).concat(NO_GROUPS_READ);
+    .map((e) => operatorProblem(e).text);
   for (const t of texts) { assert.doesNotMatch(t, /operator/i, t); assert.match(t, /The FxA Agent admin must/, t); }
 });
 

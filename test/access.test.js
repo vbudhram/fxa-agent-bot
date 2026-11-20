@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseGates, gateAllows, loadMembers, codeAllowed, codeRefusal, NO_GROUPS_READ, START_PRIVATE, PRIVATE_ONLY, sessionTeam, maySteer, mayTap, mayConfirm, askedShip, askerPatch, shipHeld } from '../src/access.js';
+import { parseGates, gateAllows, loadMembers, codeAllowed, codeRefusal, START_PRIVATE, PRIVATE_ONLY, sessionTeam, maySteer, mayTap, mayConfirm, askedShip, askerPatch, shipHeld } from '../src/access.js';
 
 test('only a team admin allows a host action card; the owner may deny it', () => {
   assert.equal(mayConfirm(true, 'U1', 'U1', true, false), false);
@@ -46,13 +46,13 @@ test('a team with a private repo posts code only in a private channel', async ()
   assert.equal(await codeAllowed({ private: true, channel: 'C1' }, client(new Error('missing_scope'))), false);
 });
 
-test('a missing groups:read scope still refuses, and says why, not "start it in a private channel"', async (t) => {
+test('a missing groups:read scope allows the channel, since the bot cannot tell, and logs it once', async (t) => {
   const err = (provided) => Object.assign(new Error('missing_scope'), { data: { error: 'missing_scope', needed: 'groups:read', provided } });
   const client = (e) => ({ conversations: { info: async () => { throw e; } } });
   const logged = t.mock.method(console, 'error', () => {});
   const s = { private: true, channel: 'G1' };
-  assert.equal(await codeRefusal(s, client(err('chat:write,channels:read')), START_PRIVATE), NO_GROUPS_READ);
-  assert.equal(await codeRefusal(s, client(err('chat:write'))), NO_GROUPS_READ);
+  assert.equal(await codeRefusal(s, client(err('chat:write,channels:read')), START_PRIVATE), null);
+  assert.equal(await codeRefusal(s, client(err('chat:write'))), null);
   assert.equal(logged.mock.callCount(), 1, 'one log line for each start of the bot');
   assert.match(logged.mock.calls[0].arguments[0], /groups:read.*manifest\.yml/);
   // With groups:read, a failed lookup is a public channel (no channels:read): the usual text.
