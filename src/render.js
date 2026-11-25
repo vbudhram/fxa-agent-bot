@@ -407,11 +407,11 @@ export function render(key, ev) {
       const v = JSON.stringify({ key, n: ev.nonce, s: ev.sha });
       const deny = ev.hidden || shown.length > 300 || raw.includes('`') || defuse(raw) !== raw;
       // ctl _asks_card: no team admin's own words in that turn named the action and its target.
-      const by = ev.who && ev.who !== 'host' ? `No team admin's own message named it (asked in ${esc(ev.who)}'s turn)` : 'No person started that turn';
+      const by = ev.who && ev.who !== 'host' ? `no team admin asked for it in ${esc(ev.who)}'s turn` : 'no admin asked for it in this turn';
       return {
         text: `The agent asks the host to run ${plain(ask)}. Only a team admin can allow it.`,
         blocks: [
-          { type: 'section', text: { type: 'mrkdwn', text: `The agent asks the host to run \`${ask}\` on *${esc(ev.target)}*. ${by}, so only a team admin can allow it. It counts as Deny when a person's next turn ends.` } },
+          { type: 'section', text: { type: 'mrkdwn', text: `The agent asks to run \`${ask}\` on *${esc(ev.target)}*. A team admin must tap Allow, because ${by}. If nobody taps before the next reply from a person ends, it does not run.` } },
           ...(ev.body ? [{ type: 'rich_text', elements: [{ type: 'rich_text_preformatted', elements: [{ type: 'text', text: ev.body }] }] }] : []),
           ...(ev.hidden ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: 'This team has a private repo, so I show the comment only in a private channel, and it cannot be allowed here.' }] }] : []),
           ...(!ev.hidden && deny ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: 'The line is too long to show here in full, so it cannot be allowed.' }] }] : []),
