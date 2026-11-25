@@ -835,7 +835,8 @@ async function onMessage({ message, client, replay = false }) {
     // No "tag me" tip for someone who may not use the bot here: a tag would only be refused.
     if (allowed(message.channel, message.user) && !tippedInThread(sessions.all(), s, message.user)) {
       sessions.patch(s.key, { tipped: [...(fresh(s.key).tipped ?? []), message.user] });
-      const why = message.user !== s.owner ? `This is <@${s.owner}>'s session. I answer others here when they tag me`
+      // A team admin decides here as the owner does, so the tip does not call the session someone else's.
+      const why = message.user !== s.owner ? (adminOf(s, message.user) ? 'Others are in this thread, so I act only when you tag me' : `This is <@${s.owner}>'s session. I answer others here when they tag me`)
         : crowd ? 'Others are in this thread now, so I act only when you tag me' : 'You stopped this session, so I pick it up only when you tag me';
       await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: message.user,
         text: `${why}. I kept your message as context. Tag <@${botUserId}> to ask me something.` }).catch(() => {});
