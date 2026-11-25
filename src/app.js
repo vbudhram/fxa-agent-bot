@@ -1946,13 +1946,19 @@ app.action(/^confirm_(allow|deny)$/, async ({ ack, body, action, client }) => {
     if (allowed(s.channel, u)) working(s, body, allow ? 'Only a team admin can allow a host action.' : `Only <@${s.owner}> or a team admin can do that.`);
     return;
   }
+  // An ask can run for minutes: a second tap meanwhile finds the card claimed, and its "expired" hid the first's result.
+  if (CONFIRMING.has(v.n)) { working(s, body, 'This card is already running. Its result shows here when it ends.'); return; }
+  CONFIRMING.add(v.n);
+  const m = body.message;
+  const card = (text) => m?.blocks && client.chat.update({ channel: body.channel.id, ts: m.ts, text: m.text, blocks: [...m.blocks.filter((b) => b.type !== 'actions'),
+    { type: 'context', elements: [{ type: 'mrkdwn', text: `${allow ? 'Allow' : 'Deny'} tapped by <@${u}>: ${text}` }] }] })
+    .catch((e) => console.error('confirm', s.key, e.data?.error ?? e.message));
+  await card('running…');
   const out = await ctl.confirm(s.key, v.n, v.s, allow, (await whoIs(client, u))?.name, adminOf(s, u))
     .catch((e) => { console.error('confirm', s.key, e.stderr || e.message); return 'failed: the host did not answer, so nothing ran.'; });
-  const m = body.message;
-  if (m?.blocks) await client.chat.update({ channel: body.channel.id, ts: m.ts, text: m.text, blocks: [...m.blocks.filter((b) => b.type !== 'actions'),
-    { type: 'context', elements: [{ type: 'mrkdwn', text: `${allow ? 'Allow' : 'Deny'} tapped by <@${u}>: ${defuse(out.trim()).replace(/[<>&]/g, '').slice(0, 500)}` }] }] })
-    .catch((e) => console.error('confirm', s.key, e.data?.error ?? e.message));
+  await card(defuse(out.trim()).replace(/[<>&]/g, '').slice(0, 500));
 });
+const CONFIRMING = new Set(); // card nonces tapped since the start
 const wrapping = new Set();
 // The row each wrap took buttons from, so a refused ship can put them back.
 const unwrap = new Map();
