@@ -10,7 +10,7 @@ export default {
     { advance: 'setup' }, { advance: 'turn', wait: { buttons: /Open PR/ } },
     { A: 'also make the label bold' },
     { advance: 'turn', wait: 'turn_end' },
-    { pause: 3, expect: { postCount: { match: /a team admin lists can open a PR/, n: 0 }, ctl: { cmd: 'finish', n: 0 } } },
+    { pause: 3, expect: { postCount: { match: /a team admin approved can open a PR/, n: 0 }, ctl: { cmd: 'finish', n: 0 } } },
   ],
   judge: 'A sees the reply and the buttons; no refusal and no PR.',
 };

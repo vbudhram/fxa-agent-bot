@@ -544,8 +544,8 @@ test('the team card shows each repo with its write access and the reason', () =>
   const text = JSON.stringify(card.blocks);
   assert.match(card.text, /Monitor session \(read-only\)/);
   assert.match(text, /👁 `mozilla\/blurts-server` reads and runs the code; no push, no PR \(the profile is read-only\)/);
-  assert.match(text, /👁 `mozilla\/fxa` runs locally beside it; read-only/);
-  assert.match(JSON.stringify(teamCard({ profile: 'x', read_only: false, repos: [{ slug: 'a/b', role: 'work', write: true }] }).blocks), /✏️ `a\/b` works here; opens a draft PR/);
+  assert.match(text, /👁 `mozilla\/fxa` runs on the sandbox with the other repos; read-only/);
+  assert.match(JSON.stringify(teamCard({ profile: 'x', read_only: false, repos: [{ slug: 'a/b', role: 'work', write: true }] }).blocks), /✏️ `a\/b` I can change the code and open a draft PR/);
 });
 
 test('files from a message: safe names, allowed types, 25 MB, five at most', () => {
@@ -582,8 +582,8 @@ test('teamCard with the session\'s repos lists only those work repos, and the de
   const info = { profile: 'fxa', label: 'FxA', read_only: false, repos: [{ slug: 'mozilla/fxa', role: 'work', write: true },
     { slug: 'mozilla/ecosystem-platform', role: 'work', write: true }, { slug: 'mozilla/blurts', role: 'work', write: true }, { slug: 'mozilla/dep', role: 'dep' }] };
   const lines = (c) => c.blocks[1].elements.map((e) => e.text);
-  assert.deepEqual(lines(teamCard(info, ['mozilla/fxa', 'mozilla/Ecosystem-Platform'])), ['✏️ `mozilla/fxa` works here; opens a draft PR',
-    '✏️ `mozilla/ecosystem-platform` works here; opens a draft PR', '👁 `mozilla/dep` runs locally beside it; read-only']);
+  assert.deepEqual(lines(teamCard(info, ['mozilla/fxa', 'mozilla/Ecosystem-Platform'])), ['✏️ `mozilla/fxa` I can change the code and open a draft PR',
+    '✏️ `mozilla/ecosystem-platform` I can change the code and open a draft PR', '👁 `mozilla/dep` runs on the sandbox with the other repos; read-only']);
   assert.equal(lines(teamCard(info)).length, 4);
 });
 

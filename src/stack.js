@@ -9,7 +9,7 @@ const PR = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)\/?$/;
 
 // "!stack", "!stack <team>", "!stack <team> [repos=a,b] <task>", "!stack checkout <PR link>",
 // "!stack help". Slack wraps a link as <url> or <url|label>. "add" and "help" are words, not teams.
-export const STACK_ADD = '`!team add` is not a command. To add a repo to this thread\'s session: `!stop` it if it runs, send `!team`, pick the same team and tick the repo to add, then tag me. The session resumes with that repo too.';
+export const STACK_ADD = '`!team add` is not a command. To add a repo to this thread\'s session:\n1. If the session runs, send `!stop`.\n2. Send `!team` and pick the same team.\n3. Tick the new repo.\n4. Tag me. The session continues with the new repo added.';
 // !team is the name people see; !stack, its first name, still works the same.
 export const teamAlias = (text) => String(text ?? '').replace(/^!team(?=\s|$)/i, '!stack');
 
@@ -38,7 +38,7 @@ export function parseStack(text) {
 // The !stack commands, and the teams this person may pick.
 export function stackHelp(teams) {
   return ['`!team`: pick a team and its repos for this thread. Your next tag starts the session with them. (`!stack` works too.)',
-    '`!team <team>`: skip the team step.',
+    '`!team <team>`: pick that team, then pick its repos.',
     '`!team <team> [repos=a,b] <task>`: start at once, with the team\'s default repos or the named ones.',
     '`!team checkout <PR link>`: continue a PR in this thread.',
     `Your teams: ${teams.map((t) => `\`${t.profile}\``).join(', ')}.`].join('\n');
@@ -49,7 +49,7 @@ export function stackHelp(teams) {
 // would replace, unless a team admin picks, and never for a team the person is not on.
 export function pickerRefusal({ user, profile, label, cur, admin = false, env = process.env }) {
   if (cur && user !== cur.owner && !admin && ['paused', 'stopped', 'failed', 'pr_open'].includes(cur.state) && !['MERGED', 'CLOSED'].includes(cur.pr_seen?.state))
-    return `This is <@${cur.owner}>'s session. Only they can pick a stack here.`;
+    return `This is <@${cur.owner}>'s session. Only they or a team admin can pick a team here.`;
   if (profile && !mayStart(profile, user, env)) return `You are not on ${label || profile}. Pick another team.`;
   return null;
 }
@@ -77,7 +77,7 @@ export function stackRepos(team, names) {
 export function stackTeamCard(teams) {
   return {
     text: 'Pick a team for this thread.',
-    blocks: [{ type: 'section', text: { type: 'mrkdwn', text: '*Team stack.* Pick a team, then its repos. Your next tag here starts the session with them.' },
+    blocks: [{ type: 'section', text: { type: 'mrkdwn', text: '*Pick a team*, then its repos. Tag me next in this thread to start the session with them.' },
       accessory: { type: 'static_select', action_id: 'stack_team', placeholder: { type: 'plain_text', text: 'Team' },
         options: teams.slice(0, 100).map((t) => ({ text: { type: 'plain_text', text: String(t.label || t.profile).slice(0, 75) }, value: t.profile })) } }],
   };
@@ -92,7 +92,7 @@ export function stackRepoCard(team, picked) {
   return {
     text: `Pick ${team.label || team.profile}'s repos.`,
     blocks: [
-      { type: 'section', text: { type: 'mrkdwn', text: `*${team.label || team.profile}.* Which repos? Each one ships on its own: a PR where I can push, else a diff.` },
+      { type: 'section', text: { type: 'mrkdwn', text: `*${team.label || team.profile}.* Which repos? I open a PR for each repo that I can push to. For the others, I give a diff.` },
         accessory: { type: 'multi_static_select', action_id: 'stack_repos', placeholder: { type: 'plain_text', text: 'Repos' },
           options: work.map(option), ...(initial.length ? { initial_options: initial } : {}) } },
       { type: 'actions', elements: [{ type: 'button', style: 'primary', text: { type: 'plain_text', text: 'Use these' }, action_id: 'stack_go', value: team.profile }] },

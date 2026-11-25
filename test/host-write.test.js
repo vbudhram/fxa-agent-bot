@@ -49,7 +49,7 @@ test('a failed write shows only the controller stderr, and a timeout says the wr
   assert.equal(hostFail({ stderr: 'warn\nERROR: That PR is not in the team repos.\n' }), 'I did not write it: That PR is not in the team repos.');
   const argv = { message: 'Command failed: /opt/ctl --backend gce session host-write k --stdin --by U --words x', stderr: '' };
   assert.equal(hostFail(argv), 'I did not write it: the write did not finish.');
-  assert.match(hostFail({ ...argv, killed: true, signal: 'SIGTERM' }), /It is possible that it was done\. Look at the target/);
+  assert.match(hostFail({ ...argv, killed: true, signal: 'SIGTERM' }), /it may have worked\. Check the ticket or PR/);
 });
 
 test('hostWrite runs the CLI with the JSON on stdin, and exit 3 is needsConfirm', async () => {

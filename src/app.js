@@ -634,7 +634,7 @@ async function launch(key, client, since = Date.now(), retry = false) {
     const pos = line.findIndex((x) => x.key === key) + 1;
     // The status line from the start: it says the place in line, and becomes the session's status when it starts.
     const who = await askerName(s);
-    const msg = statusMessage({ title: `In line${who ? ` for ${defuse(who)}` : ''} · ${ordinal(pos)} in line · all sessions are busy, so I start as soon as one frees up · I wait up to ${Math.round(QUEUE_GIVE_UP_MS / 60_000)} min · \`!stop\` to cancel` });
+    const msg = statusMessage({ title: `In line${who ? ` for ${defuse(who)}` : ''} · ${ordinal(pos)} in line · all sessions are busy, so I start when one is free, or give up after ${Math.round(QUEUE_GIVE_UP_MS / 60_000)} min · \`!stop\` to cancel` });
     const cur = fresh(key);
     if (!cur.queue_ts) {
       const r = await app.client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, ...msg }).catch(() => null);
@@ -754,7 +754,7 @@ async function threadContext(client, event, { withBot = false, files, full, sinc
 // owner, and tells anyone else once, privately, why the bot does not answer them.
 const STEER_MODE = process.env.STEER || 'mention';
 const STEER_ANYONE = STEER_MODE !== 'owner';
-const PR_REFUSAL = 'Only the people a team admin lists can open a PR or push from Slack. Ask one of them, or a team admin, to tap the button. You can still steer the session.';
+const PR_REFUSAL = 'Only people that a team admin approved can open a PR or push from Slack. Ask one of them, or a team admin, to tap the button. You can still send instructions to the session.';
 let botUserId = null; // set at start; until then no message counts as one for someone else
 // Messages for someone else wait on the session (the last 10) until the agent's next turn.
 function keepAside(s, message) {
@@ -839,7 +839,7 @@ async function onMessage({ message, client, replay = false }) {
       const why = message.user !== s.owner ? (adminOf(s, message.user) ? 'Others are in this thread, so I act only when you tag me' : `This is <@${s.owner}>'s session. I answer others here when they tag me`)
         : crowd ? 'Others are in this thread now, so I act only when you tag me' : 'You stopped this session, so I pick it up only when you tag me';
       await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: message.user,
-        text: `${why}. I kept your message as context. Tag <@${botUserId}> to ask me something.` }).catch(() => {});
+        text: `${why}. I keep your message, and I read it with the next one I answer.` }).catch(() => {});
     }
     return;
   }
@@ -924,8 +924,8 @@ async function onMessage({ message, client, replay = false }) {
     await client.chat.postEphemeral({ channel: s.channel, thread_ts: s.thread_ts, user: message.user,
       text: fresh(s.key)?.wrap_push
         ? "I'm pushing the branch, so I can't act on this now. I kept it as context, and I'll send it with your next message once the push is done."
-        : prOpenFor(fresh(s.key)) ? "I'm updating the PR, so I can't act on this now. I kept it as context. Reply here once it is updated, and I'll pick it up."
-        : "I'm wrapping up and opening the PR, so I can't act on this now. I kept it as context. Reply here once the PR is open, and I'll pick it up." }).catch(() => {});
+        : prOpenFor(fresh(s.key)) ? "I'm updating the PR, so I can't act on this now. I saved your message. Reply here when the PR is updated, and I'll act on it."
+        : "I'm opening the PR, so I can't act on this now. I saved your message. Reply here when the PR is open, and I'll act on it." }).catch(() => {});
     return;
   }
   if (!maySteer(s.owner, message.user, allowed(message.channel, message.user), STEER_ANYONE, onTeam(s, message.user), adminOf(s, message.user))) {
@@ -1061,7 +1061,7 @@ async function stackCmd(s, text, m, client, note) {
     await steerAndAck(live, `Work on ${p.url}.${rest ? ` ${rest}` : ''}`, client, m.user, m.ts, `work on ${p.url}`);
     return;
   }
-  if (s && LIVE.includes(fresh(s.key)?.state)) { await note('This thread has a running session. Use a new thread, or `!stop` first: the next session here then starts with your pick.'); return; }
+  if (s && LIVE.includes(fresh(s.key)?.state)) { await note('This thread has a running session. Use a new thread, or send `!stop` first. The next session here then uses what you chose with `!stack`.'); return; }
   // Someone else's pick would start a session that replaces the owner's, as their tag must not (onMention).
   // A team admin may pick over it: an admin of this session's team, or of the team picked.
   const cur = s && fresh(s.key);
@@ -1134,7 +1134,7 @@ app.action('stack_go', async ({ ack, body, client }) => {
 const checkingOut = new Map(); // "channel:thread" -> who
 async function stackCheckout(s, p, text, m, client, note, teams) {
   const at = `${m.channel}:${m.thread_ts}`, first = checkingOut.get(at) ?? [...pending.values()].find((x) => `${x.channel}:${x.thread_ts}` === at)?.owner;
-  if (first) { await note(`<@${first}> already took this thread's checkout.`); return; }
+  if (first) { await note(`<@${first}> already started a session in this thread, so I did not act on yours.`); return; }
   checkingOut.set(at, m.user);
   try { await checkout(s, p, text, m, client, note, teams); } finally { checkingOut.delete(at); }
 }
@@ -1211,7 +1211,7 @@ async function bang(s, text, m, client) {
   const readyToShip = () => {
     const cur = fresh(s.key);
     if (cur.state !== 'active') { note(`I can do that only while the session runs.${['paused', 'stopped'].includes(cur.state) ? ' Reply here to pick it up first.' : ''}`); return false; }
-    if (cur.status_ts) { note('I am in the middle of a turn. Wait for my reply, or `!interrupt` first.'); return false; }
+    if (cur.status_ts) { note('I am still working on a reply. Wait for it, or send `!interrupt` first.'); return false; }
     return true;
   };
   if (cmd === 'status') {
@@ -1274,12 +1274,12 @@ async function bang(s, text, m, client) {
       .catch((e) => (e.stdout?.trim() ? e.stdout : (console.error('sh', s.key, e.stderr || e.message), 'refused: the host did not answer. The bot log has the error.')));
     if (out.startsWith('refused: ')) { await note(`I did not run it: ${out.slice(9).split('\n')[0].trim().replace(/\.$/, '')}.`); return; }
     await client.files.uploadV2({ channel_id: s.channel, thread_ts: s.thread_ts, filename: 'command.txt', content: `$ ${c}\n${out.split('\n').slice(1).join('\n')}`,
-      snippet_type: 'text', initial_comment: `<@${m.user}> ran a command: ${out.split('\n')[0].trim()}. I see the output with the next message.` });
+      snippet_type: 'text', initial_comment: `<@${m.user}> ran a command: ${out.split('\n')[0].trim()}. I read this output with the next message I get in this thread.` });
   } else if (cmd === 'pause') {
     if (ownerOnly()) return;
     const cur = fresh(s.key);
     if (cur.state !== 'active') { await note(cur.state === 'paused' ? 'Already paused. Reply here to pick it up again.' : `There is nothing to pause: this session is ${STATE_WORD[cur.state] ?? cur.state}.`); return; }
-    if (cur.status_ts) { await note('I am in the middle of a turn. `!interrupt` first, then `!pause`.'); return; }
+    if (cur.status_ts) { await note('I am still working on a reply. Send `!interrupt` first, then `!pause`.'); return; }
     await sayWhile(s, 'Pausing… saving the work first.', async () => {
       const ok = await ctl.pause(s.key).then(() => true, (e) => { console.error('pause', s.key, e.stderr || e.message); return false; });
       if (!ok) return 'The pause failed. The error is in the bot log.';
@@ -1321,7 +1321,7 @@ async function bang(s, text, m, client) {
     const prompt = request + await threadContext(client, { channel: s.channel, thread_ts: s.thread_ts, ts: m.ts, user: s.owner });
     // !restart keeps an open PR: a new conversation at the PR's head, and Open PR updates it. !new starts from main.
     const cur = fresh(s.key), pr = cmd === 'restart' && cur.pr_url && !['MERGED', 'CLOSED'].includes(cur.pr_seen?.state) ? cur.pr_url : null;
-    await say(s, pr ? `Starting a new conversation on ${pr}, at its head, with the thread so far as context. \`!new\` starts from main instead.`
+    await say(s, pr ? `Starting a new conversation on ${pr}, from its latest commit. I use this thread as context. \`!new\` starts from main instead.`
       : 'Starting fresh from main, with the thread so far as context.');
     // The thread's team, its read-only and private flags stay: !new starts over in the same team, not as FxA.
     pending.set(key, { prompt, request, owner: s.owner, team: s.team, channel: s.channel, thread_ts: s.thread_ts, profile: s.profile ?? s.resumed_profile, read_only: s.read_only, private: s.private,
@@ -1340,7 +1340,7 @@ async function bang(s, text, m, client) {
   } else if (cmd === 'plan') {
     // In the thread: the plan is how the change will be checked, which all its readers care about.
     const p = await ctl.plan(s.key);
-    await say(s, planLines(p) || 'There is no test plan yet. The first turn writes it.');
+    await say(s, planLines(p) || 'There is no test plan yet. I write one before I change code.');
   } else if (cmd === 'mute' || cmd === 'unmute') {
     if (steerOnly()) return;
     sessions.patch(s.key, { muted: cmd === 'mute' });
@@ -1934,7 +1934,7 @@ app.action('stop_tool', async ({ ack, body, action, client }) => {
   working(s, body, 'Stopping the command…');
   const out = await ctl.interruptTool(s.key).catch((e) => { console.error('stop_tool', s.key, e.stderr || e.message); return ''; });
   if (!out.includes('command stopped')) { working(s, body, 'No command is running right now.'); return; }
-  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Stopped the running command. The turn goes on.' });
+  await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: 'Stopped the running command. I keep working on your request.' });
 });
 // A host action card (ctl asks_confirm). The ctl claims the card on the first tap, so a second one runs nothing.
 app.action(/^confirm_(allow|deny)$/, async ({ ack, body, action, client }) => {
@@ -1943,11 +1943,11 @@ app.action(/^confirm_(allow|deny)$/, async ({ ack, body, action, client }) => {
   const s = fresh(v?.key), u = body.user.id, allow = action.action_id === 'confirm_allow';
   if (!s || ofRoutine(s)) return;
   if (!mayConfirm(allow, s.owner, u, allowed(s.channel, u), adminOf(s, u))) {
-    if (allowed(s.channel, u)) working(s, body, allow ? 'Only a team admin can allow a host action.' : `Only <@${s.owner}> or a team admin can do that.`);
+    if (allowed(s.channel, u)) working(s, body, allow ? 'Only a team admin can tap Allow on this card.' : `Only <@${s.owner}> or a team admin can do that.`);
     return;
   }
   // An ask can run for minutes: a second tap meanwhile finds the card claimed, and its "expired" hid the first's result.
-  if (CONFIRMING.has(v.n)) { working(s, body, 'This card is already running. Its result shows here when it ends.'); return; }
+  if (CONFIRMING.has(v.n)) { working(s, body, 'Someone already tapped this card. The result shows on the card when it is done.'); return; }
   CONFIRMING.add(v.n);
   const m = body.message;
   const card = (text) => m?.blocks && client.chat.update({ channel: body.channel.id, ts: m.ts, text: m.text, blocks: [...m.blocks.filter((b) => b.type !== 'actions'),
@@ -1973,7 +1973,7 @@ async function wrapTap(s, client, body, what, repo) {
 // who started it. Returns why it cannot start, or null. A stack's repo loses only its own
 // Open PR and Push: the other repos' buttons stay, since each tree ships on its own.
 async function startWrap(s, client, what, user, msg, repo) {
-  if (wrapping.has(s.key) || fresh(s.key)?.state === 'wrapping') return 'Already wrapping up. I will post here when it is done.';
+  if (wrapping.has(s.key) || fresh(s.key)?.state === 'wrapping') return 'I am already pushing or opening the PR. I will post here when it is done.';
   wrapping.add(s.key); setTimeout(() => wrapping.delete(s.key), 30_000);
   // A push opens no PR, so a reply during it gets its own note (onMessage).
   // wrap_by: the wrap-up's status names who tapped, not the owner.
@@ -2011,7 +2011,7 @@ async function openPr(s, client, repo) {
   await ctl.finish(s.key, false, repo);
 }
 async function pushBranch(s, client, repo) {
-  const { ts } = await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: `Pushing the branch${repo ? ` of ${repo}` : ''}: a commit title, the safety checks, then the push. No PR, and the session stays open. The review runs when you open the PR.` });
+  const { ts } = await client.chat.postMessage({ channel: s.channel, thread_ts: s.thread_ts, text: `Pushing the branch${repo ? ` of ${repo}` : ''}. I write a commit title, run the safety checks, then push. This opens no PR, and the session stays open. The review runs when you open a PR.` });
   sessions.patch(s.key, { push_note_ts: ts });
   await ctl.finish(s.key, true, repo);
 }
@@ -2021,7 +2021,7 @@ function queueShip(s, body, what, repo) {
   if (cur?.state !== 'active' || !cur.status_ts) return false;
   sessions.patch(s.key, { then_wrap: what, then_wrap_at: Date.now(), then_wrap_repo: repo ?? null });
   const verb = what === 'push' ? 'push the branch' : shipWhat(cur, repo) === 'Update PR' ? 'update the PR' : 'open the PR';
-  working(s, body, `I am in the middle of a turn. I will ${verb} when this turn ends ready.`);
+  working(s, body, `I am still working. When I finish, I will ${verb} if the work is ready.`);
   return true;
 }
 ownerAction('open_pr', async (s, client, action, body) => {
@@ -2084,7 +2084,7 @@ async function shipAfterResume(key, what, ev) {
   // The owner wrote after the ship was queued (while it booted or answered): do not ship under their turn.
   const held = shipHeld(s);
   if (held === 'owner') { await postMsg(key, { text: `I did not ${verb}: you sent more. Tap ${label} when it is ready.` }); return; }
-  if (held === 'list') { await postMsg(key, { text: `I did not ${verb}: someone who is not on the team's PR list steered this. Someone on the list can tap ${label} when it is ready.` }); return; }
+  if (held === 'list') { await postMsg(key, { text: `I did not ${verb}: a person who may not open PRs for this team sent me instructions in this thread. A person who may open PRs can tap ${label} when it is ready.` }); return; }
   if (ev.type !== 'turn_end' || ev.status !== 'ready') {
     await postMsg(key, { text: `I did not ${verb}: my reply above says why. Tap ${label} again when it is ready.` });
     return;
@@ -2397,7 +2397,7 @@ async function mindLifetime(key, state) {
     // If it fails, stop before the runner's hard limit cuts it off.
     sessions.patch(key, { life_paused: true });
     if (await pauseNow(key, 'life-pause')) await say(`I paused: my sandbox reached its ${RUNNER_MIN}-minute limit. Everything is saved. Reply here to continue on a new sandbox.`);
-    else { await stopSession(key); await say(`I stopped: my sandbox reached its ${RUNNER_MIN}-minute limit, and saving for a pause failed. The work so far is saved as a patch on the host. Tag me again to start a new session.`); }
+    else { await stopSession(key); await say(`I stopped: my sandbox reached its ${RUNNER_MIN}-minute limit, and I could not pause it. I saved the work so far as a patch on the FxA Agent server. Tag me again to start a new session.`); }
   } else if (min >= WARN_AT_MIN && !s.life_warned) {
     sessions.patch(key, { life_warned: true });
     await say(`Heads-up: my sandbox stops at ${RUNNER_MIN} minutes. In about ${Math.round(PAUSE_AT_MIN - min)} minutes I'll pause and save the work so far.`);
@@ -2513,7 +2513,7 @@ async function pollOne(key) {
       sessions.patch(key, { then_wrap: null });
       // The person asked for this step; say it did not happen rather than drop it quietly.
       const what = tw === 'pr_auto' || (tw === 'pr' && prOpenFor(fresh(key), fresh(key).then_wrap_repo ?? undefined)) ? 'update the PR' : /push/.test(tw) ? 'push the branch' : 'open the PR';
-      await say(s, `That turn failed, so I did not ${what}.${tw === 'pr_auto' ? '' : ' Tap the button again when you are ready.'}`).catch(() => {});
+      await say(s, `I hit an error, so I did not ${what}.${tw === 'pr_auto' ? '' : ' Tap the button again when you are ready.'}`).catch(() => {});
     }
     // Each event posts on its own: ctl has already moved the cursor past this
     // batch, so a failed post is logged and skipped, never re-sent every 5 s.
@@ -3007,7 +3007,7 @@ ownerAction('pr_ready', async (s, client, action, body) => {
 function prBusy(s, body, repo) {
   const cur = prView(fresh(s.key), repo);
   if (cur.pr_ended) { working(s, body, `The PR is ${cur.pr_ended === 'MERGED' ? 'merged' : 'closed'}. Tag me with what to do next.`); return true; }
-  if (['starting', 'wrapping', 'queued'].includes(cur.state) || wrapping.has(s.key)) { working(s, body, 'I am busy with a launch or a wrap-up. Tap again when it is done.'); return true; }
+  if (['starting', 'wrapping', 'queued'].includes(cur.state) || wrapping.has(s.key)) { working(s, body, 'I am busy. I am starting up, or I am pushing or opening the PR. Tap again when that is done.'); return true; }
   return false;
 }
 // Fix these, Rebase: a round like Copilot's. It updates the PR only when there are no unpushed edits of the owner's.
@@ -3076,7 +3076,7 @@ async function autoRound(s, prev, cur) {
   // ponytail: a fixed ceiling on all rounds, so a review bot that comments on each push cannot loop.
   const why = (s.all_rounds ?? 0) >= ROUNDS_CEIL ? `I already ran ${ROUNDS_CEIL} review rounds on this PR on my own.`
     : (s.auto_rounds ?? 0) >= max ? (max ? `I already pushed ${max} large fix${max === 1 ? '' : 'es'} to this PR on my own.` : 'This team fixes reviews only when you tap.')
-    : (s.edited_at ?? 0) > s.pr_pushed_at ? 'Files changed since the last push, so I will fix it without pushing; you push with Update PR.'
+    : (s.edited_at ?? 0) > s.pr_pushed_at ? 'Files changed after the last push, so I will not push my fix. To push it, tap Update PR after the fix.'
     : ['stopped', 'failed'].includes(s.state) && !ofRoutine(s) ? 'This session was stopped.' : '';
   pp(seen);
   // A stack's round names its repo, so the agent works in that tree.

@@ -17,7 +17,7 @@ const code = (t) => `\`\`\`${String(t ?? '').replace(/&/g, '&amp;').replace(/</g
 const esc = (t) => defuse(String(t ?? '')).replace(/[<>&*_~`]/g, ' ').replace(/\s+/g, ' ').trim();
 const btn = (text, action_id, value, style) => ({ type: 'button', text: { type: 'plain_text', text }, action_id, value, ...(style ? { style } : {}) });
 const dupLine = (dups, jiraUrl) => (dups?.length
-  ? `Maybe the same: ${dups.map((d) => `${jiraUrl ? `<${jiraUrl}/browse/${d.key}|${d.key}>` : d.key} ${esc(d.summary).slice(0, 80)}`).join(' · ')}`
+  ? `Possible duplicates: ${dups.map((d) => `${jiraUrl ? `<${jiraUrl}/browse/${d.key}|${d.key}>` : d.key} ${esc(d.summary).slice(0, 80)}`).join(' · ')}`
   : null);
 const PRIVATE_NOTE = (p) => `:lock: This thread is private. Everyone who can read ${p} in Jira can read the ticket.`;
 const labelLine = (l) => (l?.length ? `Labels: ${l.map(esc).join(', ')}` : null);
@@ -138,7 +138,7 @@ export const hostDone = (w, r) => {
 };
 
 // The line for a failed write. Only the controller's stderr shows: Node's own message holds the command line.
-export const hostFail = (e) => (e?.killed || e?.signal ? 'The write did not finish in time. It is possible that it was done. Look at the target before you ask again.'
+export const hostFail = (e) => (e?.killed || e?.signal ? 'The write timed out, but it may have worked. Check the ticket or PR before you ask again.'
   : `I did not write it: ${String(e?.stderr ?? '').trim().split('\n').filter(Boolean).at(-1)?.replace(/^ERROR: */, '') || 'the write did not finish.'}`);
 
 // A new ticket's key goes to the live session: a request like "file it and link it in the PR" needs the key to finish.

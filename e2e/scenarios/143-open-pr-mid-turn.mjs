@@ -7,7 +7,7 @@ export default {
     { A: '@bot fix the blur on the verify code input' },
     { advance: 'setup' }, { advance: 'turn', wait: { buttons: /Open PR/ } },
     { A: 'also check the label colour', expect: { ctl: { cmd: 'steer', match: /label colour/ } } },
-    { A: { tap: 'Open PR' }, expect: { ephemeral: { to: 'A', match: /when this turn ends/ }, noCtl: 'finish', noText: /mid-turn or not ready/ } },
+    { A: { tap: 'Open PR' }, expect: { ephemeral: { to: 'A', match: /When I finish, I will/ }, noCtl: 'finish', noText: /mid-turn or not ready/ } },
     { advance: 'turn', wait: 'turn_end', expect: { ctl: { cmd: 'finish', n: 1 } } },
     { advance: 'finish', wait: { text: /pull\/999999/ } },
   ],

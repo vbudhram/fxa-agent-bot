@@ -9,7 +9,7 @@ export default {
   steps: [
     { A: '@bot team:pyfxa-team fix the text in fxa-auth-server, then update the docs',
       expect: { ctl: { cmd: 'task', match: /--repos","mozilla\/fxa,mozilla\/ecosystem-platform"/, n: 1 } } },
-    { advance: 'setup', wait: { text: /`mozilla\/ecosystem-platform` works here/ } },
+    { advance: 'setup', wait: { text: /`mozilla\/ecosystem-platform` I can change the code/ } },
     { advance: 'turn', wait: { buttons: /Open 2 PRs/ }, expect: { buttons: { match: /Fake turn/, none: /^(open_pr|push_branch)$/ } } },
     { A: { tap: 'Open 2 PRs' }, only: { ship: ['tap'] },
       expect: { ctl: { cmd: 'finish', match: /--repo","mozilla\/fxa","--repo","mozilla\/ecosystem-platform"/, n: 1 } } },

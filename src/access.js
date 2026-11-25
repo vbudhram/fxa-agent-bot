@@ -65,7 +65,7 @@ export async function loadMembers(client, gates, members) {
 // A team with a private repo posts code and files only in a private channel. The bot reads only
 // private channels (groups:read), so a public channel's lookup fails, and that counts as public.
 export const PRIVATE_ONLY = 'This team has a private repo, so I post its code and files only in a private channel.';
-export const START_PRIVATE = 'This team has a private repo, so its sessions run only in a private channel. Start it there.';
+export const START_PRIVATE = 'This team has a private repo, so its sessions run only in a private channel. Tag me in a private channel to start one.';
 
 let scopeLogged = false;
 // True when a channel lookup failed because the app lacks groups:read (logged once): the bot then cannot tell a

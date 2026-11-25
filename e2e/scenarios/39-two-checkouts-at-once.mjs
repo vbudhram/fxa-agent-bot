@@ -3,9 +3,9 @@
 // a running session. Two messages at the same moment reach the bot in either order, so the
 // scenario checks one checkout and one refusal, not which person wins.
 const PR = 'https://github.com/mozilla/fxa/pull/4321';
-const REFUSAL = /already took this thread's checkout|This thread has a running session/;
+const REFUSAL = /already started a session in this thread|This thread has a running session/;
 // An "already took" refusal names the winner, so it must go to the other person, never to the winner.
-const TO_LOSER = /^(?=.*"user":"UA")(?=.*<@UB> already took)|^(?=.*"user":"UB")(?=.*<@UA> already took)|This thread has a running session/;
+const TO_LOSER = /^(?=.*"user":"UA")(?=.*<@UB> already started a session)|^(?=.*"user":"UB")(?=.*<@UA> already started a session)|This thread has a running session/;
 export default {
   title: 'A and B send !stack checkout in one thread at the same moment: one checkout, the other is told',
   people: { A: 'owner, allowed', B: 'teammate, allowed' },

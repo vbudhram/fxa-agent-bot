@@ -5,8 +5,8 @@ export default {
   steps: [
     { A: '@bot fix the blur on the verify code input' },
     { advance: 'setup' }, { advance: 'turn', wait: { buttons: /Open PR/ } },
-    { B: { tap: 'Open PR' }, expect: { ephemeral: { to: 'B', match: /a team admin lists can open a PR/ }, noCtl: 'finish' } },
-    { A: '!pr', expect: { ephemeral: { to: 'A', match: /a team admin lists can open a PR/ }, noCtl: 'finish' } },
+    { B: { tap: 'Open PR' }, expect: { ephemeral: { to: 'B', match: /a team admin approved can open a PR/ }, noCtl: 'finish' } },
+    { A: '!pr', expect: { ephemeral: { to: 'A', match: /a team admin approved can open a PR/ }, noCtl: 'finish' } },
     // Diff is the owner's button; the admin takes it over.
     { ADMINX1: { tap: 'Diff' }, expect: { ctl: { cmd: 'diff', n: 1 } } },
     { ADMINX1: { tap: 'Open PR' }, expect: { ctl: { cmd: 'finish', n: 1 } } },

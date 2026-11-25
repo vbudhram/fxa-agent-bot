@@ -58,7 +58,7 @@ function _pr(d) {
   const rev = changers.length ? `Changes requested by ${changers.slice(0, 3).join(', ')}` : approvers.length ? `Approved by ${approvers.slice(0, 3).join(', ')}` : 'No review yet';
   const jiraLine = d.jira ? `Jira ${link(jiraUrl(d.jira), d.jira)}` : '';
   // The large fixes the bot pushed on its own, against the team's cap, once one ran: a tap is needed after the cap.
-  const rounds = num(d.rounds) > 0 && `Large fixes on my own: ${num(d.rounds)} of ${num(d.rounds_max)}`;
+  const rounds = num(d.rounds) > 0 && `Large fixes I pushed without asking: ${num(d.rounds)} of ${num(d.rounds_max)} allowed`;
   // State buttons in order: conflict, review changes, draft with green CI, no Jira.
   const live = state === 'open' || state === 'draft';
   const next = live ? [conflict && btn('Rebase onto main', 'rebase_pr', d.key), changers.length && btn('Fix review', 'fix_review', d.key),

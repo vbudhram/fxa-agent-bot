@@ -77,8 +77,8 @@ export function teamCard({ profile, label, read_only, repos: all = [], mcp = nul
   const repos = picked ? all.filter((r) => r.role !== 'work' || picked.some((p) => p.toLowerCase() === r.slug.toLowerCase())) : all;
   const stack = repos.filter((r) => r.role === 'work').length > 1;
   const name = `${label && label !== profile ? label : `${profile.charAt(0).toUpperCase()}${profile.slice(1)}`} session${read_only ? ' (read-only)' : ''}`;
-  const line = (r) => r.role === 'dep' ? `👁 \`${r.slug}\` runs locally beside it; read-only`
-    : r.write ? `✏️ \`${r.slug}\` works here; opens a draft PR`
+  const line = (r) => r.role === 'dep' ? `👁 \`${r.slug}\` runs on the sandbox with the other repos; read-only`
+    : r.write ? `✏️ \`${r.slug}\` I can change the code and open a draft PR`
     : stack ? `✏️ \`${r.slug}\` works here; ships as a diff in this thread${r.why ? ` (${r.why})` : ''}`
     : `👁 \`${r.slug}\` reads and runs the code; no push, no PR${r.why ? ` (${r.why})` : ''}`;
   // The team's own connectors (its profile's PIPE_MCP); null: the bot's usual ones, so say nothing.
@@ -391,8 +391,8 @@ export function render(key, ev) {
       return { text: plain(full), blocks: [md(head), ...warn, ...(row.length ? [buttons(key, ...row)] : []), ...trees], ...(more ? { more } : {}) };
     }
     case 'pr': {
-      const head = !gh(ev.url) ? 'The PR is up; its link did not look like a GitHub PR, so check the repo.'
-        : ev.updated ? `Updated the PR: ${gh(ev.url)}` : `Draft PR is up${repoOf(ev)}: ${gh(ev.url)}. I am still here: reply to change it or to ask about the review.`;
+      const head = !gh(ev.url) ? 'I opened the PR, but its link is not a GitHub PR link. Find the PR in the repo on GitHub.'
+        : ev.updated ? `Updated the PR: ${gh(ev.url)}` : `Draft PR is up${repoOf(ev)}: ${gh(ev.url)}. Reply here to change it or to ask about the review.`;
       // The session's totals are in the stop message and !usage, not here.
       return { text: `${head}${noteLines(ev.notes)}` };
     }
@@ -409,12 +409,12 @@ export function render(key, ev) {
       // ctl _asks_card: no team admin's own words in that turn named the action and its target.
       const by = ev.who && ev.who !== 'host' ? `no team admin asked for it in ${esc(ev.who)}'s turn` : 'no admin asked for it in this turn';
       return {
-        text: `The agent asks the host to run ${plain(ask)}. Only a team admin can allow it.`,
+        text: `The agent asks to run ${plain(ask)}. Only a team admin can allow it.`,
         blocks: [
           { type: 'section', text: { type: 'mrkdwn', text: `The agent asks to run \`${ask}\` on *${esc(ev.target)}*. A team admin must tap Allow, because ${by}. If nobody taps before the next reply from a person ends, it does not run.` } },
           ...(ev.body ? [{ type: 'rich_text', elements: [{ type: 'rich_text_preformatted', elements: [{ type: 'text', text: ev.body }] }] }] : []),
           ...(ev.hidden ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: 'This team has a private repo, so I show the comment only in a private channel, and it cannot be allowed here.' }] }] : []),
-          ...(!ev.hidden && deny ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: 'The line is too long to show here in full, so it cannot be allowed.' }] }] : []),
+          ...(!ev.hidden && deny ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: 'I cannot show this command here exactly as it runs, so nobody can allow it.' }] }] : []),
           { type: 'actions', elements: [
             ...(deny ? [] : [{ type: 'button', style: 'primary', text: { type: 'plain_text', text: 'Allow' }, action_id: 'confirm_allow', value: v }]),
             { type: 'button', style: 'danger', text: { type: 'plain_text', text: 'Deny' }, action_id: 'confirm_deny', value: v }] },
@@ -423,7 +423,7 @@ export function render(key, ev) {
     }
     // A run.sh --bg job ended. turn: the host sent the agent its log; else the cap for this message was reached.
     case 'job_done': return { text: `The background job \`${esc(ev.name).replace(/`/g, '')}\` ended. ${ev.turn ? 'I am reading its log.' : 'Reply to have me read its log.'}` };
-    case 'pushed': return { text: `Pushed \`${esc(ev.branch).replace(/`/g, '')}\`${repoOf(ev)}.${gh(ev.url) ? ` <${gh(ev.url)}|Open a PR from it> when you are ready, or keep steering here.` : ' Keep steering here, or open a PR from it on GitHub.'}${noteLines(ev.notes)}` };
+    case 'pushed': return { text: `Pushed \`${esc(ev.branch).replace(/`/g, '')}\`${repoOf(ev)}.${gh(ev.url) ? ` <${gh(ev.url)}|Open a PR from it> when you are ready, or reply here to change it.` : ' Reply here to change it, or open a PR from it on GitHub.'}${noteLines(ev.notes)}` };
     case 'error': {
       const op = operatorProblem(ev.text);
       if (op) return { text: op.text, operator: op.kind };
@@ -520,8 +520,8 @@ export const HELP = [
   '`!desktop` a Linux desktop with Firefox on this sandbox, just for you',
   '*When it is ready*',
   '`!diff` the changes so far',
-  '`!log <word>` the lines of my finished command output that hold the word, also after a pause; "Show output" shows a command that still runs',
-  '`!sh <command>` run one command on the sandbox between my turns, 100 seconds at most; I see its output with your next message',
+  '`!log <word>` show the lines that contain the word in the output of my finished commands, also after a pause. For a command that still runs, tap Show output',
+  '`!sh <command>` run one command on the sandbox while I am not working, 100 seconds at most. I see its output with your next message',
   '`!pr` open the PR, or update it once there is one',
   '`!push` push the branch, with no PR',
   '`!rebase` move the work onto the latest main and recheck it; `!pr` then updates the PR',
@@ -537,7 +537,7 @@ export const HELP = [
   '`!team checkout <PR link>` continue that PR here: its branch, its head, and its PR card move to this thread',
   '`!help` this list',
   '',
-  'A reply in the thread steers me. Once others join the thread, tag me so I know a reply is for me. After a pause, a reply or a tag picks the work up again; after a stop, a tag does. Once the PR merges or closes, a tag starts something new.',
+  'Reply in the thread to tell me what to do. When other people are in the thread, tag me, so I know the reply is for me. After a pause, a reply or a tag starts the work again. After a stop, only a tag starts it again. After the PR merges or closes, a tag starts new work.',
 ].join('\n');
 
 // A whole reply that only asks to pause ("stop.", "pause for now please") is !pause; "stop doing X" still steers.
@@ -770,7 +770,7 @@ export const emptyTurn = (ev) => ev?.type === 'turn_end' && (ev.status === 'read
 // The one follow-up such a turn gets, and what the thread shows if the next turn is empty too.
 export const EMPTY_RETRY = 'Your last message had only its status line, so the person saw nothing: your notes are not shown. '
   + 'Write your answer, or your questions with their options, in this message, then the status line.';
-export const EMPTY_FALLBACK = 'I stopped without writing a message. Reply here and ask what I need.';
+export const EMPTY_FALLBACK = 'I stopped without writing a message. Reply here to ask what I did or what I need.';
 
 // A long thread keeps its start (its topic, often the options it weighs) and its newest lines, with "..." between.
 // A resume's thread messages: the ones after since (the newest Slack ts the last turn had seen), but not

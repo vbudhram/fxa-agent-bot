@@ -31,7 +31,7 @@ test('a person not listed for a profile is refused, not sent to FxA', () => {
 
 test('fxa needs no listing, and a bad name is refused', () => {
   assert.equal(r('profile:fxa hi', 'CFXA', 'UOTHER').profile, 'fxa');
-  assert.match(r('profile:../x hi').error, /profile/);
+  assert.match(r('profile:../x hi').error, /is not a team name/);
 });
 
 test('PROFILE_OPEN: an open team needs no PROFILE_USERS entry', () => {

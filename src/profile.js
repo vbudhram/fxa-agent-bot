@@ -14,7 +14,7 @@ export function resolveProfile({ text, channel, user, env = process.env }) {
   const flag = text.trim().match(/^(?:profile|team):(\S+)/i);
   if (flag) {
     profile = flag[1].toLowerCase();
-    if (!/^[a-z0-9][a-z0-9-]*$/.test(profile)) return { error: `"${flag[1]}" is not a profile name.` };
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(profile)) return { error: `"${flag[1]}" is not a team name.` };
     text = text.trim().slice(flag[0].length).trim();
   } else {
     const jira = pairs(env.PROFILE_JIRA), channels = pairs(env.PROFILE_CHANNELS);
@@ -26,7 +26,7 @@ export function resolveProfile({ text, channel, user, env = process.env }) {
     profile = key ? jira.get(key[1]) : channels.get(channel);
   }
   // The text too: a !stack pick in the thread can override the refusal (onMention).
-  if (profile && !mayStart(profile, user, env)) return { error: `You can't start a ${profile} session yet.`, text };
+  if (profile && !mayStart(profile, user, env)) return { error: `You can't start a ${profile} session: you are not on that team, or the team is not active.`, text };
   return { profile, text };
 }
 
