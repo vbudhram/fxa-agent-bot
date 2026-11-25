@@ -193,6 +193,7 @@ test('pickerRefusal: anyone may use an open picker, but not over someone else\'s
   assert.match(pickerRefusal({ user: 'U2', cur, env }), /<@U1>'s session/);
   assert.equal(pickerRefusal({ user: 'U1', cur, env }), null, 'the owner may pick again');
   assert.equal(pickerRefusal({ user: 'U2', cur: { ...cur, pr_seen: { state: 'MERGED' } }, env }), null, 'a merged PR frees the thread');
+  assert.equal(pickerRefusal({ user: 'U2', cur, admin: true, env }), null, 'a team admin may pick over it');
 });
 
 test('shipHint names the Open N PRs button, and leaves one repo alone', () => {

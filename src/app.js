@@ -1062,8 +1062,9 @@ async function stackCmd(s, text, m, client, note) {
   }
   if (s && LIVE.includes(fresh(s.key)?.state)) { await note('This thread has a running session. Use a new thread, or `!stop` first: the next session here then starts with your pick.'); return; }
   // Someone else's pick would start a session that replaces the owner's, as their tag must not (onMention).
-  // A team admin may check out a PR here: the new session keeps the thread's owner (checkout).
-  const refusal = p.sub === 'checkout' && adminOf(s && fresh(s.key), m.user) ? null : pickerRefusal({ user: m.user, cur: s && fresh(s.key) });
+  // A team admin may pick over it: an admin of this session's team, or of the team picked.
+  const cur = s && fresh(s.key);
+  const refusal = pickerRefusal({ user: m.user, cur, admin: adminOf(cur, m.user) || (Boolean(p.team) && isAdmin(p.team, m.user)) });
   if (refusal) { await note(refusal); return; }
   const teams = teamsFor(await ctl.profileList().catch((e) => { console.error('profile list', e.message); return []; }), m.user);
   if (!teams.length) { await note('I could not read the teams. Try again in a moment.'); return; }
@@ -1091,7 +1092,8 @@ async function stackPickOf(body, client, profile) {
   if (!pick) { await say('This picker is from before a restart. Send `!team` again.'); return null; }
   if (!allowed(pick.channel, user)) return null;
   const label = pick.teams.find((t) => t.profile === (profile ?? pick.team))?.label;
-  const refusal = pickerRefusal({ user, profile: profile ?? pick.team, label, cur: fresh(sessions.get(pick.channel, pick.thread_ts)?.key) });
+  const cur = fresh(sessions.get(pick.channel, pick.thread_ts)?.key), team = profile ?? pick.team;
+  const refusal = pickerRefusal({ user, profile: team, label, cur, admin: adminOf(cur, user) || (Boolean(team) && isAdmin(team, user)) });
   if (refusal) { await say(refusal); return null; }
   pick.user = user;
   return pick;

@@ -46,9 +46,9 @@ export function stackHelp(teams) {
 
 // Why a person may not use an open !team picker, or null. Anyone in the thread may, as anyone may
 // tag here; the one who uses it owns the pick. Never over someone else's session, which their pick
-// would replace, and never for a team the person is not on.
-export function pickerRefusal({ user, profile, label, cur, env = process.env }) {
-  if (cur && user !== cur.owner && ['paused', 'stopped', 'failed', 'pr_open'].includes(cur.state) && !['MERGED', 'CLOSED'].includes(cur.pr_seen?.state))
+// would replace, unless a team admin picks, and never for a team the person is not on.
+export function pickerRefusal({ user, profile, label, cur, admin = false, env = process.env }) {
+  if (cur && user !== cur.owner && !admin && ['paused', 'stopped', 'failed', 'pr_open'].includes(cur.state) && !['MERGED', 'CLOSED'].includes(cur.pr_seen?.state))
     return `This is <@${cur.owner}>'s session. Only they can pick a stack here.`;
   if (profile && !mayStart(profile, user, env)) return `You are not on ${label || profile}. Pick another team.`;
   return null;
